@@ -62,13 +62,13 @@ namespace Tracks {
     // Track detection for no-results scenario
     static std::atomic<bool> g_firstPageScanned{ false };  // Tracks if we've seen ANY track on first page
     static std::chrono::steady_clock::time_point g_searchExecutedTime;  // When we pressed Enter on search
-    static const int NO_TRACKS_DETECTION_MS = 3000;  // Time to wait to detect no tracks
+    static const int NO_TRACKS_DETECTION_MS = 1000;  // Time to wait to detect no tracks
 
     // Search state
     static std::vector<std::string> g_searchTerms;
     static std::atomic<int> g_currentSearchIndex{ -1 };
     static std::atomic<bool> g_autoCycleEnabled{ true };
-    static std::atomic<bool> g_killSwitchActivated{ false };  // Emergency stop for everything
+    static std::atomic<bool> g_killSwitchActivated{ false };
 
     // Worker thread command queue
     enum class WorkerCommand {
@@ -143,10 +143,6 @@ namespace Tracks {
         char buffer[512];
         sprintf_s(buffer, "[Track] Loaded %zu search terms from %s:", terms.size(), filepath.c_str());
         LogMessage(buffer);
-        for (const auto& term : terms) {
-            sprintf_s(buffer, "[Track]   - \"%s\"", term.c_str());
-            LogMessage(buffer);
-        }
 
         return true;
     }
@@ -295,7 +291,7 @@ namespace Tracks {
             if (!SafeRead(base + TrackOffsets::TRACK_ID, trackId) || trackId == 0) {
                 LogMessage("[Track] Invalid or empty track slot (ID=0), skipping");
 
-                // CRITICAL: If we're seeing empty tracks, we might be at the end
+                // If we're seeing empty tracks, we might be at the end
                 // Stop auto-scroll immediately
                 if (g_autoScrollEnabled) {
                     LogMessage("[Track] WARNING: Empty track detected during auto-scroll - STOPPING");
@@ -632,13 +628,11 @@ namespace Tracks {
         try {
             // Safety delay
             if (g_killSwitchActivated) return;
-            LogMessage("[Worker] Waiting for game to stabilize...");
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
             // Flush input queue
             MSG msg;
             while (PeekMessage(&msg, NULL, WM_KEYFIRST, WM_KEYLAST, PM_REMOVE)) {}
-            LogMessage("[Worker] Input queue flushed");
 
             // Press Left Arrow to navigate to search bar
             if (g_killSwitchActivated) return;
@@ -689,11 +683,11 @@ namespace Tracks {
             if (g_killSwitchActivated) return;
             LogMessage("[Worker] Pressing Enter to execute search...");
             SimulateKeyPress(VK_RETURN);
-            g_searchExecutedTime = std::chrono::steady_clock::now();  // Mark when we executed
+            g_searchExecutedTime = std::chrono::steady_clock::now();
             std::this_thread::sleep_for(std::chrono::milliseconds(config.delayAfterSearch));
 
             LogMessage("[Worker] Search switch complete");
-            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            std::this_thread::sleep_for(std::chrono::milliseconds(800));
 
         }
         catch (const std::exception& ex) {
@@ -933,8 +927,6 @@ namespace Tracks {
                         std::cout << "\n  *** WARNING: Hit max page limit ***" << std::endl;
                     }
 
-                    std::cout << "==================================\n" << std::endl;
-
                     // Determine if we should auto-cycle (but don't queue yet!)
                     bool shouldAutoCycle = false;
                     if (g_autoCycleEnabled && !g_searchTerms.empty() && g_currentSearchIndex >= 0) {
@@ -962,8 +954,8 @@ namespace Tracks {
                     SimulateKeyPress(VK_ESCAPE);
 
                     // Give game time to process ESCAPE and stabilize
-                    LogMessage("[Worker] Waiting for game to fully exit results and stabilize...");
-                    std::this_thread::sleep_for(std::chrono::milliseconds(700));
+                    LogMessage("[Worker] Waiting for game to stabilize...");
+                    std::this_thread::sleep_for(std::chrono::milliseconds(400));
 
                     g_autoScrollEnabled = false;
                     LogMessage("[Worker] Auto-scroll stopped");
@@ -977,8 +969,8 @@ namespace Tracks {
                             WorkerTask nextTask;
                             nextTask.command = WorkerCommand::SwitchSearch;
                             nextTask.searchConfig.searchTerm = g_searchTerms[nextIndex];
-                            nextTask.searchConfig.delayBetweenSteps = 500;
-                            nextTask.searchConfig.delayAfterSearch = 500;
+                            nextTask.searchConfig.delayBetweenSteps = 450;
+                            nextTask.searchConfig.delayAfterSearch = 400;
                             nextTask.searchConfig.autoScrollAfterSearch = true;
                             nextTask.searchConfig.scrollConfig.delayMs = 200;
                             nextTask.searchConfig.scrollConfig.maxScrolls = 0;
@@ -991,7 +983,6 @@ namespace Tracks {
                             g_queueCV.notify_one();
                         }
                     }
-
                     return;
                 }
             }
@@ -1026,12 +1017,10 @@ namespace Tracks {
 
     // Worker thread function
     static void WorkerThreadFunc() {
-        LogMessage("[Worker] Thread started");
+        LogMessage("[Worker] Started");
 
         while (g_workerThreadRunning) {
             WorkerTask task;
-
-            // Wait for a task
             {
                 std::unique_lock<std::mutex> lock(g_queueMutex);
                 g_queueCV.wait_for(lock, std::chrono::milliseconds(100), [] {
@@ -1084,7 +1073,7 @@ namespace Tracks {
 
     bool Initialize() {
         g_logFile.open("tracks_debug.log", std::ios::out | std::ios::trunc);
-        LogMessage("[Track] ========== Track Hook Initializing ==========");
+        LogMessage("[Track] Track Hook Initializing ");
 
         // Open CSV file in append mode (or create with header if doesn't exist)
         bool fileExists = false;
@@ -1121,10 +1110,6 @@ namespace Tracks {
         g_hookLocation = targetAddress;
 
         char buffer[256];
-        sprintf_s(buffer, "[Track] Module base: 0x%p", (void*)baseAddress);
-        LogMessage(buffer);
-        sprintf_s(buffer, "[Track] Target address: 0x%p", targetAddress);
-        LogMessage(buffer);
 
         // Install hook using MinHook
         MH_STATUS status = MH_CreateHook(
@@ -1146,19 +1131,17 @@ namespace Tracks {
             return false;
         }
 
-        LogMessage("[Track] Hook installed successfully!");
 
         // Start the worker thread
         g_workerThreadRunning = true;
         g_workerThread = std::thread(WorkerThreadFunc);
-        LogMessage("[Worker] Thread started");
 
-        LogMessage("[Track] ========== Initialization Complete ==========\n");
+        LogMessage("[Track] Hook installed successfully!");
         return true;
     }
 
     void Shutdown() {
-        LogMessage("[Track] ========== Shutting Down ==========");
+        LogMessage("[Track] Shutting Down");
 
         // Stop worker thread
         if (g_workerThreadRunning) {
@@ -1168,7 +1151,7 @@ namespace Tracks {
             if (g_workerThread.joinable()) {
                 g_workerThread.join();
             }
-            LogMessage("[Worker] Thread stopped");
+            LogMessage("[Worker] Stopped");
         }
 
         if (g_hookLocation) {
@@ -1425,7 +1408,6 @@ namespace Tracks {
         bool success = LoadSearchTermsFromFile(filepath);
         if (success) {
             std::cout << "\n[Track] Search terms loaded successfully!" << std::endl;
-            std::cout << "[Track] Use F12 to start cycling through searches" << std::endl;
         }
         else {
             std::cout << "\n[Track] Failed to load search terms from: " << filepath << std::endl;

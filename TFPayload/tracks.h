@@ -15,7 +15,6 @@ namespace Tracks {
         // Creator information
         uint64_t creatorUID = 0;
         std::string creatorName;
-        std::string creatorImage;  // Not used - was misidentified
 
         // Statistics
         uint32_t likeCount = 0;
