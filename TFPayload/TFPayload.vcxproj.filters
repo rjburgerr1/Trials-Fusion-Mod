@@ -21,12 +21,39 @@
     <ClInclude Include="pch.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="payload.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="tracks.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="leaderboard_scanner.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="feed_fetcher.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="leaderboard_direct.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="pch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="leaderboard_scanner.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="feed_fetcher.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="tracks.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="leaderboard_direct.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

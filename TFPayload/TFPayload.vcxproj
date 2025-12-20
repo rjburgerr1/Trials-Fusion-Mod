@@ -78,15 +78,32 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>F:\VSProjects\minhook\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>"F:\VSProjects\minhook\build\VC17\lib\Release\libMinHook.x86.lib";%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>copy /Y "$(SolutionDir)$(Configuration)\$(ProjectName).dll" "F:\Trials Fusion\datapack"</Command>
     </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>REM 1. Define the path to the project directory.
+set PROJECT_DIR=$(ProjectDir)
+
+REM 2. Use a trick to safely navigate up one level from the project directory.
+REM The "%%i\.." removes the final folder name and gives the parent directory.
+for %%i in (%PROJECT_DIR%) do set PARENT_DIR=%%i\..
+
+REM 3. Create the file in the parent directory.
+type NUL &gt; "%PARENT_DIR%\DEINIT_TRIGGER.txt"
+
+REM Optional: Wait a moment for the proxy DLL to pick it up before starting the new build
+ping -n 2 127.0.0.1 &gt;nul</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -98,15 +115,32 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>F:\VSProjects\minhook\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>"F:\VSProjects\minhook\build\VC17\lib\Release\libMinHook.x86.lib";%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>copy /Y "$(SolutionDir)$(Configuration)\$(ProjectName).dll" "F:\Trials Fusion\datapack"</Command>
     </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>REM 1. Define the path to the project directory.
+set PROJECT_DIR=$(ProjectDir)
+
+REM 2. Use a trick to safely navigate up one level from the project directory.
+REM The "%%i\.." removes the final folder name and gives the parent directory.
+for %%i in (%PROJECT_DIR%) do set PARENT_DIR=%%i\..
+
+REM 3. Create the file in the parent directory.
+type NUL &gt; "%PARENT_DIR%\DEINIT_TRIGGER.txt"
+
+REM Optional: Wait a moment for the proxy DLL to pick it up before starting the new build
+ping -n 2 127.0.0.1 &gt;nul</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -141,17 +175,26 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="feed_fetcher.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="leaderboard_direct.h" />
+    <ClInclude Include="leaderboard_scanner.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="payload.h" />
+    <ClInclude Include="tracks.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="feed_fetcher.cpp" />
+    <ClCompile Include="leaderboard_direct.cpp" />
+    <ClCompile Include="leaderboard_scanner.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="tracks.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
