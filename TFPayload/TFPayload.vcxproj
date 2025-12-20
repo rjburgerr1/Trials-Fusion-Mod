@@ -179,6 +179,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClInclude Include="framework.h" />
     <ClInclude Include="leaderboard_direct.h" />
     <ClInclude Include="leaderboard_scanner.h" />
+    <ClInclude Include="pause.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="payload.h" />
     <ClInclude Include="tracks.h" />
@@ -188,6 +189,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClCompile Include="feed_fetcher.cpp" />
     <ClCompile Include="leaderboard_direct.cpp" />
     <ClCompile Include="leaderboard_scanner.cpp" />
+    <ClCompile Include="pause.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>

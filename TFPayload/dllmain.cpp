@@ -15,6 +15,7 @@
 #include "leaderboard_scanner.h"
 #include "feed_fetcher.h"
 #include "leaderboard_direct.h"
+#include "pause.h"
 #include <MinHook.h>
 
 // FORWARD DECLARATIONS
@@ -127,6 +128,7 @@ extern "C" __declspec(dllexport) void ShutdownPayload()
     LeaderboardScanner::Shutdown();
     FeedFetcher::Shutdown();
     LeaderboardDirect::Shutdown();
+    Pause::Shutdown();
 
     Log("[Main] All resources cleaned up.");
 }
@@ -187,6 +189,10 @@ extern "C" __declspec(dllexport) void PayloadInit()
     LeaderboardDirect::Initialize(baseAddress);
     Log("[TFPayload] Leaderboard direct initialized");
 
+    // Initialize pause system
+    Pause::Initialize(baseAddress);
+    Log("[TFPayload] Pause system initialized");
+
     DWORD threadId;
     g_hKeyMonitorThread = CreateThread(0, 0, (LPTHREAD_START_ROUTINE)KeyMonitorThread, (LPVOID)baseAddress, 0, &threadId);
 
@@ -242,6 +248,9 @@ void PrintHelpText()
     Log("LEADERBOARD DIRECT (Patch-based, No UI required!):");
     Log("  F10 - Test fetch track ID 221120");
     Log("  F11 - Toggle patch (bypass track check)");
+    Log("");
+    Log("PAUSE Time/Physics:");
+    Log("  0   - Toggle pause/resume");
     Log("");
     Log("Results: F:/tracks_data.csv, F:/leaderboard_scans.txt & feed_data.csv");
     Log("========================================\n");
@@ -383,6 +392,7 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         HandleDelete(hotkeyState);
         LeaderboardScanner::CheckHotkey();
         LeaderboardDirect::CheckHotkey();
+        Pause::CheckHotkey();
 
         Sleep(100);
     }
@@ -396,8 +406,6 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 {
     switch (ul_reason_for_call) {
     case DLL_PROCESS_ATTACH:
-        // Defer all initialization to PayloadInit() to avoid DLL_INIT_FAILED errors
-        // DllMain must complete quickly and cannot do heavy initialization
         break;
 
     case DLL_THREAD_ATTACH:
