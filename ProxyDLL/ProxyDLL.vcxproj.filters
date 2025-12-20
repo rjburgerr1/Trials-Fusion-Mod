@@ -39,9 +39,6 @@
     <ClInclude Include="imgui\backends\imgui_impl_win32.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="HookDX11.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Overlay.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -49,9 +46,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Keybinds.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MinHook\include\MinHook.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -80,9 +74,6 @@
     <ClCompile Include="imgui\backends\imgui_impl_win32.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="HookDX11.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="Overlay.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -92,8 +83,5 @@
     <ClCompile Include="Keybinds.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <Library Include="MinHook\lib\libMinHook.x86.lib" />
   </ItemGroup>
 </Project>

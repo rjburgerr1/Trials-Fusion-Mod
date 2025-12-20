@@ -163,7 +163,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="HookDX11.h" />
     <ClInclude Include="imgui\backends\imgui_impl_dx11.h" />
     <ClInclude Include="imgui\backends\imgui_impl_win32.h" />
     <ClInclude Include="imgui\imconfig.h" />
@@ -173,13 +172,11 @@
     <ClInclude Include="imgui\imstb_textedit.h" />
     <ClInclude Include="imgui\imstb_truetype.h" />
     <ClInclude Include="Keybinds.h" />
-    <ClInclude Include="MinHook\include\MinHook.h" />
     <ClInclude Include="Overlay.h" />
     <ClInclude Include="ProxyDbgcore.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp" />
-    <ClCompile Include="HookDX11.cpp" />
     <ClCompile Include="imgui\backends\imgui_impl_dx11.cpp" />
     <ClCompile Include="imgui\backends\imgui_impl_win32.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
@@ -190,9 +187,6 @@
     <ClCompile Include="Keybinds.cpp" />
     <ClCompile Include="Overlay.cpp" />
     <ClCompile Include="ProxyDbgcore.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <Library Include="MinHook\lib\libMinHook.x86.lib" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
