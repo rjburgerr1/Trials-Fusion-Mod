@@ -1,13 +1,12 @@
 #include "pch.h"
 #include "leaderboard_scanner.h"
 #include "leaderboard_direct.h"
+#include "logging.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
 #include <fstream>
 #include <MinHook.h>
-
-#define Log(...) std::cout << __VA_ARGS__ << std::endl
 
 namespace LeaderboardScanner {
 
@@ -171,19 +170,19 @@ namespace LeaderboardScanner {
                 std::string trackId = GetTrackIDFromContext(context);
                 if (!trackId.empty() && trackId != s_state.currentTrackId) {
                     s_state.currentTrackId = trackId;
-                    Log("[Scanner] ========================================");
-                    Log("[Scanner] Track ID: " << trackId);
+                    LOG_VERBOSE("");
+                    LOG_VERBOSE("[Scanner] Track ID: " << trackId);
                     
                     // If we're in auto-scan mode, start scanning automatically
                     if (s_autoScanNextTrack && !s_trackQueue.empty() && s_currentTrackIndex >= 0) {
-                        Log("[Scanner] Auto-scanning track " << (s_currentTrackIndex + 1) << "/" << s_trackQueue.size());
-                        Log("[Scanner] ========================================");
+                        LOG_VERBOSE("[Scanner] Auto-scanning track " << (s_currentTrackIndex + 1) << "/" << s_trackQueue.size());
+                        LOG_VERBOSE("[Scanner] ========================================");
                         // Wait for data to fully load, then start scan
                         Sleep(400);
                         StartScan();
                     } else {
-                        Log("[Scanner] Press F3 to scan this leaderboard");
-                        Log("[Scanner] ========================================");
+                        LOG_VERBOSE("[Scanner] Press F3 to scan this leaderboard");
+                        LOG_VERBOSE("");
                     }
                 }
             }
@@ -198,10 +197,10 @@ namespace LeaderboardScanner {
     bool Initialize(DWORD_PTR baseAddress) {
         s_baseAddress = baseAddress;
 
-        Log("[Scanner] Initializing with base address: 0x" << std::hex << baseAddress << std::dec);
+        LOG_VERBOSE("[Scanner] Initializing with base address: 0x" << std::hex << baseAddress << std::dec);
 
         if (MH_Initialize() != MH_OK && MH_Initialize() != MH_ERROR_ALREADY_INITIALIZED) {
-            Log("[Scanner] Failed to initialize MinHook");
+            LOG_ERROR("[Scanner] Failed to initialize MinHook");
             return false;
         }
 
@@ -211,25 +210,25 @@ namespace LeaderboardScanner {
 
         if (MH_CreateHook(targetProcessData, &Hook_ProcessLeaderboardData,
             reinterpret_cast<LPVOID*>(&o_ProcessLeaderboardData)) != MH_OK) {
-            Log("[Scanner] Failed to hook ProcessLeaderboardData");
+            LOG_ERROR("[Scanner] Failed to hook ProcessLeaderboardData");
             return false;
         }
 
         if (MH_EnableHook(targetProcessData) != MH_OK) {
-            Log("[Scanner] Failed to enable ProcessLeaderboardData hook");
+            LOG_ERROR("[Scanner] Failed to enable ProcessLeaderboardData hook");
             return false;
         }
 
         // Store function pointers
-        // GetLeaderboardEntry: Ghidra 0xa43ab0 -> RVA 0x343ab0
-        // SetLeaderboardListRange: Ghidra 0xa45530 -> RVA 0x345530
-        // RefreshLeaderboardHandler: Ghidra 0xa45300 -> RVA 0x345300
+        // GetLeaderboardEntry: RVA 0x343ab0
+        // SetLeaderboardListRange: RVA 0x345530
+        // RefreshLeaderboardHandler: RVA 0x345300
         o_GetLeaderboardEntry = (GetLeaderboardEntryFn)(baseAddress + 0x343ab0);
         o_SetLeaderboardListRange = (SetLeaderboardListRangeFn)(baseAddress + 0x345530);
         o_RefreshLeaderboardHandler = (RefreshLeaderboardHandlerFn)(baseAddress + 0x345300);
 
-        Log("[Scanner] Leaderboard scanner initialized!");
-        Log("[Scanner] Output file: " << s_outputPath);
+        LOG_VERBOSE("[Scanner] Leaderboard scanner initialized!");
+        LOG_VERBOSE("[Scanner] Output file: " << s_outputPath);
 
         return true;
     }
@@ -245,12 +244,12 @@ namespace LeaderboardScanner {
         s_entryCallback = nullptr;
         s_baseAddress = 0;
 
-        Log("[Scanner] Leaderboard scanner shut down");
+        LOG_VERBOSE("[Scanner] Leaderboard scanner shut down");
     }
 
     void StartScan() {
         if (!s_state.capturedContext) {
-            Log("[Scanner] ERROR: No leaderboard context! Navigate to a leaderboard first.");
+            LOG_ERROR("[Scanner] No leaderboard context! Navigate to a leaderboard first.");
             return;
         }
 
@@ -260,7 +259,7 @@ namespace LeaderboardScanner {
         int totalEntries = *(int*)((char*)context + 0x150);
 
         if (totalEntries == 0 || totalEntries > 100000) {
-            Log("[Scanner] ERROR: Invalid total entries: " << totalEntries);
+            LOG_ERROR("[Scanner] Invalid total entries: " << totalEntries);
             return;
         }
 
@@ -270,14 +269,14 @@ namespace LeaderboardScanner {
         s_state.allEntries.clear();
         s_totalScanned = 0;
 
-        Log("[Scanner] STARTING LEADERBOARD SCAN");
+        LOG_INFO("[Scanner] STARTING LEADERBOARD SCAN");
         if (!s_state.currentTrackId.empty()) {
-            Log("[Scanner] Track ID: " << s_state.currentTrackId);
+            LOG_INFO("[Scanner] Track ID: " << s_state.currentTrackId);
         }
-        Log("[Scanner] Total entries: " << totalEntries);
-        Log("[Scanner] Pages required: " << ((totalEntries + 9) / 10));
-        Log("[Scanner] ======================================");
-        Log("");
+        LOG_INFO("[Scanner] Total entries: " << totalEntries);
+        LOG_INFO("[Scanner] Pages required: " << ((totalEntries + 9) / 10));
+        LOG_INFO("[Scanner] ======================================");
+        LOG_INFO("");
 
         // Request first page
         o_SetLeaderboardListRange(context, 0, 10);
@@ -285,21 +284,21 @@ namespace LeaderboardScanner {
 
     void StopScan() {
         if (s_state.isScanning) {
-            Log("[Scanner] Scan stopped by user");
+            LOG_INFO("[Scanner] Scan stopped by user");
             s_state.isScanning = false;
         }
     }
 
     void SaveToFile() {
         if (s_state.allEntries.empty()) {
-            Log("[Scanner] No entries to save!");
+            LOG_WARNING("[Scanner] No entries to save!");
             return;
         }
 
         try {
             std::ofstream file(s_outputPath, std::ios::app);
             if (!file.is_open()) {
-                Log("[Scanner] ERROR: Could not open output file: " << s_outputPath);
+                LOG_ERROR("[Scanner] Could not open output file: " << s_outputPath);
                 return;
             }
 
@@ -333,35 +332,35 @@ namespace LeaderboardScanner {
             file << "\n";
             file.close();
 
-            Log("[Scanner] Scan saved to file: " << s_outputPath);
+            LOG_INFO("[Scanner] Scan saved to file: " << s_outputPath);
         }
         catch (...) {
-            Log("[Scanner] ERROR: Failed to write to file");
+            LOG_ERROR("[Scanner] Failed to write to file");
         }
     }
 
     bool ScanTrackById(const std::string& trackId) {
         if (!s_state.capturedContext) {
-            Log("[Scanner] ERROR: No leaderboard context! Open any leaderboard first.");
+            LOG_ERROR("[Scanner] No leaderboard context! Open any leaderboard first.");
             return false;
         }
 
         if (trackId.empty()) {
-            Log("[Scanner] ERROR: Track ID cannot be empty");
+            LOG_ERROR("[Scanner] Track ID cannot be empty");
             return false;
         }
 
         // Validate track ID is numeric
         for (char c : trackId) {
             if (c < '0' || c > '9') {
-                Log("[Scanner] ERROR: Track ID must be numeric, got: " << trackId);
+                LOG_ERROR("[Scanner] Track ID must be numeric, got: " << trackId);
                 return false;
             }
         }
 
-        Log("[Scanner] ========================================");
-        Log("[Scanner] REQUESTING TRACK ID: " << trackId);
-        Log("[Scanner] ========================================");
+        LOG_INFO("");
+        LOG_INFO("[Scanner] REQUESTING TRACK ID: " << trackId);
+        LOG_INFO("");
 
         void* context = s_state.capturedContext;
 
@@ -369,7 +368,7 @@ namespace LeaderboardScanner {
             // Get the string object pointer at context+0x164
             void** stringObjPtr = (void**)((char*)context + 0x164);
             if (*stringObjPtr == nullptr) {
-                Log("[Scanner] ERROR: String object is null");
+                LOG_ERROR("[Scanner] String object is null");
                 return false;
             }
 
@@ -378,7 +377,7 @@ namespace LeaderboardScanner {
             
             // Validate pointer
             if ((DWORD_PTR)str < 0x10000 || (DWORD_PTR)str > 0x7FFFFFFF) {
-                Log("[Scanner] ERROR: Invalid string pointer");
+                LOG_ERROR("[Scanner] Invalid string pointer");
                 return false;
             }
 
@@ -386,17 +385,17 @@ namespace LeaderboardScanner {
             memset(str, 0, 32);  // Clear existing
             strncpy_s(str, 32, trackId.c_str(), trackId.length());
 
-            Log("[Scanner] Track ID written to context");
+            LOG_VERBOSE("[Scanner] Track ID written to context");
 
             // Call RefreshLeaderboard to reload with new track ID
             o_RefreshLeaderboardHandler(context);
 
-            Log("[Scanner] Refresh called - waiting for leaderboard to load...");
+            LOG_INFO("[Scanner] Refresh called - waiting for leaderboard to load...");
 
             return true;
         }
         catch (...) {
-            Log("[Scanner] ERROR: Exception while setting track ID");
+            LOG_ERROR("[Scanner] Exception while setting track ID");
             return false;
         }
     }
@@ -413,12 +412,12 @@ namespace LeaderboardScanner {
 
         void* service = GetLeaderboardService();
         if (!service) {
-            Log("[Scanner] Error: Could not get leaderboard service");
+            LOG_ERROR("[Scanner] Could not get leaderboard service");
             s_state.isScanning = false;
             return;
         }
 
-        Log("[Scanner] Page " << s_state.currentPage << " - Processing entries " << startIndex << " to " << (startIndex + count - 1));
+        LOG_VERBOSE("[Scanner] Page " << s_state.currentPage << " - Processing entries " << startIndex << " to " << (startIndex + count - 1));
 
         // Fetch entries using GetLeaderboardEntry
         for (int i = startIndex; i < startIndex + count && i < s_state.totalEntries; i++) {
@@ -451,7 +450,7 @@ namespace LeaderboardScanner {
                     std::string timeStr = FormatTime(entry.timeMs);
                     std::string medalStr = GetMedalName(entry.medal);
 
-                    Log("#" << std::setw(4) << entry.rank
+                    LOG_VERBOSE("#" << std::setw(4) << entry.rank
                         << " | " << std::setw(20) << std::left << entry.playerName
                         << " | Faults: " << std::setw(3) << entry.faults
                         << " | Time: " << timeStr
@@ -465,7 +464,7 @@ namespace LeaderboardScanner {
                     }
                 }
                 catch (...) {
-                    Log("[Scanner] Error reading entry " << i);
+                    LOG_VERBOSE("[Scanner] Error reading entry " << i);
                 }
             }
         }
@@ -478,12 +477,11 @@ namespace LeaderboardScanner {
             o_SetLeaderboardListRange(context, nextStart, 10);
         }
         else {
-            Log("");
-            Log("[Scanner] ======================================");
-            Log("[Scanner] SCAN COMPLETE");
-            Log("[Scanner] ======================================");
-            Log("[Scanner] Total entries scanned: " << s_totalScanned << " / " << s_state.totalEntries);
-            Log("[Scanner] ======================================");
+            LOG_INFO("");
+            LOG_INFO("[Scanner] SCAN COMPLETE");
+            LOG_INFO("[Scanner] ======================================");
+            LOG_INFO("[Scanner] Total entries scanned: " << s_totalScanned << " / " << s_state.totalEntries);
+            LOG_INFO("");
             s_state.isScanning = false;
 
             // Auto-save to file
@@ -493,21 +491,19 @@ namespace LeaderboardScanner {
             if (s_autoScanNextTrack && !s_trackQueue.empty()) {
                 s_currentTrackIndex++;
                 if (s_currentTrackIndex < (int)s_trackQueue.size()) {
-                    Log("");
-                    Log("[Scanner] ======================================");
-                    Log("[Scanner] Loading next track...");
-                    Log("[Scanner] Track " << (s_currentTrackIndex + 1) << "/" << s_trackQueue.size());
-                    Log("[Scanner] ======================================");
+                    LOG_INFO("");
+                    LOG_INFO("[Scanner] Loading next track...");
+                    LOG_INFO("[Scanner] Track " << (s_currentTrackIndex + 1) << "/" << s_trackQueue.size());
+                    LOG_INFO("");
                     Sleep(1000);  // Wait a moment between scans
                     ScanTrackById(s_trackQueue[s_currentTrackIndex]);
                 } else {
                     // All tracks scanned!
-                    Log("");
-                    Log("[Scanner] ======================================");
-                    Log("[Scanner] ALL TRACKS SCANNED!");
-                    Log("[Scanner] Total tracks: " << s_trackQueue.size());
-                    Log("[Scanner] Results saved to: " << s_outputPath);
-                    Log("[Scanner] ======================================");
+                    LOG_INFO("");
+                    LOG_INFO("[Scanner] ALL TRACKS SCANNED!");
+                    LOG_INFO("[Scanner] Total tracks: " << s_trackQueue.size());
+                    LOG_INFO("[Scanner] Results saved to: " << s_outputPath);
+                    LOG_INFO("");
                     s_trackQueue.clear();
                     s_currentTrackIndex = -1;
                     s_autoScanNextTrack = false;
@@ -549,7 +545,7 @@ namespace LeaderboardScanner {
 
         if (f2IsPressed && !f2WasPressed && !s_state.isScanning) {
             std::string testTrackId = "220120";
-            Log("[Scanner] F2 pressed - Loading test track ID: " << testTrackId);
+            LOG_INFO("[Scanner] F2 pressed - Loading test track ID: " << testTrackId);
             ScanTrackById(testTrackId);
         }
 
@@ -567,7 +563,7 @@ namespace LeaderboardScanner {
 
     void SetOutputPath(const std::string& path) {
         s_outputPath = path;
-        Log("[Scanner] Output path set to: " << path);
+        LOG_INFO("[Scanner] Output path set to: " << path);
     }
 
     const ScannerState& GetState() {
