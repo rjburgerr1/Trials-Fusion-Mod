@@ -1,8 +1,8 @@
-﻿#include <Windows.h>
+#include <Windows.h>
 #include <iostream>
 #include <winuser.h>
 #include "ProxyDbgcore.h"
-#include "HookDX11.h"
+#include "Overlay.h"
 #include <TlHelp32.h>
 
 // Debug Console
@@ -13,6 +13,34 @@ void AllocateConsole()
     freopen_s(&fDummy, "CONOUT$", "w", stdout);
     freopen_s(&fDummy, "CONOUT$", "w", stderr);
     freopen_s(&fDummy, "CONIN$", "r", stdin);
+
+    // Get console window handle
+    HWND consoleWindow = GetConsoleWindow();
+    if (consoleWindow)
+    {
+        // Get the leftmost monitor (assuming left monitor is positioned to the left of primary)
+        POINT pt = { -1, 0 }; // Point on the left side
+        HMONITOR hMonitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+
+        MONITORINFO mi;
+        mi.cbSize = sizeof(MONITORINFO);
+        GetMonitorInfo(hMonitor, &mi);
+
+        // Get the work area of the left monitor
+        int monitorLeft = mi.rcWork.left;
+        int monitorTop = mi.rcWork.top;
+        int monitorWidth = mi.rcWork.right - mi.rcWork.left;
+        int monitorHeight = mi.rcWork.bottom - mi.rcWork.top;
+
+        // Position console on the right half of the left monitor
+        int consoleWidth = monitorWidth / 2;
+        int consoleHeight = monitorHeight;
+        int consoleX = monitorLeft + (monitorWidth / 2);
+        int consoleY = monitorTop;
+
+        // Resize and reposition the console window
+        SetWindowPos(consoleWindow, HWND_TOP, consoleX, consoleY, consoleWidth, consoleHeight, SWP_SHOWWINDOW);
+    }
 }
 
 DWORD GetProcessID(LPCTSTR ProcessName)
@@ -81,10 +109,21 @@ DWORD WINAPI PayloadManagerThread()
     // Create a console window for debug output.
     AllocateConsole();
 
+    std::cout << "[ProxyDLL] Starting payload manager..." << std::endl;
+
+    // Initialize D3D11 hook
+    std::cout << "[ProxyDLL] Initializing D3D11 hook..." << std::endl;
+    if (InitializeD3D11Hook()) {
+        std::cout << "[ProxyDLL] D3D11 hook initialized successfully!" << std::endl;
+    }
+    else {
+        std::cout << "[ProxyDLL] Failed to initialize D3D11 hook!" << std::endl;
+    }
+
     // Start an infinite loop to monitor for hotkeys.
     while (true) {
-        // Check if the F3 key was pressed (0x1 ensures it's a single press).
-        if (GetAsyncKeyState(VK_F3) & 0x1) {
+        // Check if the F1 key was pressed (0x1 ensures it's a single press).
+        if (GetAsyncKeyState(VK_F1) & 0x1) {
             // Check current state: is the payload already loaded?
             if (isLoaded) {
                 // UNLOAD (Free) the payload DLL.
@@ -104,6 +143,8 @@ DWORD WINAPI PayloadManagerThread()
                 std::cout << "Payload Dll UP" << std::endl;
             }
         }
+
+        Sleep(10);
     }
 }
 
@@ -117,9 +158,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
     case DLL_PROCESS_ATTACH:
         // Initialize the proxy (likely for function forwarding/spoofing).
         StartProxy();
-
-        // DX11 init, finds present function, applies MinHook to redirect rendering calls to custom hkPresent function in HookDX11.cpp (draws overlay)
-        StartDX11Hook();
 
         // Create a new thread to manage the payload's lifecycle and hotkeys.
         CreateThread(0, 0, (LPTHREAD_START_ROUTINE)PayloadManagerThread, 0, 0, 0);

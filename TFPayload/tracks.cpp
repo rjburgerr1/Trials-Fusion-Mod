@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "tracks.h"
+#include "logging.h"
 #include <MinHook.h>
 #include <iostream>
 #include <fstream>
@@ -91,26 +92,11 @@ namespace Tracks {
     static std::atomic<bool> g_workerThreadRunning{ false };
     static std::thread g_workerThread;
 
-    static void LogMessage(const std::string& message) {
-        if (g_loggingEnabled) {
-            // Output to console
-            std::cout << message << std::endl;
-
-            // Output to file
-            if (g_logFile.is_open()) {
-                g_logFile << message << std::endl;
-                g_logFile.flush();
-            }
-        }
-    }
-
     // Load search terms from a file
     static bool LoadSearchTermsFromFile(const std::string& filepath) {
         std::ifstream file(filepath);
         if (!file.is_open()) {
-            char buffer[256];
-            sprintf_s(buffer, "[Track] Failed to open search terms file: %s", filepath.c_str());
-            LogMessage(buffer);
+            LOG_VERBOSE("[Track] Failed to open search terms file: " << filepath);
             return false;
         }
 
@@ -133,16 +119,14 @@ namespace Tracks {
         file.close();
 
         if (terms.empty()) {
-            LogMessage("[Track] Warning: No search terms found in file");
+            LOG_VERBOSE("[Track] Warning: No search terms found in file");
             return false;
         }
 
         g_searchTerms = terms;
         g_currentSearchIndex = -1;
 
-        char buffer[512];
-        sprintf_s(buffer, "[Track] Loaded %zu search terms from %s:", terms.size(), filepath.c_str());
-        LogMessage(buffer);
+        LOG_VERBOSE("[Track] Loaded " << terms.size() << " search terms from " << filepath);
 
         return true;
     }
@@ -169,34 +153,29 @@ namespace Tracks {
     }
 
     static void DumpHex(const void* data, size_t size, const std::string& label) {
-        if (!g_loggingEnabled) return;
-
-        char buffer[256];
-        sprintf_s(buffer, "[Track] %s (%zu bytes):", label.c_str(), size);
-        LogMessage(buffer);
+        LOG_VERBOSE("[Track] " << label << " (" << size << " bytes):");
 
         const uint8_t* bytes = static_cast<const uint8_t*>(data);
         for (size_t i = 0; i < size; i += 16) {
-            char line[256];
-            int pos = sprintf_s(line, "  %04zX: ", i);
+            std::ostringstream line;
+            line << "  " << std::setfill('0') << std::setw(4) << std::hex << i << ": ";
 
             for (size_t j = 0; j < 16 && (i + j) < size; j++) {
-                pos += sprintf_s(line + pos, sizeof(line) - pos, "%02X ", bytes[i + j]);
+                line << std::setw(2) << (int)bytes[i + j] << " ";
             }
 
             for (size_t j = size - i; j < 16; j++) {
-                pos += sprintf_s(line + pos, sizeof(line) - pos, "   ");
+                line << "   ";
             }
 
-            pos += sprintf_s(line + pos, sizeof(line) - pos, " |");
+            line << " |";
             for (size_t j = 0; j < 16 && (i + j) < size; j++) {
                 uint8_t b = bytes[i + j];
-                pos += sprintf_s(line + pos, sizeof(line) - pos, "%c",
-                    (b >= 32 && b < 127) ? b : '.');
+                line << (char)((b >= 32 && b < 127) ? b : '.');
             }
-            sprintf_s(line + pos, sizeof(line) - pos, "|");
+            line << "|";
 
-            LogMessage(line);
+            LOG_VERBOSE(line.str());
         }
     }
 
@@ -273,49 +252,45 @@ namespace Tracks {
     static void ProcessTrackData(void* trackPtr) {
         try {
             if (!trackPtr || !IsValidPointer(trackPtr)) {
-                LogMessage("[Track] Invalid track pointer - hook called but pointer is invalid");
+                LOG_VERBOSE("[Track] Invalid track pointer - hook called but pointer is invalid");
                 return;
             }
 
-            char buffer[512];
             TrackInfo info = {};
             info.isValid = true;
             const uint8_t* base = static_cast<const uint8_t*>(trackPtr);
 
-            LogMessage("\n[Track] ========== Track Data Captured ==========");
-            sprintf_s(buffer, "[Track] Track Structure (ESI): 0x%p", trackPtr);
-            LogMessage(buffer);
+            LOG_VERBOSE("\n[Track] ========== Track Data Captured ==========");
+            LOG_VERBOSE("[Track] Track Structure (ESI): 0x" << std::hex << trackPtr);
 
             // Read track ID first - if it's 0, this might be invalid/empty slot
             uint32_t trackId = 0;
             if (!SafeRead(base + TrackOffsets::TRACK_ID, trackId) || trackId == 0) {
-                LogMessage("[Track] Invalid or empty track slot (ID=0), skipping");
+                LOG_VERBOSE("[Track] Invalid or empty track slot (ID=0), skipping");
 
                 // If we're seeing empty tracks, we might be at the end
                 // Stop auto-scroll immediately
                 if (g_autoScrollEnabled) {
-                    LogMessage("[Track] WARNING: Empty track detected during auto-scroll - STOPPING");
+                    LOG_WARNING("[Track] Empty track detected during auto-scroll - STOPPING");
                     g_autoScrollEnabled = false;  // Signal worker thread to stop scrolling
                 }
                 return;
             }
 
-            sprintf_s(buffer, "[Track] Track ID: %u", trackId);
-            LogMessage(buffer);
+            LOG_VERBOSE("[Track] Track ID: " << std::dec << trackId);
             info.trackId = static_cast<uint16_t>(trackId);
             
             // Mark that we've scanned a VALID track (for no-tracks detection)
             // This must come AFTER we verify trackId != 0
             if (!g_firstPageScanned) {
-                LogMessage("[Track] *** FIRST VALID TRACK DETECTED - Setting g_firstPageScanned flag ***");
+                LOG_VERBOSE("[Track] *** FIRST VALID TRACK DETECTED - Setting g_firstPageScanned flag ***");
                 g_firstPageScanned = true;
             }
 
             // Read creator UID
             uint64_t creatorUID = 0;
             if (SafeRead(base + TrackOffsets::CREATOR_UID, creatorUID)) {
-                sprintf_s(buffer, "[Track] Creator UID: %llu", creatorUID);
-                LogMessage(buffer);
+                LOG_VERBOSE("[Track] Creator UID: " << creatorUID);
                 info.creatorUID = creatorUID;
             }
 
@@ -324,8 +299,7 @@ namespace Tracks {
             if (IsValidPointer(creatorNamePtrPtr) && IsValidPointer(*creatorNamePtrPtr)) {
                 std::string creatorName;
                 if (SafeReadString(*creatorNamePtrPtr, creatorName, 256)) {
-                    sprintf_s(buffer, "[Track] Creator Name: %s", creatorName.c_str());
-                    LogMessage(buffer);
+                    LOG_VERBOSE("[Track] Creator Name: " << creatorName);
                     info.creatorName = creatorName;
                 }
             }
@@ -343,8 +317,7 @@ namespace Tracks {
             }
 
             if (!trackName.empty()) {
-                sprintf_s(buffer, "[Track] Track Name: %s", trackName.c_str());
-                LogMessage(buffer);
+                LOG_VERBOSE("[Track] Track Name: " << trackName);
                 info.trackName = trackName;
             }
 
@@ -353,8 +326,7 @@ namespace Tracks {
             if (IsValidPointer(descPtrPtr) && IsValidPointer(*descPtrPtr)) {
                 std::string description;
                 if (SafeReadString(*descPtrPtr, description, 512) && description.length() >= 5) {
-                    sprintf_s(buffer, "[Track] Description: %s", description.c_str());
-                    LogMessage(buffer);
+                    LOG_VERBOSE("[Track] Description: " << description);
                     info.description = description;
                 }
             }
@@ -362,22 +334,19 @@ namespace Tracks {
             // Read statistics
             uint32_t likeCount = 0;
             if (SafeRead(base + TrackOffsets::LIKE_COUNT, likeCount)) {
-                sprintf_s(buffer, "[Track] Like Count: %u", likeCount);
-                LogMessage(buffer);
+                LOG_VERBOSE("[Track] Like Count: " << likeCount);
                 info.likeCount = likeCount;
             }
 
             uint32_t dislikeCount = 0;
             if (SafeRead(base + TrackOffsets::DISLIKE_COUNT, dislikeCount)) {
-                sprintf_s(buffer, "[Track] Dislike Count: %u", dislikeCount);
-                LogMessage(buffer);
+                LOG_VERBOSE("[Track] Dislike Count: " << dislikeCount);
                 info.dislikeCount = dislikeCount;
             }
 
             uint32_t downloadCount = 0;
             if (SafeRead(base + TrackOffsets::DOWNLOAD_COUNT, downloadCount)) {
-                sprintf_s(buffer, "[Track] Download Count: %u", downloadCount);
-                LogMessage(buffer);
+                LOG_VERBOSE("[Track] Download Count: " << downloadCount);
                 info.downloadCount = downloadCount;
             }
 
@@ -388,11 +357,12 @@ namespace Tracks {
             if (SafeRead(base + TrackOffsets::UPLOAD_YEAR, uploadYear)) {
                 SafeRead(base + TrackOffsets::UPLOAD_MONTH, uploadMonth);
                 SafeRead(base + TrackOffsets::UPLOAD_DAY, uploadDay);
-                sprintf_s(buffer, "[Track] Upload Date: %u-%02u-%02u", uploadYear, uploadMonth, uploadDay);
-                LogMessage(buffer);
+                LOG_VERBOSE("[Track] Upload Date: " << uploadYear << "-" 
+                           << std::setfill('0') << std::setw(2) << (int)uploadMonth << "-" 
+                           << std::setw(2) << (int)uploadDay);
             }
 
-            LogMessage("[Track] ========== End Track Data ==========\n");
+            LOG_VERBOSE("[Track] ========== End Track Data ==========\n");
 
             // Write to CSV if enabled
             if (g_csvLoggingEnabled && g_csvFile.is_open()) {
@@ -432,14 +402,14 @@ namespace Tracks {
                 }
 
                 if (isNewTrack) {
-                    sprintf_s(buffer, "[Track] NEW track #%u (unique: %u/%u total)",
-                        info.trackId, g_uniqueTracksThisSearch.load(), g_totalTracksScannedThisSearch.load());
-                    LogMessage(buffer);
+                    LOG_VERBOSE("[Track] NEW track #" << info.trackId << " (unique: " 
+                               << g_uniqueTracksThisSearch.load() << "/" 
+                               << g_totalTracksScannedThisSearch.load() << " total)");
                 }
                 else {
-                    sprintf_s(buffer, "[Track] DUPLICATE track #%u (unique: %u/%u total)",
-                        info.trackId, g_uniqueTracksThisSearch.load(), g_totalTracksScannedThisSearch.load());
-                    LogMessage(buffer);
+                    LOG_VERBOSE("[Track] DUPLICATE track #" << info.trackId << " (unique: " 
+                               << g_uniqueTracksThisSearch.load() << "/" 
+                               << g_totalTracksScannedThisSearch.load() << " total)");
                 }
             }
 
@@ -448,12 +418,10 @@ namespace Tracks {
             }
         }
         catch (const std::exception& ex) {
-            char buffer[256];
-            sprintf_s(buffer, "[Track] Exception: %s", ex.what());
-            LogMessage(buffer);
+            LOG_ERROR("[Track] Exception: " << ex.what());
         }
         catch (...) {
-            LogMessage("[Track] Unknown exception in ProcessTrackData");
+            LOG_ERROR("[Track] Unknown exception in ProcessTrackData");
         }
     }
 
@@ -555,13 +523,11 @@ namespace Tracks {
     // Execute initial search workflow
     static void ExecuteInitialSearch(const AutoSearchConfig& config) {
         if (g_killSwitchActivated) {
-            LogMessage("[Worker] Killswitch activated - aborting initial search");
+            LOG_VERBOSE("[Worker] Killswitch activated - aborting initial search");
             return;
         }
 
-        char buffer[512];
-        sprintf_s(buffer, "[Worker] Starting initial search: %s", config.searchTerm.c_str());
-        LogMessage(buffer);
+        LOG_VERBOSE("[Worker] Starting initial search: " << config.searchTerm);
 
         // Update current search term for tracking
         g_currentSearchTerm = config.searchTerm;
@@ -569,26 +535,25 @@ namespace Tracks {
         try {
             // Press Enter to enable search bar
             if (g_killSwitchActivated) return;
-            LogMessage("[Worker] Pressing Enter to enable search bar...");
+            LOG_VERBOSE("[Worker] Pressing Enter to enable search bar...");
             SimulateKeyPress(VK_RETURN);
             std::this_thread::sleep_for(std::chrono::milliseconds(config.delayBetweenSteps));
 
             // Type the search term
             if (g_killSwitchActivated) return;
-            sprintf_s(buffer, "[Worker] Typing search term: %s", config.searchTerm.c_str());
-            LogMessage(buffer);
+            LOG_VERBOSE("[Worker] Typing search term: " << config.searchTerm);
             SimulateTextInput(config.searchTerm);
             std::this_thread::sleep_for(std::chrono::milliseconds(config.delayBetweenSteps));
 
             // Press Enter to exit search bar
             if (g_killSwitchActivated) return;
-            LogMessage("[Worker] Pressing Enter to exit search bar...");
+            LOG_VERBOSE("[Worker] Pressing Enter to exit search bar...");
             SimulateKeyPress(VK_RETURN);
             std::this_thread::sleep_for(std::chrono::milliseconds(config.delayBetweenSteps));
 
             // Press Right Arrow to navigate to search button
             if (g_killSwitchActivated) return;
-            LogMessage("[Worker] Pressing Right Arrow...");
+            LOG_VERBOSE("[Worker] Pressing Right Arrow...");
             SimulateKeyPress(VK_RIGHT);
             std::this_thread::sleep_for(std::chrono::milliseconds(config.delayBetweenSteps));
 
@@ -598,29 +563,26 @@ namespace Tracks {
 
             // Press Enter to execute search
             if (g_killSwitchActivated) return;
-            LogMessage("[Worker] Pressing Enter to execute search...");
+            LOG_VERBOSE("[Worker] Pressing Enter to execute search...");
             SimulateKeyPress(VK_RETURN);
             g_searchExecutedTime = std::chrono::steady_clock::now();  // Mark when we executed
             std::this_thread::sleep_for(std::chrono::milliseconds(config.delayAfterSearch));
 
-            LogMessage("[Worker] Initial search complete");
+            LOG_VERBOSE("[Worker] Initial search complete");
         }
         catch (const std::exception& ex) {
-            sprintf_s(buffer, "[Worker] Exception in ExecuteInitialSearch: %s", ex.what());
-            LogMessage(buffer);
+            LOG_ERROR("[Worker] Exception in ExecuteInitialSearch: " << ex.what());
         }
     }
 
     // Execute search switch workflow
     static void ExecuteSwitchSearch(const AutoSearchConfig& config) {
         if (g_killSwitchActivated) {
-            LogMessage("[Worker] Killswitch activated - aborting search switch");
+            LOG_VERBOSE("[Worker] Killswitch activated - aborting search switch");
             return;
         }
 
-        char buffer[512];
-        sprintf_s(buffer, "[Worker] Switching to search: %s", config.searchTerm.c_str());
-        LogMessage(buffer);
+        LOG_VERBOSE("[Worker] Switching to search: " << config.searchTerm);
 
         // Update current search term for tracking
         g_currentSearchTerm = config.searchTerm;
@@ -636,19 +598,19 @@ namespace Tracks {
 
             // Press Left Arrow to navigate to search bar
             if (g_killSwitchActivated) return;
-            LogMessage("[Worker] Pressing Left Arrow...");
+            LOG_VERBOSE("[Worker] Pressing Left Arrow...");
             SimulateKeyPress(VK_LEFT);
             std::this_thread::sleep_for(std::chrono::milliseconds(config.delayBetweenSteps));
 
             // Press Enter to enter search bar
             if (g_killSwitchActivated) return;
-            LogMessage("[Worker] Pressing Enter to enter search bar...");
+            LOG_VERBOSE("[Worker] Pressing Enter to enter search bar...");
             SimulateKeyPress(VK_RETURN);
             std::this_thread::sleep_for(std::chrono::milliseconds(config.delayBetweenSteps));
 
             // Backspace to clear old text
             if (g_killSwitchActivated) return;
-            LogMessage("[Worker] Clearing old search term...");
+            LOG_VERBOSE("[Worker] Clearing old search term...");
             for (int i = 0; i < 20; i++) {
                 if (g_killSwitchActivated) return;
                 SimulateKeyPress(VK_BACK);
@@ -658,20 +620,19 @@ namespace Tracks {
 
             // Type new search term
             if (g_killSwitchActivated) return;
-            sprintf_s(buffer, "[Worker] Typing new search term: %s", config.searchTerm.c_str());
-            LogMessage(buffer);
+            LOG_VERBOSE("[Worker] Typing new search term: " << config.searchTerm);
             SimulateTextInput(config.searchTerm);
             std::this_thread::sleep_for(std::chrono::milliseconds(config.delayBetweenSteps));
 
             // Press Enter to exit search bar
             if (g_killSwitchActivated) return;
-            LogMessage("[Worker] Pressing Enter to exit search bar...");
+            LOG_VERBOSE("[Worker] Pressing Enter to exit search bar...");
             SimulateKeyPress(VK_RETURN);
             std::this_thread::sleep_for(std::chrono::milliseconds(config.delayBetweenSteps));
 
             // Press Right Arrow
             if (g_killSwitchActivated) return;
-            LogMessage("[Worker] Pressing Right Arrow...");
+            LOG_VERBOSE("[Worker] Pressing Right Arrow...");
             SimulateKeyPress(VK_RIGHT);
             std::this_thread::sleep_for(std::chrono::milliseconds(config.delayBetweenSteps));
 
@@ -681,37 +642,34 @@ namespace Tracks {
 
             // Press Enter to execute search
             if (g_killSwitchActivated) return;
-            LogMessage("[Worker] Pressing Enter to execute search...");
+            LOG_VERBOSE("[Worker] Pressing Enter to execute search...");
             SimulateKeyPress(VK_RETURN);
             g_searchExecutedTime = std::chrono::steady_clock::now();
             std::this_thread::sleep_for(std::chrono::milliseconds(config.delayAfterSearch));
 
-            LogMessage("[Worker] Search switch complete");
+            LOG_VERBOSE("[Worker] Search switch complete");
             std::this_thread::sleep_for(std::chrono::milliseconds(800));
 
         }
         catch (const std::exception& ex) {
-            sprintf_s(buffer, "[Worker] Exception in ExecuteSwitchSearch: %s", ex.what());
-            LogMessage(buffer);
+            LOG_ERROR("[Worker] Exception in ExecuteSwitchSearch: " << ex.what());
         }
     }
 
     // Execute auto-scroll
     static void ExecuteAutoScroll(const AutoScrollConfig& config) {
-        char buffer[256];
-        sprintf_s(buffer, "[Worker] Starting auto-scroll (delay: %ums, max: %u)",
-            config.delayMs, config.maxScrolls);
-        LogMessage(buffer);
+        LOG_VERBOSE("[Worker] Starting auto-scroll (delay: " << config.delayMs 
+                   << "ms, max: " << config.maxScrolls << ")");
 
         g_autoScrollConfig = config;
         g_autoScrollEnabled = true;
         g_scrollCount = 0;
 
         // Initial safety delay - but check for no tracks during this time
-        sprintf_s(buffer, "[Worker] Waiting up to %dms for first page to load and scan...", NO_TRACKS_DETECTION_MS);
-        LogMessage(buffer);
-        sprintf_s(buffer, "[Worker] g_firstPageScanned initial state: %s", g_firstPageScanned.load() ? "true" : "false");
-        LogMessage(buffer);
+        LOG_VERBOSE("[Worker] Waiting up to " << NO_TRACKS_DETECTION_MS 
+                   << "ms for first page to load and scan...");
+        LOG_VERBOSE("[Worker] g_firstPageScanned initial state: " 
+                   << (g_firstPageScanned.load() ? "true" : "false"));
         
         auto waitStart = std::chrono::steady_clock::now();
         bool tracksFound = false;
@@ -723,8 +681,8 @@ namespace Tracks {
             if (g_firstPageScanned) {
                 auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - waitStart).count();
-                sprintf_s(buffer, "[Worker] First page scanned successfully after %lldms, tracks found!", elapsed);
-                LogMessage(buffer);
+                LOG_VERBOSE("[Worker] First page scanned successfully after " << elapsed 
+                           << "ms, tracks found!");
                 tracksFound = true;
                 break;
             }
@@ -735,17 +693,17 @@ namespace Tracks {
         }
         
         if (!tracksFound) {
-            LogMessage("[Worker] Timeout expired - g_firstPageScanned still false");
+            LOG_VERBOSE("[Worker] Timeout expired - g_firstPageScanned still false");
         }
         
-        sprintf_s(buffer, "[Worker] Final g_firstPageScanned state: %s", g_firstPageScanned.load() ? "true" : "false");
-        LogMessage(buffer);
-        sprintf_s(buffer, "[Worker] Total tracks scanned so far: %u", g_totalTracksScannedThisSearch.load());
-        LogMessage(buffer);
+        LOG_VERBOSE("[Worker] Final g_firstPageScanned state: " 
+                   << (g_firstPageScanned.load() ? "true" : "false"));
+        LOG_VERBOSE("[Worker] Total tracks scanned so far: " 
+                   << g_totalTracksScannedThisSearch.load());
 
         // If no tracks were scanned, we have a no-results scenario
         if (!g_firstPageScanned) {
-            LogMessage("[Worker] *** NO TRACKS FOUND for this search ***");
+            LOG_INFO("[Worker] *** NO TRACKS FOUND for this search ***");
             std::cout << "\n[Auto-Search] No tracks found for: \"" << g_currentSearchTerm << "\"" << std::endl;
             
             // Record stats
@@ -765,7 +723,7 @@ namespace Tracks {
                 
                 if (nextIndex == 0 && g_currentSearchIndex > 0) {
                     std::cout << "\n[Auto-Cycle] All searches completed!\n" << std::endl;
-                    LogMessage("[Worker] All searches in cycle completed");
+                    LOG_INFO("[Worker] All searches in cycle completed");
                     return;
                 }
                 
@@ -773,21 +731,21 @@ namespace Tracks {
                 std::cout << "[Auto-Cycle] Will continue to: \"" << g_searchTerms[nextIndex] << "\"\n" << std::endl;
                 
                 // NO-TRACKS PATH: Left arrow -> Enter -> Clear -> Type new -> etc
-                LogMessage("[Worker] Executing NO-TRACKS workflow");
+                LOG_VERBOSE("[Worker] Executing NO-TRACKS workflow");
                 
                 try {
                     // Left arrow to go to search bar
-                    LogMessage("[Worker] Pressing Left Arrow to navigate to search bar...");
+                    LOG_VERBOSE("[Worker] Pressing Left Arrow to navigate to search bar...");
                     SimulateKeyPress(VK_LEFT);
                     std::this_thread::sleep_for(std::chrono::milliseconds(400));
                     
                     // Press Enter to enter search bar
-                    LogMessage("[Worker] Pressing Enter to enter search bar...");
+                    LOG_VERBOSE("[Worker] Pressing Enter to enter search bar...");
                     SimulateKeyPress(VK_RETURN);
                     std::this_thread::sleep_for(std::chrono::milliseconds(500));
                     
                     // Clear old search
-                    LogMessage("[Worker] Clearing old search term...");
+                    LOG_VERBOSE("[Worker] Clearing old search term...");
                     for (int i = 0; i < 20; i++) {
                         if (g_killSwitchActivated) return;
                         SimulateKeyPress(VK_BACK);
@@ -798,18 +756,17 @@ namespace Tracks {
                     // Type new search term
                     std::string newTerm = g_searchTerms[nextIndex];
                     g_currentSearchTerm = newTerm;
-                    sprintf_s(buffer, "[Worker] Typing new search term: %s", newTerm.c_str());
-                    LogMessage(buffer);
+                    LOG_VERBOSE("[Worker] Typing new search term: " << newTerm);
                     SimulateTextInput(newTerm);
                     std::this_thread::sleep_for(std::chrono::milliseconds(400));
                     
                     // Press Enter to exit search bar
-                    LogMessage("[Worker] Pressing Enter to exit search bar...");
+                    LOG_VERBOSE("[Worker] Pressing Enter to exit search bar...");
                     SimulateKeyPress(VK_RETURN);
                     std::this_thread::sleep_for(std::chrono::milliseconds(400));
                     
                     // Press Right Arrow to navigate to search button
-                    LogMessage("[Worker] Pressing Right Arrow...");
+                    LOG_VERBOSE("[Worker] Pressing Right Arrow...");
                     SimulateKeyPress(VK_RIGHT);
                     std::this_thread::sleep_for(std::chrono::milliseconds(500));
                     
@@ -818,7 +775,7 @@ namespace Tracks {
                     g_totalTracksScannedThisSearch = 0;
                     
                     // Press Enter to execute search
-                    LogMessage("[Worker] Pressing Enter to execute new search...");
+                    LOG_VERBOSE("[Worker] Pressing Enter to execute new search...");
                     SimulateKeyPress(VK_RETURN);
                     g_searchExecutedTime = std::chrono::steady_clock::now();
                     std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -837,8 +794,7 @@ namespace Tracks {
                     g_queueCV.notify_one();
                     
                 } catch (const std::exception& ex) {
-                    sprintf_s(buffer, "[Worker] Exception in NO-TRACKS workflow: %s", ex.what());
-                    LogMessage(buffer);
+                    LOG_ERROR("[Worker] Exception in NO-TRACKS workflow: " << ex.what());
                 }
             }
             
@@ -858,7 +814,7 @@ namespace Tracks {
         while (g_autoScrollEnabled && g_workerThreadRunning && !g_killSwitchActivated) {
             // Check max scroll count
             if (config.maxScrolls > 0 && g_scrollCount >= config.maxScrolls) {
-                LogMessage("[Worker] Max scrolls reached, stopping");
+                LOG_VERBOSE("[Worker] Max scrolls reached, stopping");
                 break;
             }
 
@@ -906,14 +862,12 @@ namespace Tracks {
                                 << uniqueScanned << " unique) - Likely hit 143 max pages\n";
                             g_maxPagesLogFile.flush();
 
-                            sprintf_s(buffer, "[Track] Logged max pages warning for: %s", g_currentSearchTerm.c_str());
-                            LogMessage(buffer);
+                            LOG_VERBOSE("[Track] Logged max pages warning for: " << g_currentSearchTerm);
                         }
                     }
 
-                    sprintf_s(buffer, "[Worker] Timeout reached. Scanned %u total (%u unique)",
-                        totalScanned, uniqueScanned);
-                    LogMessage(buffer);
+                    LOG_VERBOSE("[Worker] Timeout reached. Scanned " << totalScanned 
+                               << " total (" << uniqueScanned << " unique)");
 
                     std::cout << "\n==================================" << std::endl;
                     std::cout << "  AUTO-SCROLL COMPLETE" << std::endl;
@@ -935,14 +889,14 @@ namespace Tracks {
                         if (nextIndex == 0 && g_currentSearchIndex > 0) {
                             // Completed full cycle
                             std::cout << "\n[Auto-Cycle] All searches completed!\n" << std::endl;
-                            LogMessage("[Worker] All searches in cycle completed");
+                            LOG_INFO("[Worker] All searches in cycle completed");
                             shouldAutoCycle = false;
                         }
                         else {
                             // Should continue to next search
                             shouldAutoCycle = true;
                             std::cout << "[Auto-Cycle] Will continue to: \"" << g_searchTerms[nextIndex] << "\"\n" << std::endl;
-                            LogMessage("[Worker] Will auto-cycle to next search after cleanup");
+                            LOG_VERBOSE("[Worker] Will auto-cycle to next search after cleanup");
 
                             // Update index for next search
                             g_currentSearchIndex = nextIndex;
@@ -950,21 +904,21 @@ namespace Tracks {
                     }
 
                     // ALWAYS press ESCAPE to exit results page cleanly
-                    LogMessage("[Worker] Pressing ESCAPE to exit results");
+                    LOG_VERBOSE("[Worker] Pressing ESCAPE to exit results");
                     SimulateKeyPress(VK_ESCAPE);
 
                     // Give game time to process ESCAPE and stabilize
-                    LogMessage("[Worker] Waiting for game to stabilize...");
+                    LOG_VERBOSE("[Worker] Waiting for game to stabilize...");
                     std::this_thread::sleep_for(std::chrono::milliseconds(400));
 
                     g_autoScrollEnabled = false;
-                    LogMessage("[Worker] Auto-scroll stopped");
+                    LOG_INFO("[Worker] Auto-scroll stopped");
 
                     // AFTER scroll completes and game stabilized, queue next task
                     if (shouldAutoCycle && !g_searchTerms.empty() && !g_killSwitchActivated) {
                         int nextIndex = g_currentSearchIndex.load();
                         if (nextIndex >= 0 && nextIndex < (int)g_searchTerms.size()) {
-                            LogMessage("[Worker] Auto-scroll complete, queueing next search");
+                            LOG_VERBOSE("[Worker] Auto-scroll complete, queueing next search");
 
                             WorkerTask nextTask;
                             nextTask.command = WorkerCommand::SwitchSearch;
@@ -1008,16 +962,16 @@ namespace Tracks {
         }
 
         if (g_killSwitchActivated) {
-            LogMessage("[Worker] Killswitch activated - auto-scroll aborted");
+            LOG_INFO("[Worker] Killswitch activated - auto-scroll aborted");
         }
 
         g_autoScrollEnabled = false;
-        LogMessage("[Worker] Auto-scroll stopped");
+        LOG_INFO("[Worker] Auto-scroll stopped");
     }
 
     // Worker thread function
     static void WorkerThreadFunc() {
-        LogMessage("[Worker] Started");
+        LOG_VERBOSE("[Worker] Started");
 
         while (g_workerThreadRunning) {
             WorkerTask task;
@@ -1068,12 +1022,12 @@ namespace Tracks {
             }
         }
 
-        LogMessage("[Worker] Thread exiting");
+        LOG_VERBOSE("[Worker] Thread exiting");
     }
 
     bool Initialize() {
         g_logFile.open("tracks_debug.log", std::ios::out | std::ios::trunc);
-        LogMessage("[Track] Track Hook Initializing ");
+        LOG_VERBOSE("[Track] Track Hook Initializing");
 
         // Open CSV file in append mode (or create with header if doesn't exist)
         bool fileExists = false;
@@ -1088,28 +1042,26 @@ namespace Tracks {
             if (!fileExists) {
                 g_csvFile << "TrackID,TrackName,CreatorName,CreatorUID,Likes,Dislikes,Downloads,UploadDate,Description\n";
                 g_csvFile.flush();
-                LogMessage("[Track] CSV logging enabled: F:/tracks_data.csv (new file created with header)");
+                LOG_VERBOSE("[Track] CSV logging enabled: F:/tracks_data.csv (new file created with header)");
             }
             else {
-                LogMessage("[Track] CSV logging enabled: F:/tracks_data.csv (appending to existing file)");
+                LOG_VERBOSE("[Track] CSV logging enabled: F:/tracks_data.csv (appending to existing file)");
             }
             g_csvLoggingEnabled = true;
         }
         else {
-            LogMessage("[Track] Warning: Could not open CSV file for writing");
+            LOG_WARNING("[Track] Could not open CSV file for writing");
         }
 
         HMODULE baseModule = GetModuleHandle(NULL);
         if (!baseModule) {
-            LogMessage("[Track] Failed to get module handle");
+            LOG_ERROR("[Track] Failed to get module handle");
             return false;
         }
 
         DWORD_PTR baseAddress = reinterpret_cast<DWORD_PTR>(baseModule);
         void* targetAddress = reinterpret_cast<void*>(baseAddress + 0x35088F);
         g_hookLocation = targetAddress;
-
-        char buffer[256];
 
         // Install hook using MinHook
         MH_STATUS status = MH_CreateHook(
@@ -1119,29 +1071,26 @@ namespace Tracks {
         );
 
         if (status != MH_OK) {
-            sprintf_s(buffer, "[Track] Failed to create hook: %s", MH_StatusToString(status));
-            LogMessage(buffer);
+            LOG_ERROR("[Track] Failed to create hook: " << MH_StatusToString(status));
             return false;
         }
 
         status = MH_EnableHook(targetAddress);
         if (status != MH_OK) {
-            sprintf_s(buffer, "[Track] Failed to enable hook: %s", MH_StatusToString(status));
-            LogMessage(buffer);
+            LOG_ERROR("[Track] Failed to enable hook: " << MH_StatusToString(status));
             return false;
         }
-
 
         // Start the worker thread
         g_workerThreadRunning = true;
         g_workerThread = std::thread(WorkerThreadFunc);
 
-        LogMessage("[Track] Hook installed successfully!");
+        LOG_VERBOSE("[Track] Hook installed successfully!");
         return true;
     }
 
     void Shutdown() {
-        LogMessage("[Track] Shutting Down");
+        LOG_VERBOSE("[Track] Shutting Down");
 
         // Stop worker thread
         if (g_workerThreadRunning) {
@@ -1151,7 +1100,7 @@ namespace Tracks {
             if (g_workerThread.joinable()) {
                 g_workerThread.join();
             }
-            LogMessage("[Worker] Stopped");
+            LOG_VERBOSE("[Worker] Stopped");
         }
 
         if (g_hookLocation) {
@@ -1165,16 +1114,16 @@ namespace Tracks {
 
         if (g_csvFile.is_open()) {
             g_csvFile.close();
-            LogMessage("[Track] CSV file closed");
+            LOG_VERBOSE("[Track] CSV file closed");
         }
 
         if (g_maxPagesLogFile.is_open()) {
             g_maxPagesLogFile.close();
-            LogMessage("[Track] Max pages log file closed");
+            LOG_VERBOSE("[Track] Max pages log file closed");
         }
 
         if (g_logFile.is_open()) {
-            LogMessage("[Track] Shutdown complete");
+            LOG_VERBOSE("[Track] Shutdown complete");
             g_logFile.close();
         }
     }
@@ -1185,9 +1134,7 @@ namespace Tracks {
 
     void SetLoggingEnabled(bool enabled) {
         g_loggingEnabled = enabled;
-        char buffer[128];
-        sprintf_s(buffer, "[Track] Logging %s", enabled ? "enabled" : "disabled");
-        LogMessage(buffer);
+        LOG_VERBOSE("[Track] Logging " << (enabled ? "enabled" : "disabled"));
     }
 
     void DumpTrackStructure(void* trackPtr, size_t size) {
@@ -1222,9 +1169,7 @@ namespace Tracks {
 
     void SetAutoScrollDelay(uint32_t delayMs) {
         g_autoScrollConfig.delayMs = delayMs;
-        char buffer[128];
-        sprintf_s(buffer, "[Track] Scroll delay set to %ums", delayMs);
-        LogMessage(buffer);
+        LOG_VERBOSE("[Track] Scroll delay set to " << delayMs << "ms");
     }
 
     void StartAutoSearch(const AutoSearchConfig& config) {
@@ -1264,20 +1209,18 @@ namespace Tracks {
     void SetSearchTerms(const std::vector<std::string>& terms) {
         g_searchTerms = terms;
         g_currentSearchIndex = -1;
-        char buffer[256];
-        sprintf_s(buffer, "[Track] Search terms configured: %zu terms", terms.size());
-        LogMessage(buffer);
+        LOG_VERBOSE("[Track] Search terms configured: " << terms.size() << " terms");
     }
 
     void CycleToNextSearch() {
         if (g_searchTerms.empty()) {
-            LogMessage("[Track] Error: No search terms configured!");
+            LOG_ERROR("[Track] No search terms configured!");
             return;
         }
 
         // Stop current operation
         if (g_autoScrollEnabled) {
-            LogMessage("[Track] Stopping current scroll...");
+            LOG_VERBOSE("[Track] Stopping current scroll...");
             StopAutoScroll();
             std::this_thread::sleep_for(std::chrono::milliseconds(1300));
         }
@@ -1289,10 +1232,8 @@ namespace Tracks {
 
         std::string searchTerm = g_searchTerms[nextIndex];
 
-        char buffer[512];
-        sprintf_s(buffer, "[Track] Cycling to search %d/%zu: %s",
-            nextIndex + 1, g_searchTerms.size(), searchTerm.c_str());
-        LogMessage(buffer);
+        LOG_VERBOSE("[Track] Cycling to search " << (nextIndex + 1) << "/" 
+                   << g_searchTerms.size() << ": " << searchTerm);
 
         // Configure search
         AutoSearchConfig config;
@@ -1364,14 +1305,12 @@ namespace Tracks {
 
     void ClearSearchStats() {
         g_searchStatsHistory.clear();
-        LogMessage("[Track] Stats cleared");
+        LOG_VERBOSE("[Track] Stats cleared");
     }
 
     void SetAutoCycleEnabled(bool enabled) {
         g_autoCycleEnabled = enabled;
-        char buffer[128];
-        sprintf_s(buffer, "[Track] Auto-cycle %s", enabled ? "enabled" : "disabled");
-        LogMessage(buffer);
+        LOG_VERBOSE("[Track] Auto-cycle " << (enabled ? "enabled" : "disabled"));
     }
 
     bool IsAutoCycleEnabled() {
@@ -1388,7 +1327,7 @@ namespace Tracks {
             g_taskQueue.clear();
         }
 
-        LogMessage("[Track] *** KILLSWITCH ACTIVATED *** All operations stopped!");
+        LOG_INFO("[Track] *** KILLSWITCH ACTIVATED *** All operations stopped!");
         std::cout << "\n*** KILLSWITCH ACTIVATED ***" << std::endl;
         std::cout << "All auto-scroll and auto-search operations have been stopped." << std::endl;
         std::cout << "Press F6 again to reset and re-enable." << std::endl;
@@ -1396,7 +1335,7 @@ namespace Tracks {
 
     void DeactivateKillSwitch() {
         g_killSwitchActivated = false;
-        LogMessage("[Track] Killswitch deactivated - operations can resume");
+        LOG_INFO("[Track] Killswitch deactivated - operations can resume");
         std::cout << "[Track] Killswitch deactivated - ready for new operations" << std::endl;
     }
 

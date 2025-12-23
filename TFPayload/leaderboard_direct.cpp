@@ -1,11 +1,10 @@
 #include "pch.h"
 #include "leaderboard_direct.h"
+#include "logging.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
 #include <MinHook.h>
-
-#define Log(...) std::cout << __VA_ARGS__ << std::endl
 
 namespace LeaderboardDirect {
     
@@ -60,17 +59,17 @@ namespace LeaderboardDirect {
             return false;
         }
         
-        Log("[LB - Direct] ========================================");
-        Log("[LB - Direct] LEADERBOARD DATA RECEIVED!");
-        Log("[LB - Direct] Track ID requested: " << s_fetchTrackId);
-        Log("[LB - Direct] ========================================");
+        LOG_INFO("[LB - Direct] ========================================");
+        LOG_INFO("[LB - Direct] LEADERBOARD DATA RECEIVED!");
+        LOG_INFO("[LB - Direct] Track ID requested: " << s_fetchTrackId);
+        LOG_INFO("[LB - Direct] ========================================");
         
         // Get leaderboard service to read entries
         void* service = GetLeaderboardService();
         if (service && o_GetLeaderboardEntry) {
             // Try to get total entries from context+0x150
             int totalEntries = *(int*)((char*)context + 0x150);
-            Log("[LB - Direct] Total entries available: " << totalEntries);
+            LOG_VERBOSE("[LB - Direct] Total entries available: " << totalEntries);
             
             // Clear previous entries
             s_state.fetchedEntries.clear();
@@ -99,7 +98,7 @@ namespace LeaderboardDirect {
                     int seconds = (timeMs % 60000) / 1000;
                     int ms = timeMs % 1000;
                     
-                    Log("[LB - Direct] #" << rank << ": " << playerName 
+                    LOG_VERBOSE("[LB - Direct] #" << rank << ": " << playerName 
                         << " - " << minutes << ":" << std::setfill('0') << std::setw(2) << seconds 
                         << "." << std::setw(3) << ms << std::setfill(' ')
                         << " (" << faults << " faults)");
@@ -115,11 +114,11 @@ namespace LeaderboardDirect {
                 }
             }
             
-            Log("[LB - Direct] ========================================");
-            Log("[LB - Direct] Captured " << s_state.fetchedEntries.size() << " entries");
-            Log("[LB - Direct] ========================================");
+            LOG_INFO("[LB - Direct] ========================================");
+            LOG_INFO("[LB - Direct] Captured " << s_state.fetchedEntries.size() << " entries");
+            LOG_INFO("[LB - Direct] ========================================");
         } else {
-            Log("[LB - Direct] WARNING: Could not read entries (service=0x" << std::hex << (uintptr_t)service << ", GetEntry=0x" << (uintptr_t)o_GetLeaderboardEntry << std::dec << ")");
+            LOG_WARNING("[LB - Direct] Could not read entries (service=0x" << std::hex << (uintptr_t)service << ", GetEntry=0x" << (uintptr_t)o_GetLeaderboardEntry << std::dec << ")");
         }
         
         s_weTriggeredFetch = false;
@@ -138,10 +137,10 @@ namespace LeaderboardDirect {
     static FetchLeaderboardDataFromServerFn o_FetchLeaderboardDataFromServer = nullptr;
 
     static void __fastcall Hook_FetchLeaderboardDataFromServer(void* thisPtr, void* edx, int param1, int param2, int** filterString, int param4, int configPtr) {
-        Log("[LB - Direct] === FetchLeaderboardDataFromServer CALLED ===");
-        Log("[LB - Direct] param1 (requestType): " << param1);
-        Log("[LB - Direct] param2 (startIndex): " << param2);
-        Log("[LB - Direct] filterString ptr: 0x" << std::hex << (uintptr_t)filterString << std::dec);
+        LOG_VERBOSE("[LB - Direct] === FetchLeaderboardDataFromServer CALLED ===");
+        LOG_VERBOSE("[LB - Direct] param1 (requestType): " << param1);
+        LOG_VERBOSE("[LB - Direct] param2 (startIndex): " << param2);
+        LOG_VERBOSE("[LB - Direct] filterString ptr: 0x" << std::hex << (uintptr_t)filterString << std::dec);
         if (filterString && *filterString) {
             int* strData = *filterString;
             // Structure is: [refcount:4][length:4][capacity?:4][string data...]
@@ -155,15 +154,15 @@ namespace LeaderboardDirect {
             for (int i = 0; i < 64 && str[i] != '\0'; i++) {
                 fullStr += str[i];
             }
-            Log("[LB - Direct] filterString value: \"" << fullStr << "\"");
+            LOG_VERBOSE("[LB - Direct] filterString value: \"" << fullStr << "\"");
         }
-        Log("[LB - Direct] param4 (trackId): " << param4);
-        Log("[LB - Direct] configPtr: 0x" << std::hex << configPtr << std::dec);
+        LOG_VERBOSE("[LB - Direct] param4 (trackId): " << param4);
+        LOG_VERBOSE("[LB - Direct] configPtr: 0x" << std::hex << configPtr << std::dec);
         if (configPtr) {
-            Log("[LB - Direct] config+0x18: 0x" << std::hex << *(int*)(configPtr + 0x18) << std::dec);
-            Log("[LB - Direct] config+0x1c: 0x" << std::hex << *(int*)(configPtr + 0x1c) << std::dec);
-            Log("[LB - Direct] config+0x30: 0x" << std::hex << *(int*)(configPtr + 0x30) << std::dec);
-            Log("[LB - Direct] config+0x34 (lbType): " << *(int*)(configPtr + 0x34));
+            LOG_VERBOSE("[LB - Direct] config+0x18: 0x" << std::hex << *(int*)(configPtr + 0x18) << std::dec);
+            LOG_VERBOSE("[LB - Direct] config+0x1c: 0x" << std::hex << *(int*)(configPtr + 0x1c) << std::dec);
+            LOG_VERBOSE("[LB - Direct] config+0x30: 0x" << std::hex << *(int*)(configPtr + 0x30) << std::dec);
+            LOG_VERBOSE("[LB - Direct] config+0x34 (lbType): " << *(int*)(configPtr + 0x34));
         }
         
         // Call original function
@@ -193,7 +192,7 @@ namespace LeaderboardDirect {
     bool Initialize(DWORD_PTR baseAddress) {
         s_baseAddress = baseAddress;
         
-        Log("[LB - Direct] Initializing LeaderboardDirect Hook...");
+        LOG_VERBOSE("[LB - Direct] Initializing LeaderboardDirect Hook...");
 
         // Set up function pointers
         o_RequestLeaderboardData = (RequestLeaderboardDataFn)(baseAddress + 0x343950);
@@ -204,12 +203,12 @@ namespace LeaderboardDirect {
         void* targetFetch = (void*)(baseAddress + 0x3436f0);
         if (MH_CreateHook(targetFetch, &Hook_FetchLeaderboardDataFromServer,
             reinterpret_cast<LPVOID*>(&o_FetchLeaderboardDataFromServer)) != MH_OK) {
-            Log("[LB - Direct] WARNING: Failed to hook FetchLeaderboardDataFromServer");
+            LOG_WARNING("[LB - Direct] Failed to hook FetchLeaderboardDataFromServer");
         } else {
             if (MH_EnableHook(targetFetch) != MH_OK) {
-                Log("[LB - Direct] WARNING: Failed to enable FetchLeaderboardDataFromServer hook");
+                LOG_WARNING("[LB - Direct] Failed to enable FetchLeaderboardDataFromServer hook");
             } else {
-                Log("[LB - Direct] Hooked FetchLeaderboardDataFromServer for debugging");
+                LOG_VERBOSE("[LB - Direct] Hooked FetchLeaderboardDataFromServer for debugging");
             }
         }
 
@@ -219,7 +218,7 @@ namespace LeaderboardDirect {
         // Make memory readable
         DWORD oldProtect;
         if (!VirtualProtect(patchAddr, 2, PAGE_EXECUTE_READ, &oldProtect)) {
-            Log("[LB - Direct] WARNING: Could not read patch location");
+            LOG_WARNING("[LB - Direct] Could not read patch location");
         } else {
             s_originalBytes[0] = patchAddr[0];
             s_originalBytes[1] = patchAddr[1];
@@ -227,14 +226,14 @@ namespace LeaderboardDirect {
             VirtualProtect(patchAddr, 2, oldProtect, &oldProtect);
             
             if (s_originalBytes[0] == ORIGINAL_OPCODE) {
-                Log("[LB - Direct] Verified: Found JNZ instruction at expected location");
+                LOG_VERBOSE("[LB - Direct] Verified: Found JNZ instruction at expected location");
             } else {
-                Log("[LB - Direct] WARNING: Expected JNZ (0x75), found 0x" << std::hex << (int)s_originalBytes[0] << std::dec);
+                LOG_WARNING("[LB - Direct] Expected JNZ (0x75), found 0x" << std::hex << (int)s_originalBytes[0] << std::dec);
             }
         }
 
         s_state.isInitialized = true;
-        Log("[LB - Direct] LeaderboardDirect initialized successfully!");
+        LOG_VERBOSE("[LB - Direct] LeaderboardDirect initialized successfully!");
         
         return true;
     }
@@ -257,7 +256,7 @@ namespace LeaderboardDirect {
         s_completionCallback = nullptr;
         s_baseAddress = 0;
 
-        Log("[LB - Direct] LeaderboardDirect shut down");
+        LOG_VERBOSE("[LB - Direct] LeaderboardDirect shut down");
     }
 
     // PATCH MANAGEMENT
@@ -268,7 +267,7 @@ namespace LeaderboardDirect {
         }
 
         if (s_state.isPatchApplied) {
-            Log("[LB - Direct] Patch already applied");
+            LOG_VERBOSE("[LB - Direct] Patch already applied");
             return true;
         }
 
@@ -283,7 +282,7 @@ namespace LeaderboardDirect {
         DWORD oldProtect;
         if (!VirtualProtect(patchAddr, 1, PAGE_EXECUTE_READWRITE, &oldProtect)) {
             s_state.lastError = "VirtualProtect failed";
-            Log("[LB - Direct] ERROR: " << s_state.lastError);
+            LOG_ERROR("[LB - Direct] " << s_state.lastError);
             return false;
         }
 
@@ -297,8 +296,8 @@ namespace LeaderboardDirect {
         FlushInstructionCache(GetCurrentProcess(), patchAddr, 1);
 
         s_state.isPatchApplied = true;
-        Log("[LB - Direct] *** PATCH APPLIED ***");
-        Log("[LB - Direct] Track manager check bypassed - can fetch any leaderboard!");
+        LOG_INFO("[LB - Direct] *** PATCH APPLIED ***");
+        LOG_INFO("[LB - Direct] Track manager check bypassed - can fetch any leaderboard!");
         
         return true;
     }
@@ -309,7 +308,7 @@ namespace LeaderboardDirect {
         }
 
         if (!s_state.isPatchApplied) {
-            Log("[LB - Direct] Patch not applied");
+            LOG_VERBOSE("[LB - Direct] Patch not applied");
             return true;
         }
 
@@ -324,7 +323,7 @@ namespace LeaderboardDirect {
         DWORD oldProtect;
         if (!VirtualProtect(patchAddr, 1, PAGE_EXECUTE_READWRITE, &oldProtect)) {
             s_state.lastError = "VirtualProtect failed";
-            Log("[LB - Direct] ERROR: " << s_state.lastError);
+            LOG_ERROR("[LB - Direct] " << s_state.lastError);
             return false;
         }
 
@@ -338,8 +337,8 @@ namespace LeaderboardDirect {
         FlushInstructionCache(GetCurrentProcess(), patchAddr, 1);
 
         s_state.isPatchApplied = false;
-        Log("[LB - Direct] *** PATCH REMOVED ***");
-        Log("[LB - Direct] Track manager check restored");
+        LOG_INFO("[LB - Direct] *** PATCH REMOVED ***");
+        LOG_INFO("[LB - Direct] Track manager check restored");
         
         return true;
     }
@@ -352,7 +351,7 @@ namespace LeaderboardDirect {
     bool FetchLeaderboard(const FetchRequest& request) {
         if (!s_state.isInitialized) {
             s_state.lastError = "Not initialized";
-            Log("[LB - Direct] ERROR: " << s_state.lastError);
+            LOG_ERROR("[LB - Direct] " << s_state.lastError);
             return false;
         }
 
@@ -360,17 +359,17 @@ namespace LeaderboardDirect {
         void* service = GetLeaderboardService();
         if (!service) {
             s_state.lastError = "No leaderboard service - open any leaderboard first to initialize";
-            Log("[LB - Direct] ERROR: " << s_state.lastError);
+            LOG_ERROR("[LB - Direct] " << s_state.lastError);
             return false;
         }
 
-        Log("[LB - Direct] ========================================");
-        Log("[LB - Direct] FETCHING LEADERBOARD");
-        Log("[LB - Direct] Track ID: " << request.trackId);
-        Log("[LB - Direct] Start Index: " << request.startIndex);
-        Log("[LB - Direct] Leaderboard Type: " << request.leaderboardType);
-        Log("[LB - Direct] Patch Applied: " << (s_state.isPatchApplied ? "YES" : "NO"));
-        Log("[LB - Direct] ========================================");
+        LOG_INFO("[LB - Direct] ========================================");
+        LOG_INFO("[LB - Direct] FETCHING LEADERBOARD");
+        LOG_INFO("[LB - Direct] Track ID: " << request.trackId);
+        LOG_VERBOSE("[LB - Direct] Start Index: " << request.startIndex);
+        LOG_VERBOSE("[LB - Direct] Leaderboard Type: " << request.leaderboardType);
+        LOG_INFO("[LB - Direct] Patch Applied: " << (s_state.isPatchApplied ? "YES" : "NO"));
+        LOG_INFO("[LB - Direct] ========================================");
 
         // Store current request
         s_state.currentRequest = request;
@@ -384,7 +383,7 @@ namespace LeaderboardDirect {
             char c = request.trackId[i];
             if (c < '0' || c > '9') {
                 s_state.lastError = "Invalid track ID (not a number)";
-                Log("[LB - Direct] ERROR: " << s_state.lastError);
+                LOG_ERROR("[LB - Direct] " << s_state.lastError);
                 s_state.isFetching = false;
                 return false;
             }
@@ -393,7 +392,7 @@ namespace LeaderboardDirect {
 
         // Set track ID at service+0xc (this gets read by case 4 and 5 in the switch)
         *(int*)((char*)service + 0xc) = trackIdInt;
-        Log("[LB - Direct] Set track ID at service+0xc: " << trackIdInt);
+        LOG_VERBOSE("[LB - Direct] Set track ID at service+0xc: " << trackIdInt);
 
         // From debug hook, we learned:
         // - filterString format is "sp_new_ugc:TRACKID"
@@ -405,8 +404,8 @@ namespace LeaderboardDirect {
         if (dataPtr && *dataPtr) {
             int* dataValue = *dataPtr;  // This is piVar2 from RE
             
-            Log("[LB - Direct] dataPtr address: 0x" << std::hex << (uintptr_t)dataPtr << std::dec);
-            Log("[LB - Direct] dataValue (*dataPtr): 0x" << std::hex << (uintptr_t)dataValue << std::dec);
+            LOG_VERBOSE("[LB - Direct] dataPtr address: 0x" << std::hex << (uintptr_t)dataPtr << std::dec);
+            LOG_VERBOSE("[LB - Direct] dataValue (*dataPtr): 0x" << std::hex << (uintptr_t)dataValue << std::dec);
             
             // Build the filter string "sp_new_ugc:TRACKID"
             std::string filterStr = "sp_new_ugc:" + request.trackId;
@@ -421,18 +420,18 @@ namespace LeaderboardDirect {
             
             // Set the filter string pointer at dataValue[3] (offset 0xC)
             int** filterStringLoc = (int**)(dataValue + 3);
-            Log("[LB - Direct] filterStringLoc (dataValue+3): 0x" << std::hex << (uintptr_t)filterStringLoc << std::dec);
+            LOG_VERBOSE("[LB - Direct] filterStringLoc (dataValue+3): 0x" << std::hex << (uintptr_t)filterStringLoc << std::dec);
             
             // Store pointer (leaking old string for now)
             *filterStringLoc = newString;
-            Log("[LB - Direct] Set filter string: \"" << filterStr << "\"");
+            LOG_VERBOSE("[LB - Direct] Set filter string: \"" << filterStr << "\"");
             
             // Set param4 (dataValue[5]) to our track ID
             dataValue[5] = trackIdInt;
-            Log("[LB - Direct] Set dataValue[5] (param4) to track ID: " << trackIdInt);
+            LOG_VERBOSE("[LB - Direct] Set dataValue[5] (param4) to track ID: " << trackIdInt);
             
         } else {
-            Log("[LB - Direct] WARNING: dataPtr is null, cannot set track ID");
+            LOG_WARNING("[LB - Direct] dataPtr is null, cannot set track ID");
         }
 
         // Set flags before calling - this tells our hook to capture the results
@@ -441,14 +440,14 @@ namespace LeaderboardDirect {
         s_state.fetchedEntries.clear();
 
         // Call RequestLeaderboardData
-        Log("[LB - Direct] Calling RequestLeaderboardData...");
-        Log("[LB - Direct]   this = 0x" << std::hex << (uintptr_t)service << std::dec);
-        Log("[LB - Direct]   type = " << request.leaderboardType);
-        Log("[LB - Direct]   startIndex = " << request.startIndex);
+        LOG_VERBOSE("[LB - Direct] Calling RequestLeaderboardData...");
+        LOG_VERBOSE("[LB - Direct]   this = 0x" << std::hex << (uintptr_t)service << std::dec);
+        LOG_VERBOSE("[LB - Direct]   type = " << request.leaderboardType);
+        LOG_VERBOSE("[LB - Direct]   startIndex = " << request.startIndex);
 
         bool result = CallRequestLeaderboardData(service, request.leaderboardType, request.startIndex);
         
-        Log("[LB - Direct] RequestLeaderboardData returned: " << (result ? "true" : "false"));
+        LOG_VERBOSE("[LB - Direct] RequestLeaderboardData returned: " << (result ? "true" : "false"));
 
         if (!result) {
             if (!s_state.isPatchApplied) {
@@ -456,12 +455,12 @@ namespace LeaderboardDirect {
             } else {
                 s_state.lastError = "RequestLeaderboardData failed even with patch";
             }
-            Log("[LB - Direct] ERROR: " << s_state.lastError);
+            LOG_ERROR("[LB - Direct] " << s_state.lastError);
             s_state.isFetching = false;
             return false;
         }
 
-        Log("[LB - Direct] Request sent! Watch leaderboard_scanner for results...");
+        LOG_INFO("[LB - Direct] Request sent! Watch leaderboard_scanner for results...");
         s_state.isFetching = false;
         
         return true;
@@ -525,7 +524,7 @@ namespace LeaderboardDirect {
         bool f10IsPressed = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;
 
         if (f10IsPressed && !f10WasPressed) {
-            Log("\n[LB - Direct] F10 pressed - Testing leaderboard fetch...");
+            LOG_INFO("\n[LB - Direct] F10 pressed - Testing leaderboard fetch...");
             
             FetchRequest request;
             request.trackId = "221120";
@@ -542,7 +541,7 @@ namespace LeaderboardDirect {
         bool f11IsPressed = (GetAsyncKeyState(VK_F11) & 0x8000) != 0;
 
         if (f11IsPressed && !f11WasPressed) {
-            Log("\n[LB - Direct] F11 pressed - Toggling patch...");
+            LOG_INFO("\n[LB - Direct] F11 pressed - Toggling patch...");
             
             if (s_state.isPatchApplied) {
                 RemovePatch();

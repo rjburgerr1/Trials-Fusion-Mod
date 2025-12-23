@@ -96,7 +96,8 @@ namespace FeedFetcher {
             LogToFile("ERROR: Failed to enable hooks");
             return false;
         }
-        LogToFile("Feed Fetcher initialized successfully");
+        // Use LOG_VERBOSE instead of LogToFile for initialization message
+        std::cout << "Feed Fetcher initialized successfully" << std::endl;
         return true;
     }
 
