@@ -966,7 +966,7 @@ namespace Tracks {
         }
 
         g_autoScrollEnabled = false;
-        LOG_INFO("[Worker] Auto-scroll stopped");
+        LOG_VERBOSE("[Worker] Auto-scroll stopped");
     }
 
     // Worker thread function
@@ -1346,10 +1346,10 @@ namespace Tracks {
     bool LoadSearchTerms(const std::string& filepath) {
         bool success = LoadSearchTermsFromFile(filepath);
         if (success) {
-            std::cout << "\n[Track] Search terms loaded successfully!" << std::endl;
+            LOG_VERBOSE("[Track] Search terms loaded successfully!");
         }
         else {
-            std::cout << "\n[Track] Failed to load search terms from: " << filepath << std::endl;
+            LOG_VERBOSE("[Track] Failed to load search terms from:" + filepath);
         }
         return success;
     }

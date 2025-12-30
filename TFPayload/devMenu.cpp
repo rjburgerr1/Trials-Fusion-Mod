@@ -11,52 +11,55 @@
 // Global instance
 DevMenu* g_DevMenu = nullptr;
 
-std::shared_ptr<TweakableFloat> CreateSyncedFloat(int id, const std::string& name, 
-                                                    float defaultVal, float minVal, float maxVal) {
+std::shared_ptr<TweakableFloat> CreateSyncedFloat(int id, const std::string& name,
+    float defaultVal, float minVal, float maxVal) {
     auto tweakable = std::make_shared<TweakableFloat>(id, name, defaultVal, minVal, maxVal);
-    
+
     // Auto-sync to game memory on change
     tweakable->SetOnChangeCallback([id, name](float newValue) {
         LOG_VERBOSE("Float changed: " << name << " (ID=" << id << ") = " << newValue);
         if (!DevMenuSync::WriteValue<float>(id, newValue)) {
             LOG_WARNING("Failed to write Float ID=" << id << " to game memory!");
-        } else {
+        }
+        else {
             LOG_VERBOSE("Successfully wrote Float ID=" << id << " to game memory");
         }
-    });
-    
+        });
+
     return tweakable;
 }
 
 std::shared_ptr<TweakableInt> CreateSyncedInt(int id, const std::string& name,
-                                                int defaultVal, int minVal, int maxVal) {
+    int defaultVal, int minVal, int maxVal) {
     auto tweakable = std::make_shared<TweakableInt>(id, name, defaultVal, minVal, maxVal);
-    
+
     tweakable->SetOnChangeCallback([id, name](int newValue) {
         LOG_VERBOSE("Int changed: " << name << " (ID=" << id << ") = " << newValue);
         if (!DevMenuSync::WriteValue<int>(id, newValue)) {
             LOG_WARNING("Failed to write Int ID=" << id << " to game memory!");
-        } else {
+        }
+        else {
             LOG_VERBOSE("Successfully wrote Int ID=" << id << " to game memory");
         }
-    });
-    
+        });
+
     return tweakable;
 }
 
 std::shared_ptr<TweakableBool> CreateSyncedBool(int id, const std::string& name, bool defaultVal) {
     auto tweakable = std::make_shared<TweakableBool>(id, name, defaultVal);
-    
+
     tweakable->SetOnChangeCallback([id, name](bool newValue) {
         LOG_VERBOSE("Bool changed: " << name << " (ID=" << id << ") = " << (newValue ? "true" : "false"));
         // Game uses int for bool (0 or 1)
         if (!DevMenuSync::WriteValue<int>(id, newValue ? 1 : 0)) {
             LOG_WARNING("Failed to write Bool ID=" << id << " to game memory!");
-        } else {
+        }
+        else {
             LOG_VERBOSE("Successfully wrote Bool ID=" << id << " to game memory");
         }
-    });
-    
+        });
+
     return tweakable;
 }
 
@@ -230,7 +233,8 @@ DevMenu::~DevMenu() {
 }
 
 void DevMenu::Initialize() {
-    std::cout << "[DevMenu] Initializing..." << std::endl;
+    LOG_VERBOSE("[DevMenu] Initializing...");
+
     // Initialize all tweakable categories
     InitializeBikeSound();
     InitializeDynamicMusic();
@@ -267,7 +271,8 @@ void DevMenu::Initialize() {
     InitializeGarbageCollector();
     InitializeSettings();
     InitializeDebugLocalization();
-    std::cout << "[DevMenu] Initialized with " << m_rootFolders.size() << " root folders" << std::endl;
+    InitializeMod();
+    LOG_VERBOSE("[DevMenu] Initialized with " << m_rootFolders.size() << " root folders");
 }
 
 void DevMenu::Render() {
@@ -365,8 +370,12 @@ std::shared_ptr<TweakableFolder> DevMenu::GetFolder(int id) {
 }
 
 void DevMenu::SaveConfig(const std::string& filename) {
+    LOG_INFO("[DevMenu] Saving config to " << filename);
     std::ofstream file(filename);
-    if (!file.is_open()) return;
+    if (!file.is_open()) {
+        LOG_ERROR("[DevMenu] Failed to open file for saving: " << filename);
+        return;
+    }
 
     for (auto& pair : m_tweakableMap) {
         auto item = pair.second;
@@ -393,12 +402,18 @@ void DevMenu::SaveConfig(const std::string& filename) {
     }
 
     file.close();
+    LOG_INFO("[DevMenu] Config saved successfully");
 }
 
 void DevMenu::LoadConfig(const std::string& filename) {
+    LOG_INFO("[DevMenu] Loading config from " << filename);
     std::ifstream file(filename);
-    if (!file.is_open()) return;
+    if (!file.is_open()) {
+        LOG_WARNING("[DevMenu] Config file not found: " << filename);
+        return;
+    }
 
+    int loadedCount = 0;
     std::string line;
     while (std::getline(file, line)) {
         std::istringstream iss(line);
@@ -414,26 +429,33 @@ void DevMenu::LoadConfig(const std::string& filename) {
                 case TweakableType::Float: {
                     auto floatItem = std::static_pointer_cast<TweakableFloat>(item);
                     floatItem->SetValue(value);
+                    loadedCount++;
                     break;
                 }
                 case TweakableType::Int: {
                     auto intItem = std::static_pointer_cast<TweakableInt>(item);
                     intItem->SetValue(static_cast<int>(value));
+                    loadedCount++;
                     break;
                 }
                 case TweakableType::Bool: {
                     auto boolItem = std::static_pointer_cast<TweakableBool>(item);
                     boolItem->SetValue(value != 0.0f);
+                    loadedCount++;
                     break;
                 }
                 default:
                     break;
                 }
             }
+            else {
+                LOG_VERBOSE("[DevMenu] Tweakable ID " << id << " not found in map");
+            }
         }
     }
 
     file.close();
+    LOG_INFO("[DevMenu] Config loaded: " << loadedCount << " values restored");
 }
 
 void DevMenu::RegisterTweakable(std::shared_ptr<TweakableItem> item) {
@@ -1497,10 +1519,10 @@ void DevMenu::InitializeRider() {
     // Properties subfolder
     auto properties = std::make_shared<TweakableFolder>(216, "Properties");
     auto massFactor = CreateSyncedFloat(217, "MassFactor", 1.0f, 0.0f, 10.0f);
-    
+
     RegisterTweakable(massFactor);
     properties->AddChild(massFactor);
-    
+
     RegisterTweakable(properties);
     rider->AddChild(properties);
 
@@ -2954,7 +2976,7 @@ void DevMenu::InitializeDebugLocalization() {
 
 // Function addresses from Ghidra
 typedef void* (__fastcall* InitializeDevMenuDataFunc)(int param_1);
-typedef void (__cdecl* BuildTweakablesListFunc)(void* this_ptr, void* outputArray, int categoryId);
+typedef void(__cdecl* BuildTweakablesListFunc)(void* this_ptr, void* outputArray, int categoryId);
 
 const uintptr_t INIT_DEV_MENU_DATA_ADDR = 0x00cef440;
 const uintptr_t BUILD_TWEAKABLES_LIST_ADDR = 0x00d623e0;
@@ -2973,7 +2995,8 @@ static bool SafeReadName(char* namePtr, char* buffer, int bufferSize) {
             return true;
         }
         return false;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }
@@ -2986,7 +3009,8 @@ static bool SafeReadBoolValue(void** valuePtr, int* outValue) {
             return true;
         }
         return false;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }
@@ -2999,7 +3023,8 @@ static bool SafeReadIntValue(void** valuePtr, int* outValue) {
             return true;
         }
         return false;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }
@@ -3012,7 +3037,8 @@ static bool SafeReadFloatValue(void** valuePtr, float* outValue) {
             return true;
         }
         return false;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }
@@ -3022,7 +3048,7 @@ static void DumpCategoryRecursive(void* devMenuData, uintptr_t buildTweakablesLi
     int outputArray[3] = { 0, 2, 0 };
     void* arrayData = malloc(8);
     outputArray[2] = (int)arrayData;
-    
+
     __asm {
         mov ecx, devMenuData
         lea eax, outputArray
@@ -3030,113 +3056,143 @@ static void DumpCategoryRecursive(void* devMenuData, uintptr_t buildTweakablesLi
         push eax
         call buildTweakablesListAddr
     }
-    
+
     LOG_VERBOSE("Category " << categoryId << " (depth " << depth << "): Found " << outputArray[0] << " items");
-    
+
     void** tweakablePointers = (void**)outputArray[2];
-    
+
     for (int i = 0; i < outputArray[0]; i++) {
         void* tweakablePtr = tweakablePointers[i];
-        
+
         if (tweakablePtr != nullptr) {
             unsigned int* data = (unsigned int*)tweakablePtr;
             int type = data[1];  // +0x04
             int id = data[2];     // +0x08
-            char* namePtr = *(char**)(data + 0x14/4);
-            
+            char* namePtr = *(char**)(data + 0x14 / 4);
+
             const char* typeStr = "Unknown";
             if (type == 0) typeStr = "Folder";
             else if (type == 1) typeStr = "Bool";
             else if (type == 2) typeStr = "Int";
             else if (type == 3) typeStr = "Float";
-            
+
             // Build indentation string
             std::string indent(depth * 2, ' ');
-            
+
             // Try to read the name safely
             char nameBuffer[256];
             if (SafeReadName(namePtr, nameBuffer, sizeof(nameBuffer))) {
                 std::string output = indent + nameBuffer + " (" + typeStr + ", ID=" + std::to_string(id) + ")";
-                
+
                 // Show value for non-folders
                 if (type >= 1 && type <= 3) {
-                    void** valuePtr = (void**)(data + 0x1bc/4);
-                    
+                    void** valuePtr = (void**)(data + 0x1bc / 4);
+
                     if (type == 1) {  // Bool
                         int value;
                         if (SafeReadBoolValue(valuePtr, &value)) {
                             output += " = " + std::string(value ? "true" : "false");
-                        } else {
+                        }
+                        else {
                             output += " = (read failed)";
                         }
-                    } else if (type == 2) {  // Int
+                    }
+                    else if (type == 2) {  // Int
                         int value;
                         if (SafeReadIntValue(valuePtr, &value)) {
                             output += " = " + std::to_string(value);
-                        } else {
+                        }
+                        else {
                             output += " = (read failed)";
                         }
-                    } else if (type == 3) {  // Float
+                    }
+                    else if (type == 3) {  // Float
                         float value;
                         if (SafeReadFloatValue(valuePtr, &value)) {
                             char floatBuf[32];
                             snprintf(floatBuf, sizeof(floatBuf), " = %.3f", value);
                             output += floatBuf;
-                        } else {
+                        }
+                        else {
                             output += " = (read failed)";
                         }
                     }
                 }
-                
+
                 LOG_INFO(output);
-                
+
                 // Recursively dump if it's a folder
                 if (type == 0) {
                     DumpCategoryRecursive(devMenuData, buildTweakablesListAddr, id, depth + 1);
                 }
-            } else {
+            }
+            else {
                 std::string failMsg = indent + "(name read failed, ID=" + std::to_string(id) + ")";
                 LOG_INFO(failMsg);
             }
         }
     }
-    
+
     free(arrayData);
 }
 
 void DevMenu::DumpTweakablesData() {
     LOG_INFO("===== DUMPING ALL TWEAKABLES (RECURSIVE) =====");
-    
+
     uintptr_t baseAddress = (uintptr_t)GetModuleHandle(NULL);
-    
+
     // Get pointer to global dev menu data
     void** globalDevMenuDataPtr = (void**)(baseAddress + GLOBAL_DEV_MENU_DATA - 0x700000);
     void* devMenuData = *globalDevMenuDataPtr;
-    
+
     LOG_VERBOSE("Base address: 0x" << std::hex << baseAddress);
     LOG_VERBOSE("Global dev menu data ptr: 0x" << std::hex << (uintptr_t)globalDevMenuDataPtr);
-    
+
     if (devMenuData == nullptr) {
         LOG_INFO("Initializing dev menu data...");
         InitializeDevMenuDataFunc initDevMenuData = (InitializeDevMenuDataFunc)(baseAddress + INIT_DEV_MENU_DATA_ADDR - 0x700000);
         devMenuData = initDevMenuData(0);
         *globalDevMenuDataPtr = devMenuData;
     }
-    
+
     if (devMenuData == nullptr) {
         LOG_ERROR("Failed to initialize dev menu data!");
         return;
     }
-    
+
     LOG_INFO("Dev menu data @ 0x" << std::hex << (uintptr_t)devMenuData);
-    
+
     uintptr_t buildTweakablesListAddr = baseAddress + BUILD_TWEAKABLES_LIST_ADDR - 0x700000;
     LOG_VERBOSE("BuildTweakablesList @ 0x" << std::hex << buildTweakablesListAddr);
     LOG_INFO("");
-    
+
     // Start recursive dump from category 0 (top level)
     DumpCategoryRecursive(devMenuData, buildTweakablesListAddr, 0, 0);
-    
+
     LOG_INFO("");
     LOG_INFO("===== END DUMP =====");
+}
+
+// ============================================================================
+// MOD Category - Custom Modded Values (not synced to game tweakables)
+// ============================================================================
+
+void DevMenu::InitializeMod() {
+    auto mod = std::make_shared<TweakableFolder>(10000, "Mod");
+
+    // Race Timeout slider
+    auto raceTimeout = std::make_shared<TweakableInt>(
+        10001,
+        "Race Time Limit (minutes)",
+        30,     // Default: 30 minutes
+        1,      // Min: 1 minute
+        240     // Max: 4 hours
+    );
+
+
+    RegisterTweakable(raceTimeout);
+    mod->AddChild(raceTimeout);
+
+    RegisterTweakable(mod);
+    m_rootFolders.push_back(mod);
 }

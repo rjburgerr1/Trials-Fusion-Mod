@@ -241,6 +241,9 @@ private:
     void InitializeSettings();
     void InitializeDebugLocalization();
     
+    // NEW: Mod-specific tweakables (not synced to game)
+    void InitializeMod();
+    
     // Helper functions
     void RegisterTweakable(std::shared_ptr<TweakableItem> item);
     bool PassesFilter(const std::string& name);

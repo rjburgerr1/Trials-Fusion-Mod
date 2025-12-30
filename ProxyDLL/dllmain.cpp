@@ -3,6 +3,7 @@
 #include <winuser.h>
 #include "ProxyDbgcore.h"
 #include "Overlay.h"
+#include "SkipIntro.h"
 #include <TlHelp32.h>
 
 // Debug Console
@@ -110,6 +111,14 @@ DWORD WINAPI PayloadManagerThread()
     AllocateConsole();
 
     std::cout << "[ProxyDLL] Starting payload manager..." << std::endl;
+
+    // Initialize skip intro EARLY (before game loads videos)
+    std::cout << "[ProxyDLL] Initializing skip intro..." << std::endl;
+    if (SkipIntro::Initialize()) {
+        std::cout << "[ProxyDLL] Skip intro initialized!" << std::endl;
+    } else {
+        std::cout << "[ProxyDLL] Skip intro FAILED to initialize" << std::endl;
+    }
 
     // Initialize D3D11 hook
     std::cout << "[ProxyDLL] Initializing D3D11 hook..." << std::endl;

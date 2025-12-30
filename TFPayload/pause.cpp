@@ -1,9 +1,8 @@
 #include "pch.h"
 #include "pause.h"
+#include "logging.h"
 #include <iostream>
 #include <Windows.h>
-
-#define Log(...) std::cout << __VA_ARGS__ << std::endl
 
 namespace Pause {
     // Function pointer types matching the game's calling convention
@@ -27,12 +26,12 @@ namespace Pause {
 
     bool Initialize(uintptr_t baseAddress) {
         if (g_initialized) {
-            Log("[Pause] Already initialized");
+            LOG_VERBOSE("[Pause] Already initialized");
             return true;
         }
 
         if (baseAddress == 0) {
-            Log("[Pause ERROR] Invalid base address");
+            LOG_ERROR("[Pause] Invalid base address");
             return false;
         }
 
@@ -45,7 +44,7 @@ namespace Pause {
 
         // Verify addresses are valid
         if (IsBadReadPtr(g_globalStructPtr, sizeof(void*))) {
-            Log("[Pause ERROR] Invalid global struct pointer at " << std::hex << (baseAddress + GLOBAL_STRUCT_RVA));
+            LOG_ERROR("[Pause] Invalid global struct pointer at 0x" << std::hex << (baseAddress + GLOBAL_STRUCT_RVA));
             return false;
         }
 
@@ -58,7 +57,7 @@ namespace Pause {
             return;
         }
 
-        Log("[Pause] Shutting down...");
+        LOG_VERBOSE("[Pause] Shutting down...");
         
         g_initialized = false;
         g_pauseCallback = nullptr;
@@ -69,14 +68,14 @@ namespace Pause {
 
     void TogglePause() {
         if (!g_initialized) {
-            Log("[Pause ERROR] Not initialized!");
+            LOG_ERROR("[Pause] Not initialized!");
             return;
         }
 
         // Get the InGameService pointer from the global structure
         void* globalStruct = *g_globalStructPtr;
         if (!globalStruct || IsBadReadPtr(globalStruct, sizeof(void*))) {
-            Log("[Pause ERROR] Invalid global structure pointer");
+            LOG_ERROR("[Pause] Invalid global structure pointer");
             return;
         }
 
@@ -84,7 +83,7 @@ namespace Pause {
         void* inGameServicePtr = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(globalStruct) + 0x174);
         
         if (!inGameServicePtr || IsBadReadPtr(inGameServicePtr, 0x2f0)) {
-            Log("[Pause ERROR] Invalid InGameService pointer");
+            LOG_ERROR("[Pause] Invalid InGameService pointer");
             return;
         }
 
@@ -94,11 +93,11 @@ namespace Pause {
         // Toggle based on ACTUAL game state
         if (currentPauseFlag == 0) {
             // Game is not paused, so pause it
-            Log("[Pause] Pause Game");
+            LOG_VERBOSE("[Pause] Pause Game");
             g_pauseCallback(inGameServicePtr);
         } else {
             // Game is paused, so resume it
-            Log("[Pause] Resume Game");
+            LOG_VERBOSE("[Pause] Resume Game");
             g_resumeCallback(inGameServicePtr);
         }
 
@@ -116,7 +115,7 @@ namespace Pause {
 
         // Only trigger on key press (not held)
         if (key0IsPressed && !g_key0WasPressed) {
-            Log("[Pause] '0' key pressed - toggling pause");
+            LOG_VERBOSE("[Pause] '0' key pressed - toggling pause");
             TogglePause();
         }
 

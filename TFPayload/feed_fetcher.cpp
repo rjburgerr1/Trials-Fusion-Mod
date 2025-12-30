@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "feed_fetcher.h"
+#include "logging.h"
 #include <MinHook.h>
 #include <fstream>
 #include <sstream>
@@ -27,35 +28,17 @@ namespace FeedFetcher {
     typedef int(__thiscall* GetTrackByIndexFromCache_t)(void* thisPtr, int param_1, int param_2, char* param_3);
     static GetTrackByIndexFromCache_t g_originalGetTrackByIndex = nullptr;
 
-    // HELPERS
-    
-    void LogToFile(const std::string& message) {
-        std::ofstream logFile("feed_fetcher_log.txt", std::ios::app);
-        if (logFile.is_open()) {
-            logFile << message << std::endl;
-            logFile.close();
-        }
-        // Also print to console
-        std::cout << message << std::endl;
-    }
-
-    // HOOKS
-
     // Hook for GetTrackByIndexFromCache
     int __fastcall Hook_GetTrackByIndexFromCache(void* thisPtr, void* edx, int param_1, int param_2, char* param_3) {
         if (g_state.isFetching) {
-            std::stringstream ss;
-            ss << "[GetTrackByIndexFromCache] UI requesting index=" << param_2;
-            LogToFile(ss.str());
+            LOG_VERBOSE("[GetTrackByIndexFromCache] UI requesting index=" << param_2);
         }
         
         // Call original function
         int result = g_originalGetTrackByIndex(thisPtr, param_1, param_2, param_3);
         
         if (g_state.isFetching && result != 0) {
-            std::stringstream ss;
-            ss << "[GetTrackByIndexFromCache] Returned valid data for index=" << param_2;
-            LogToFile(ss.str());
+            LOG_VERBOSE("[GetTrackByIndexFromCache] Returned valid data for index=" << param_2);
         }
         
         return result;
@@ -65,7 +48,7 @@ namespace FeedFetcher {
     bool Initialize(DWORD_PTR baseAddress) {
         g_baseAddress = baseAddress;
         
-        LogToFile("Feed Fetcher Initializing");
+        LOG_VERBOSE("[FeedFetcher] Initializing");
         
         // Calculate absolute addresses
         DWORD_PTR getTrackByIndexAddr = baseAddress + RVA_GET_TRACK_BY_INDEX;
@@ -75,34 +58,30 @@ namespace FeedFetcher {
         uint32_t receivedStartIndex = g_lastFetchedStartIndex;
         uint32_t receivedCount = g_lastFetchedCount;
         
-        std::stringstream ss;
-        ss << "GetTrackByIndexFromCache at: 0x" << std::hex << getTrackByIndexAddr;
-        LogToFile(ss.str());
-        ss.str("");
-        ss << "EnqueueTrackFetchTask at: 0x" << std::hex << enqueueTrackFetchAddr;
-        LogToFile(ss.str());
+        LOG_VERBOSE("[FeedFetcher] GetTrackByIndexFromCache at: 0x" << std::hex << getTrackByIndexAddr);
+        LOG_VERBOSE("[FeedFetcher] EnqueueTrackFetchTask at: 0x" << std::hex << enqueueTrackFetchAddr);
         
         // Hook GetTrackByIndexFromCache for logging
         if (MH_CreateHook(
             reinterpret_cast<LPVOID>(getTrackByIndexAddr),
             &Hook_GetTrackByIndexFromCache,
             reinterpret_cast<LPVOID*>(&g_originalGetTrackByIndex)) != MH_OK) {
-            LogToFile("ERROR: Failed to create hook for GetTrackByIndexFromCache");
+            LOG_ERROR("[FeedFetcher] Failed to create hook for GetTrackByIndexFromCache");
             return false;
         }
         
         // Enable hooks
         if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK) {
-            LogToFile("ERROR: Failed to enable hooks");
+            LOG_ERROR("[FeedFetcher] Failed to enable hooks");
             return false;
         }
-        // Use LOG_VERBOSE instead of LogToFile for initialization message
-        std::cout << "Feed Fetcher initialized successfully" << std::endl;
+        
+        LOG_VERBOSE("[FeedFetcher] Initialized successfully");
         return true;
     }
 
     void Shutdown() {
-        LogToFile("Feed Fetcher shutting down");
+        LOG_VERBOSE("[FeedFetcher] Shutting down");
         
         if (g_state.isFetching) {
             StopFetch();
@@ -115,7 +94,7 @@ namespace FeedFetcher {
 
     bool StartFetch(const FetchConfig& config) {
         if (g_state.isFetching) {
-            LogToFile("ERROR: Already fetching");
+            LOG_ERROR("[FeedFetcher] Already fetching");
             return false;
         }
         
@@ -127,10 +106,8 @@ namespace FeedFetcher {
         g_state.tracksPerBatch = config.batchSize;
         g_state.fetchedTracks.clear();
         
-        std::stringstream ss;
-        ss << "Starting fetch: indices " << config.startIndex << "-" << config.endIndex 
-           << ", batch size=" << config.batchSize;
-        LogToFile(ss.str());
+        LOG_INFO("[FeedFetcher] Starting fetch: indices " << config.startIndex << "-" << config.endIndex 
+           << ", batch size=" << config.batchSize);
         
         std::cout << "\n=== FEED FETCHER STARTED ===" << std::endl;
         std::cout << "Fetching tracks " << config.startIndex << "-" << config.endIndex << std::endl;
@@ -147,10 +124,8 @@ namespace FeedFetcher {
         
         g_state.isFetching = false;
         
-        std::stringstream ss;
-        ss << "Stopped fetching at index " << g_state.currentIndex 
-           << ", total tracks fetched: " << g_state.fetchedTracks.size();
-        LogToFile(ss.str());
+        LOG_INFO("[FeedFetcher] Stopped fetching at index " << g_state.currentIndex 
+           << ", total tracks fetched: " << g_state.fetchedTracks.size());
         
         std::cout << "\n=== FEED FETCHER STOPPED ===" << std::endl;
         std::cout << "Fetched " << g_state.fetchedTracks.size() << " tracks" << std::endl;
@@ -182,7 +157,7 @@ namespace FeedFetcher {
         
         std::ofstream file(filepath);
         if (!file.is_open()) {
-            LogToFile("ERROR: Could not open output file: " + filepath);
+            LOG_ERROR("[FeedFetcher] Could not open output file: " << filepath);
             return;
         }
         
@@ -203,10 +178,7 @@ namespace FeedFetcher {
         
         file.close();
         
-        std::stringstream ss;
-        ss << "Saved " << g_state.fetchedTracks.size() << " tracks to " << filepath;
-        LogToFile(ss.str());
-        std::cout << ss.str() << std::endl;
+        LOG_INFO("[FeedFetcher] Saved " << g_state.fetchedTracks.size() << " tracks to " << filepath);
     }
 
     const std::vector<TrackMetadata>& GetFetchedTracks() {
@@ -219,16 +191,14 @@ namespace FeedFetcher {
             return false;
         }
         
-        std::stringstream ss;
-        ss << "[FeedFetcher] *** Network fetch intercepted: startIndex=" << startIndex << ", count=" << count;
-        LogToFile(ss.str());
+        LOG_VERBOSE("[FeedFetcher] *** Network fetch intercepted: startIndex=" << startIndex << ", count=" << count);
         
         // Calculate where we should be in our custom range
         int targetIndex = g_state.currentIndex;
         
         // Check if we've finished our range
         if (targetIndex > g_config.endIndex) {
-            LogToFile("[FeedFetcher] Reached end of fetch range, stopping");
+            LOG_VERBOSE("[FeedFetcher] Reached end of fetch range, stopping");
             StopFetch();
             return false;
         }
@@ -236,7 +206,7 @@ namespace FeedFetcher {
         // Calculate how many tracks remain in our target range
         int remaining = g_config.endIndex - targetIndex + 1;
         if (remaining <= 0) {
-            LogToFile("[FeedFetcher] No tracks remaining, stopping");
+            LOG_VERBOSE("[FeedFetcher] No tracks remaining, stopping");
             StopFetch();
             return false;
         }
@@ -244,9 +214,7 @@ namespace FeedFetcher {
         // Determine fetch count (up to batch size or remaining)
         uint32_t fetchCount = (std::min)((uint32_t)remaining, (uint32_t)g_config.batchSize);
         
-        ss.str("");
-        ss << "[FeedFetcher] *** Redirecting network fetch: " << startIndex << " -> " << targetIndex << " (count=" << fetchCount << ")";
-        LogToFile(ss.str());
+        LOG_VERBOSE("[FeedFetcher] *** Redirecting network fetch: " << startIndex << " -> " << targetIndex << " (count=" << fetchCount << ")");
         
         // Store what we fetched so we can copy it later
         g_lastFetchedStartIndex = targetIndex;
@@ -276,31 +244,25 @@ namespace FeedFetcher {
         uint32_t receivedCount = g_lastFetchedCount;
         
         if (receivedCount == 0) {
-            LogToFile("[OnTracksReceived] No tracks were fetched, nothing to copy");
+            LOG_VERBOSE("[FeedFetcher] No tracks were fetched, nothing to copy");
             return;
         }
         
-        std::stringstream ss;
-        ss << "\n[OnTracksReceived] Processing fetch of " << receivedCount << " tracks starting at index " << receivedStartIndex;
-        LogToFile(ss.str());
+        LOG_VERBOSE("\n[FeedFetcher] Processing fetch of " << receivedCount << " tracks starting at index " << receivedStartIndex);
 
         // Track array is at: cacheObjPtr + 0x60890
         // Each track is 0x138 bytes
         uint8_t* cacheBase = reinterpret_cast<uint8_t*>(cacheObjPtr) + 0x60890;
         
-        ss.str("");
-        ss << "[OnTracksReceived] Cache base at: 0x" << std::hex << reinterpret_cast<uintptr_t>(cacheBase);
-        LogToFile(ss.str());
+        LOG_VERBOSE("[FeedFetcher] Cache base at: 0x" << std::hex << reinterpret_cast<uintptr_t>(cacheBase));
         
         // Calculate range to copy
         int rangeSize = g_config.endIndex - g_config.startIndex + 1;
         int copyCount = (std::min)((int)receivedCount, rangeSize);
         
-        ss.str("");
-        ss << "[OnTracksReceived] Will copy " << std::dec << copyCount << " tracks from cache indices " 
+        LOG_VERBOSE("[FeedFetcher] Will copy " << std::dec << copyCount << " tracks from cache indices " 
            << receivedStartIndex << "-" << (receivedStartIndex + copyCount - 1)
-           << " to cache indices 0-" << (copyCount - 1);
-        LogToFile(ss.str());
+           << " to cache indices 0-" << (copyCount - 1));
         
         // Copy tracks from high indices to low indices
         for (int i = 0; i < copyCount; i++) {
@@ -311,13 +273,11 @@ namespace FeedFetcher {
             memcpy(dstTrack, srcTrack, TRACK_ENTRY_SIZE);
             
             if (i < 3 || i >= copyCount - 3) {  // Log first 3 and last 3
-                ss.str("");
-                ss << "[OnTracksReceived] Copied track from cache index " << (receivedStartIndex + i) << " to index " << i;
-                LogToFile(ss.str());
+                LOG_VERBOSE("[FeedFetcher] Copied track from cache index " << (receivedStartIndex + i) << " to index " << i);
             }
         }
         
-        LogToFile("[OnTracksReceived] *** Cache copy complete! UI should now see tracks at indices 0-9 ***\n");
+        LOG_VERBOSE("[FeedFetcher] *** Cache copy complete! UI should now see tracks at indices 0-9 ***\n");
     }
 
 }
