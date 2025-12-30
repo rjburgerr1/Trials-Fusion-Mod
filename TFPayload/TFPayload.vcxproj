@@ -195,9 +195,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClInclude Include="pch.h" />
     <ClInclude Include="payload.h" />
     <ClInclude Include="rendering.h" />
-    <ClInclude Include="save-bike.h" />
-    <ClInclude Include="save-physics.h" />
-    <ClInclude Include="save-states.h" />
+    <ClInclude Include="respawn.h" />
     <ClInclude Include="tracks.h" />
   </ItemGroup>
   <ItemGroup>
@@ -224,9 +222,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="save-bike.cpp" />
-    <ClCompile Include="save-physics.cpp" />
-    <ClCompile Include="save-states.cpp" />
+    <ClCompile Include="respawn.cpp" />
     <ClCompile Include="tracks.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

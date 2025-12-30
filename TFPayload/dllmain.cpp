@@ -17,14 +17,12 @@
 #include "feed_fetcher.h"
 #include "leaderboard_direct.h"
 #include "pause.h"
-#include "save-states.h"
-#include "save-physics.h"
-#include "save-bike.h"
 #include "devMenu.h"
 #include "devMenuSync.h"
 #include "rendering.h"
 #include "actionscript.h"
 #include "logging.h"
+#include "respawn.h"
 #include <MinHook.h>
 
 // FORWARD DECLARATIONS
@@ -130,7 +128,7 @@ extern "C" __declspec(dllexport) void ShutdownPayload()
     }
     isShuttingDown = true;
 
-    LOG_INFO("\n[TFPayload] Shutting down for rebuild (Automated Trigger)...");
+    LOG_VERBOSE("\n[TFPayload] Shutting down for rebuild (Automated Trigger)...");
 
     isRunning = false;
 
@@ -158,11 +156,9 @@ extern "C" __declspec(dllexport) void ShutdownPayload()
     FeedFetcher::Shutdown();
     LeaderboardDirect::Shutdown();
     Pause::Shutdown();
-    SaveStates::Shutdown();
-    SavePhysics::Shutdown();
-    SaveBike::Shutdown();
+    Respawn::Shutdown();
 
-    LOG_INFO("[Main] All resources cleaned up.");
+    LOG_VERBOSE("[Main] All resources cleaned up.");
 }
 
 // PAYLOAD INITIALIZATION (called when hot-loaded)
@@ -171,7 +167,7 @@ extern "C" __declspec(dllexport) void PayloadInit()
     LOG_INFO("\n[TFPayload] PayloadInit called - Starting payload operations...");
 
     if (isRunning) {
-        LOG_INFO("[TFPayload] Already running, skipping init");
+        LOG_VERBOSE("[TFPayload] Already running, skipping init");
         return;
     }
 
@@ -225,23 +221,18 @@ extern "C" __declspec(dllexport) void PayloadInit()
     Pause::Initialize(baseAddress);
     LOG_VERBOSE("[TFPayload] Pause system initialized");
 
-    // Initialize save states system
-    SaveStates::Initialize(baseAddress);
-    LOG_VERBOSE("[TFPayload] Save states system initialized");
-
-    // Initialize save physics system
-    SavePhysics::Initialize(baseAddress);
-    LOG_VERBOSE("[TFPayload] Save physics system initialized");
-
-    // Initialize save bike system
-    SaveBike::Initialize(baseAddress);
-    LOG_VERBOSE("[TFPayload] Save bike system initialized");
-
     // Initialize ActionScript messaging system
     if (ActionScript::Initialize()) {
         LOG_VERBOSE("[TFPayload] ActionScript messaging system initialized");
     } else {
         LOG_ERROR("[TFPayload] Failed to initialize ActionScript messaging!");
+    }
+
+    // Initialize respawn system
+    if (Respawn::Initialize(baseAddress)) {
+        LOG_VERBOSE("[TFPayload] Respawn system initialized");
+    } else {
+        LOG_ERROR("[TFPayload] Failed to initialize respawn system!");
     }
 
     // Wait a moment to ensure ProxyDLL has hooked D3D11
@@ -308,11 +299,15 @@ struct HotkeyState {
     bool m = false;
     bool n = false;
     bool u = false;
+    bool i = false;
     bool t = false;
     bool l = false;
     bool c = false;
     bool k = false;
     bool v = false;
+    bool y = false;
+    bool p = false;
+    bool o = false;
     bool equals = false;
     bool hyphen = false;
     bool clearConsole = false;
@@ -367,9 +362,27 @@ void PrintHelpText()
     LOG_INFO("  3  - Quick save bike (slot 0)");
     LOG_INFO("  4  - Quick load bike (slot 0)");
     LOG_INFO("");
+    LOG_INFO("RESPAWN:");
+    LOG_INFO("  Q  - Respawn at current checkpoint");
+    LOG_INFO("  E  - Respawn at next checkpoint");
+    LOG_INFO("  W  - Respawn at previous checkpoint");
+    LOG_INFO("");
     LOG_INFO("DEV MENU / TWEAKABLES:");
     LOG_INFO("  HOME - Toggle Custom ImGui Dev Menu (Renders in-game!)");
     LOG_INFO("  B    - Dump tweakables data (see what's available)");
+    LOG_INFO("");
+    LOG_INFO("BIKE MEMORY DUMP:");
+    LOG_INFO("  Y    - Dump bike state to F:/bike_dump.txt (CSV format)");
+    LOG_INFO("  U    - Save current bike state (position, velocity, rotation)");
+    LOG_INFO("  I    - Load saved bike state (teleport + set velocity)");
+    LOG_INFO("");
+    LOG_INFO("PHYSICS LOGGING:");
+    LOG_INFO("  P    - Toggle CP skip physics logging (ON/OFF)");
+    LOG_INFO("  O    - Dump physics log to F:/physics_log.csv");
+    LOG_INFO("  X    - Modify X position by +100 units (test if bike/camera moves)");
+    LOG_INFO("");
+    LOG_INFO("SKIP INTRO:");
+    LOG_INFO("  (Automatic on load - video loader is hooked)");
     LOG_INFO("");
     LOG_INFO("ACTIONSCRIPT COMMANDS:");
     LOG_INFO("  T        - Full countdown sequence (3, 2, 1, GO, Ready!) with auto-timing");
@@ -609,6 +622,22 @@ void HandleHomeImGuiMenu(HotkeyState& state)
     state.home = homeIsPressed;
 }
 
+// Helper function to check if game window has focus
+static bool IsGameWindowFocused()
+{
+    HWND foregroundWindow = GetForegroundWindow();
+    if (!foregroundWindow) {
+        return false;
+    }
+    
+    // Get the process ID of the foreground window
+    DWORD foregroundPID = 0;
+    GetWindowThreadProcessId(foregroundWindow, &foregroundPID);
+    
+    // Compare with our own process ID
+    return (foregroundPID == GetCurrentProcessId());
+}
+
 // MAIN KEY MONITOR THREAD
 DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
 {
@@ -628,6 +657,12 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
     HotkeyState hotkeyState;
 
     while (isRunning) {
+        // Only process keypresses when the game window is focused
+        if (!IsGameWindowFocused()) {
+            Sleep(125);
+            continue;
+        }
+        
         if (KeyPress(VK_END)) {
             LOG_INFO("[END] Shutting down and unloading...");
             
@@ -637,17 +672,13 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
             // Now that shutdown is complete, schedule the DLL unload
             // We need to do this on a separate thread because we can't unload ourselves
             if (g_hModule != NULL) {
-                LOG_INFO("[TFPayload] Scheduling DLL unload...");
+                LOG_VERBOSE("[TFPayload] Scheduling DLL unload...");
                 
                 // Create a thread that will unload the DLL
                 HANDLE hUnloadThread = CreateThread(NULL, 0, [](LPVOID param) -> DWORD {
                     HMODULE hMod = (HMODULE)param;
-                    
-                    // Wait a bit to ensure the key monitor thread has fully exited
-                    Sleep(250);
-                    
-                    LOG_INFO("[TFPayload] Unloading DLL now...");
-                    
+
+                    LOG_INFO("[TFPayload] Unloaded DLL");
                     // Unload the DLL and exit this thread
                     FreeLibraryAndExitThread(hMod, 0);
                     return 0;
@@ -672,6 +703,7 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         HandleT(hotkeyState);
         HandleL(hotkeyState);
         HandleV(hotkeyState);
+        
         HandleEquals(hotkeyState);
         HandleHyphen(hotkeyState);
         HandleClearConsole(hotkeyState);
@@ -680,39 +712,9 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         LeaderboardScanner::CheckHotkey();
         LeaderboardDirect::CheckHotkey();
         Pause::CheckHotkey();
-        SaveStates::CheckHotkeys();
+        Respawn::CheckHotkey();
         
-        // Check save-physics hotkeys (1 = save camera, 2 = load camera)
-        static bool key1Pressed = false;
-        bool key1IsPressed = (GetAsyncKeyState('1') & 0x8000) != 0;
-        if (key1IsPressed && !key1Pressed) {
-            SavePhysics::QuickSavePhysics();
-        }
-        key1Pressed = key1IsPressed;
-
-        static bool key2Pressed = false;
-        bool key2IsPressed = (GetAsyncKeyState('2') & 0x8000) != 0;
-        if (key2IsPressed && !key2Pressed) {
-            SavePhysics::QuickLoadPhysics();
-        }
-        key2Pressed = key2IsPressed;
-
-        // Check save-bike hotkeys (3 = save bike, 4 = load bike)
-        static bool key3Pressed = false;
-        bool key3IsPressed = (GetAsyncKeyState('3') & 0x8000) != 0;
-        if (key3IsPressed && !key3Pressed) {
-            SaveBike::QuickSaveBike();
-        }
-        key3Pressed = key3IsPressed;
-
-        static bool key4Pressed = false;
-        bool key4IsPressed = (GetAsyncKeyState('4') & 0x8000) != 0;
-        if (key4IsPressed && !key4Pressed) {
-            SaveBike::QuickLoadBike();
-        }
-        key4Pressed = key4IsPressed;
-        
-        Sleep(125);
+        Sleep(80);
     }
     return 0;
 }

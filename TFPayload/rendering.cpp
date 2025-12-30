@@ -2,6 +2,7 @@
 #include "pch.h"
 #include "rendering.h"
 #include "devMenu.h"
+#include "logging.h"
 #include "imgui/imgui.h"
 #include <iostream>
 
@@ -35,20 +36,19 @@ void TFPayloadRenderCallback()
     if (!ImGui::GetCurrentContext()) {
         static int errorCount = 0;
         if (errorCount++ < 5) { // Only log first 5 errors
-            std::cout << "[Render] No ImGui context!" << std::endl;
+            LOG_ERROR("[Render] No ImGui context!");
         }
         return;
     }
 
     g_TestFrameCount++;
-
     try {
         // Debug: Check DevMenu state changes
         if (g_DevMenu) {
             bool currentVisible = g_DevMenu->IsVisible();
             if (currentVisible != g_LastDevMenuVisible) {
-                std::cout << "[Render] DevMenu visibility changed: " 
-                          << (currentVisible ? "VISIBLE" : "HIDDEN") << std::endl;
+                LOG_VERBOSE("[Render] DevMenu visibility changed: " 
+                          << (currentVisible ? "VISIBLE" : "HIDDEN"));
                 g_LastDevMenuVisible = currentVisible;
             }
         }
@@ -70,7 +70,7 @@ void TFPayloadRenderCallback()
                     ImGui::Text("DevMenu visible: %s", isVisible ? "YES" : "NO");
                     
                     if (ImGui::Button(isVisible ? "Hide Dev Menu" : "Show Dev Menu")) {
-                        std::cout << "[Render] Button clicked, toggling menu..." << std::endl;
+                        LOG_VERBOSE("[Render] Button clicked, toggling menu...");
                         g_DevMenu->Toggle();
                     }
                     
@@ -89,20 +89,20 @@ void TFPayloadRenderCallback()
                 g_DevMenu->Render();
             }
             catch (const std::exception& e) {
-                std::cout << "[Render] DevMenu exception: " << e.what() << std::endl;
+                LOG_ERROR("[Render] DevMenu exception: " << e.what());
                 g_DevMenu->Hide();
             }
             catch (...) {
-                std::cout << "[Render] DevMenu unknown exception!" << std::endl;
+                LOG_ERROR("[Render] DevMenu unknown exception!");
                 g_DevMenu->Hide();
             }
         }
     }
     catch (const std::exception& e) {
-        std::cout << "[Render] Callback exception: " << e.what() << std::endl;
+        LOG_ERROR("[Render] Callback exception: " << e.what());
     }
     catch (...) {
-        std::cout << "[Render] Callback unknown exception!" << std::endl;
+        LOG_ERROR("[Render] Callback unknown exception!");
     }
 }
 
@@ -110,15 +110,15 @@ namespace Rendering {
 
 bool Initialize()
 {
-    std::cout << "[TFPayload/Rendering] Connecting to ProxyDLL's D3D11 hook..." << std::endl;
+    LOG_INFO("[TFPayload/Rendering] Connecting to ProxyDLL's D3D11 hook...");
 
     HMODULE hProxyDLL = GetModuleHandleA("dbgcore.dll");
     if (!hProxyDLL) {
-        std::cout << "[TFPayload/Rendering] ERROR: Could not find dbgcore.dll!" << std::endl;
+        LOG_ERROR("[TFPayload/Rendering] Could not find dbgcore.dll!");
         return false;
     }
 
-    std::cout << "[TFPayload/Rendering] Found dbgcore.dll" << std::endl;
+    LOG_VERBOSE("[TFPayload/Rendering] Found dbgcore.dll");
 
     // Get all exported functions
     g_RegisterCallback = (RegisterRenderCallbackFn)GetProcAddress(hProxyDLL, "RegisterRenderCallback");
@@ -126,25 +126,25 @@ bool Initialize()
     g_GetImGuiContext = (GetImGuiContextFn)GetProcAddress(hProxyDLL, "GetImGuiContext");
 
     if (!g_RegisterCallback || !g_UnregisterCallback) {
-        std::cout << "[TFPayload/Rendering] ERROR: Could not find callback exports!" << std::endl;
+        LOG_ERROR("[TFPayload/Rendering] Could not find callback exports!");
         return false;
     }
 
     if (!g_GetImGuiContext) {
-        std::cout << "[TFPayload/Rendering] WARNING: Could not find GetImGuiContext export!" << std::endl;
-        std::cout << "[TFPayload/Rendering] Context sharing may not work!" << std::endl;
+        LOG_WARNING("[TFPayload/Rendering] Could not find GetImGuiContext export!");
+        LOG_WARNING("[TFPayload/Rendering] Context sharing may not work!");
     } else {
-        std::cout << "[TFPayload/Rendering] Found GetImGuiContext export" << std::endl;
+        LOG_VERBOSE("[TFPayload/Rendering] Found GetImGuiContext export");
     }
 
     try {
         g_RegisterCallback(TFPayloadRenderCallback);
         g_IsRegistered = true;
-        std::cout << "[TFPayload/Rendering] Registered render callback!" << std::endl;
-        std::cout << "[TFPayload/Rendering] Status window should be visible in-game" << std::endl;
+        LOG_INFO("[TFPayload/Rendering] Registered render callback!");
+        LOG_VERBOSE("[TFPayload/Rendering] Status window should be visible in-game");
     }
     catch (...) {
-        std::cout << "[TFPayload/Rendering] Exception while registering callback!" << std::endl;
+        LOG_ERROR("[TFPayload/Rendering] Exception while registering callback!");
         return false;
     }
 
@@ -153,15 +153,15 @@ bool Initialize()
 
 void Shutdown()
 {
-    std::cout << "[TFPayload/Rendering] Shutting down..." << std::endl;
+    LOG_VERBOSE("[TFPayload/Rendering] Shutting down...");
 
     if (g_IsRegistered && g_UnregisterCallback) {
         try {
             g_UnregisterCallback(TFPayloadRenderCallback);
-            std::cout << "[TFPayload/Rendering] Unregistered render callback" << std::endl;
+            LOG_VERBOSE("[TFPayload/Rendering] Unregistered render callback");
         }
         catch (...) {
-            std::cout << "[TFPayload/Rendering] Exception while unregistering" << std::endl;
+            LOG_ERROR("[TFPayload/Rendering] Exception while unregistering");
         }
         g_IsRegistered = false;
     }
@@ -170,7 +170,7 @@ void Shutdown()
     g_UnregisterCallback = nullptr;
     g_GetImGuiContext = nullptr;
 
-    std::cout << "[TFPayload/Rendering] Shutdown complete" << std::endl;
+    LOG_VERBOSE("[TFPayload/Rendering] Shutdown complete");
 }
 
 void RenderFrame()

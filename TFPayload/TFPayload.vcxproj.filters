@@ -39,15 +39,6 @@
     <ClInclude Include="pause.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="save-states.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="save-physics.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="save-bike.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="devMenu.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -87,6 +78,9 @@
     <ClInclude Include="logging.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="respawn.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -108,15 +102,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="pause.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="save-states.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="save-physics.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="save-bike.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="devMenu.cpp">
@@ -153,6 +138,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="logging.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="respawn.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
