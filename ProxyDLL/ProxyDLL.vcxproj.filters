@@ -48,10 +48,7 @@
     <ClInclude Include="Keybinds.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="MinHook\include\MinHook.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="SkipIntros.h">
+    <ClInclude Include="SkipIntro.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -89,11 +86,10 @@
     <ClCompile Include="Keybinds.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="SkipIntros.cpp">
+    <ClCompile Include="SkipIntro.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <Library Include="MinHook\lib\libMinHook.x86.lib" />
   </ItemGroup>
 </Project>
