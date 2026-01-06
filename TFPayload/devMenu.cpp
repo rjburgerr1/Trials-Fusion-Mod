@@ -3,6 +3,10 @@
 #include "devMenuSync.h"
 #include "imgui/imgui.h"
 #include "logging.h"
+#include "respawn.h"
+#include "actionscript.h"
+#include "keybindings.h"
+#include "multiplayer.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -188,6 +192,17 @@ void TweakableBool::Render() {
     }
 }
 
+// TweakableButton Implementation
+void TweakableButton::Render() {
+    std::string label = m_name + "##" + std::to_string(m_id);
+    
+    if (ImGui::Button(label.c_str())) {
+        if (m_onClick) {
+            m_onClick();
+        }
+    }
+}
+
 // TweakableFolder Implementation
 void TweakableFolder::Render() {
     // Use TreeNode for folders
@@ -226,6 +241,7 @@ DevMenu::DevMenu()
     , m_menuHeight(800.0f)
     , m_showResetButton(true)
     , m_showSearchBar(true)
+    , m_showKeybindingsWindow(false)
 {
 }
 
@@ -272,10 +288,175 @@ void DevMenu::Initialize() {
     InitializeSettings();
     InitializeDebugLocalization();
     InitializeMod();
+    InitializeKeybindings();
     LOG_VERBOSE("[DevMenu] Initialized with " << m_rootFolders.size() << " root folders");
 }
 
 void DevMenu::Render() {
+    // Render Keybindings window independently (even if main menu is hidden)
+    if (m_showKeybindingsWindow) {
+        ImGui::SetNextWindowSize(ImVec2(600, 400), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(ImVec2(700, 50), ImGuiCond_FirstUseEver);
+        
+        if (ImGui::Begin("Keybindings", &m_showKeybindingsWindow)) {
+            ImGui::Text("Configure hotkeys for mod actions:");
+            ImGui::Separator();
+            
+            // Build a map of VK codes to count how many actions use each key
+            std::unordered_map<int, int> keyUsageCount;
+            size_t numKeybinds = m_keybindingItems.size() >= 2 ? m_keybindingItems.size() - 2 : 0;
+            
+            for (size_t i = 0; i < numKeybinds; i++) {
+                int vkCode = Keybindings::GetKey(m_keybindingActions[i]);
+                if (vkCode != 0) { // Ignore unbound keys
+                    keyUsageCount[vkCode]++;
+                }
+            }
+            
+            // Calculate widths for alignment
+            float maxActionWidth = 0.0f;
+            float maxKeyWidth = 0.0f;
+            
+            for (size_t i = 0; i < numKeybinds; i++) {
+                Keybindings::Action action = m_keybindingActions[i];
+                std::string actionName = Keybindings::GetActionName(action);
+                std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(action));
+                
+                ImVec2 actionSize = ImGui::CalcTextSize(actionName.c_str());
+                ImVec2 keySize = ImGui::CalcTextSize(keyName.c_str());
+                
+                if (actionSize.x > maxActionWidth) maxActionWidth = actionSize.x;
+                if (keySize.x > maxKeyWidth) maxKeyWidth = keySize.x;
+            }
+            
+            // Add padding for the button
+            float buttonPadding = ImGui::GetStyle().FramePadding.x * 2.0f;
+            float colonWidth = ImGui::CalcTextSize(": ").x;
+            float totalButtonWidth = maxActionWidth + colonWidth + maxKeyWidth + buttonPadding + 10.0f; // 10 extra padding
+            
+            // Render keybindings with aligned columns
+            for (size_t i = 0; i < m_keybindingItems.size(); i++) {
+                auto& item = m_keybindingItems[i];
+                
+                // Check if this is one of the control buttons at the end (Save as Default or Reset All)
+                if (i >= m_keybindingItems.size() - 2) {
+                    item->Render();
+                    if (i < m_keybindingItems.size() - 1) {
+                        ImGui::SameLine();
+                    }
+                    continue;
+                }
+                
+                // Get info for this keybinding
+                Keybindings::Action action = m_keybindingActions[i];
+                std::string actionName = Keybindings::GetActionName(action);
+                std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(action));
+                int currentKey = Keybindings::GetKey(action);
+                int defaultKey = m_keybindingDefaults[i];
+                
+                // Check if the button is in "waiting for key" mode by checking its actual name
+                std::string buttonName = item->GetName();
+                bool isWaitingForKey = (buttonName.find("Press any key...") != std::string::npos);
+                
+                // Check if this key is bound to multiple actions
+                bool isOverbound = (keyUsageCount[currentKey] > 1);
+                
+                // Build the button label
+                std::string buttonLabel;
+                if (isWaitingForKey) {
+                    // Show "Press any key..." message when rebinding
+                    buttonLabel = "Press any key...##bind" + std::to_string(i);
+                } else {
+                    // Build button label with fixed-width action name for alignment
+                    // Pad the action name to ensure consistent spacing
+                    std::string paddedActionName = actionName;
+                    float actionTextWidth = ImGui::CalcTextSize(actionName.c_str()).x;
+                    float paddingNeeded = maxActionWidth - actionTextWidth;
+                    
+                    // Calculate number of spaces needed (approximate, using average char width)
+                    int numSpaces = (int)(paddingNeeded / ImGui::CalcTextSize(" ").x);
+                    for (int s = 0; s < numSpaces; s++) {
+                        paddedActionName += " ";
+                    }
+                    
+                    buttonLabel = paddedActionName + ": " + keyName + "##bind" + std::to_string(i);
+                }
+                
+                // Render the button with fixed width and left-aligned text
+                ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f)); // 0.0 = left align, 0.5 = vertical center
+                
+                // Show visual indicator when waiting for key press or if key is overbound
+                if (isWaitingForKey) {
+                    // Use a different color to indicate we're waiting for input
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 0.3f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.4f, 0.7f, 0.4f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.2f, 0.5f, 0.2f, 1.0f));
+                } else if (isOverbound) {
+                    // Use red color to indicate this key is bound to multiple actions
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.3f, 0.3f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.7f, 0.1f, 0.1f, 1.0f));
+                }
+                
+                if (ImGui::Button(buttonLabel.c_str(), ImVec2(totalButtonWidth, 0))) {
+                    // Trigger the keybinding capture callback
+                    if (auto btn = std::dynamic_pointer_cast<TweakableButton>(item)) {
+                        btn->TriggerClick();
+                    }
+                }
+                
+                // Add tooltip for overbound keys
+                if (isOverbound && !isWaitingForKey) {
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("WARNING: This key is bound to multiple actions!");
+                    }
+                }
+                
+                if (isWaitingForKey || isOverbound) {
+                    ImGui::PopStyleColor(3); // Pop the 3 color overrides
+                }
+                
+                ImGui::PopStyleVar(); // Restore previous alignment
+                
+                // Add individual buttons next to it
+                ImGui::SameLine();
+                
+                // Only show Reset and Save as Default buttons if current key differs from default
+                if (currentKey != defaultKey) {
+                    std::string saveLabel = "Save##" + std::to_string(i);
+                    if (ImGui::SmallButton(saveLabel.c_str())) {
+                        // Save this specific keybinding as the new default (updates the stored default)
+                        m_keybindingDefaults[i] = currentKey;
+                        Keybindings::SaveToFile();
+                        LOG_VERBOSE("[DevMenu] Saved " << actionName << " = " << keyName << " as default");
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Save as Default");
+                    }
+                    
+                    ImGui::SameLine();
+                    
+                    std::string resetLabel = "Reset##" + std::to_string(i);
+                    if (ImGui::SmallButton(resetLabel.c_str())) {
+                        // Reset this specific keybinding to default
+                        Keybindings::SetKey(action, defaultKey);
+                        std::string newKeyName = Keybindings::GetKeyName(defaultKey);
+                        item->SetName("Bind " + actionName + ": " + newKeyName);
+                        LOG_VERBOSE("[DevMenu] Reset " << actionName << " to default: " << newKeyName);
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Reset to Default");
+                    }
+                } else {
+                    // Show disabled text to maintain alignment
+                    ImGui::TextDisabled("(default)");
+                }
+            }
+        }
+        ImGui::End();
+    }
+    
+    // Early return if main dev menu is not visible
     if (!m_isVisible) {
         return;
     }
@@ -307,6 +488,12 @@ void DevMenu::Render() {
         if (ImGui::BeginMenu("Options")) {
             ImGui::MenuItem("Show Search Bar", nullptr, &m_showSearchBar);
             ImGui::MenuItem("Show Reset Buttons", nullptr, &m_showResetButton);
+            ImGui::EndMenu();
+        }
+        
+        // Keybindings menu
+        if (ImGui::BeginMenu("Keybindings")) {
+            ImGui::MenuItem("Show Keybindings Window", nullptr, &m_showKeybindingsWindow);
             ImGui::EndMenu();
         }
 
@@ -3180,19 +3367,798 @@ void DevMenu::DumpTweakablesData() {
 void DevMenu::InitializeMod() {
     auto mod = std::make_shared<TweakableFolder>(10000, "Mod");
 
-    // Race Timeout slider
-    auto raceTimeout = std::make_shared<TweakableInt>(
-        10001,
-        "Race Time Limit (minutes)",
-        30,     // Default: 30 minutes
-        1,      // Min: 1 minute
-        240     // Max: 4 hours
+    // ============================================================================
+    // Respawn Controls
+    // ============================================================================
+    
+    // Respawn at Current Checkpoint
+    auto respawnCurrent = std::make_shared<TweakableButton>(
+        10002,
+        "Respawn at Current Checkpoint"
     );
+    respawnCurrent->SetOnClickCallback([]() {
+        Respawn::RespawnAtCheckpoint();
+    });
+    RegisterTweakable(respawnCurrent);
+    mod->AddChild(respawnCurrent);
 
+    // Respawn at Next Checkpoint
+    auto respawnNext = std::make_shared<TweakableButton>(
+        10003,
+        "Respawn at Next Checkpoint"
+    );
+    respawnNext->SetOnClickCallback([]() {
+        Respawn::RespawnAtNextCheckpoint();
+    });
+    RegisterTweakable(respawnNext);
+    mod->AddChild(respawnNext);
 
-    RegisterTweakable(raceTimeout);
-    mod->AddChild(raceTimeout);
+    // Respawn at Previous Checkpoint
+    auto respawnPrev = std::make_shared<TweakableButton>(
+        10004,
+        "Respawn at Previous Checkpoint"
+    );
+    respawnPrev->SetOnClickCallback([]() {
+        Respawn::RespawnAtPreviousCheckpoint();
+    });
+    RegisterTweakable(respawnPrev);
+    mod->AddChild(respawnPrev);
+
+    // Respawn at Checkpoint Index - Slider (no auto-respawn)
+    auto checkpointIndexSlider = std::make_shared<TweakableInt>(
+        10005,
+        "Select Checkpoint Index",
+        0,      // Default: 0
+        0,      // Min: 0
+        100     // Max: 100 (will be updated dynamically)
+    );
+    // Update the max value based on current track's checkpoint count
+    int currentCheckpointCount = Respawn::GetCheckpointCount();
+    if (currentCheckpointCount > 0) {
+        checkpointIndexSlider->SetRange(0, currentCheckpointCount - 1);
+        std::string label = "Select Checkpoint (0-" + std::to_string(currentCheckpointCount - 1) + ")";
+        checkpointIndexSlider->SetName(label);
+    }
+    // No callback - we'll use a button to apply the respawn
+    RegisterTweakable(checkpointIndexSlider);
+    mod->AddChild(checkpointIndexSlider);
+
+    // Go to Selected Checkpoint Button
+    auto goToCheckpointButton = std::make_shared<TweakableButton>(
+        10014,
+        "Go to Selected Checkpoint"
+    );
+    goToCheckpointButton->SetOnClickCallback([checkpointIndexSlider]() {
+        int selectedIndex = checkpointIndexSlider->GetValue();
+        int checkpointCount = Respawn::GetCheckpointCount();
+        
+        // Update slider range in case track changed
+        if (checkpointCount > 0) {
+            checkpointIndexSlider->SetRange(0, checkpointCount - 1);
+            std::string label = "Select Checkpoint (0-" + std::to_string(checkpointCount - 1) + ")";
+            checkpointIndexSlider->SetName(label);
+            
+            // Clamp selected index to valid range
+            if (selectedIndex >= checkpointCount) {
+                selectedIndex = checkpointCount - 1;
+                checkpointIndexSlider->SetValue(selectedIndex);
+            }
+        }
+        
+        // Check if user selected the last checkpoint (finish line)
+        if (selectedIndex == checkpointCount - 1 && checkpointCount > 0) {
+            LOG_INFO("[DevMenu] Last checkpoint selected - triggering race finish instead of respawn");
+            LOG_INFO("[DevMenu] (Respawning at finish line causes softlock)");
+            
+            // Trigger proper race finish using ActionScript
+            if (ActionScript::CallHandleRaceFinish()) {
+                LOG_VERBOSE("[DevMenu] Successfully called HandleRaceFinish!");
+            } else {
+                LOG_ERROR("[DevMenu] Failed to call HandleRaceFinish!");
+            }
+        } else {
+            LOG_INFO("[DevMenu] Going to checkpoint " << selectedIndex << " (Total checkpoints: " << checkpointCount << ")");
+            Respawn::RespawnAtCheckpointIndex(selectedIndex);
+        }
+    });
+    RegisterTweakable(goToCheckpointButton);
+    mod->AddChild(goToCheckpointButton);
+
+    // Toggle Selected Checkpoint Enabled/Disabled Button
+    auto toggleCheckpointButton = std::make_shared<TweakableButton>(
+        10015,
+        "Toggle Selected Checkpoint (Disable/Enable)"
+    );
+    toggleCheckpointButton->SetOnClickCallback([checkpointIndexSlider, toggleCheckpointButton]() {
+        int selectedIndex = checkpointIndexSlider->GetValue();
+        int checkpointCount = Respawn::GetCheckpointCount();
+        
+        // Update slider range in case track changed
+        if (checkpointCount > 0) {
+            checkpointIndexSlider->SetRange(0, checkpointCount - 1);
+            std::string label = "Select Checkpoint (0-" + std::to_string(checkpointCount - 1) + ")";
+            checkpointIndexSlider->SetName(label);
+            
+            // Clamp selected index to valid range
+            if (selectedIndex >= checkpointCount) {
+                selectedIndex = checkpointCount - 1;
+                checkpointIndexSlider->SetValue(selectedIndex);
+            }
+        }
+        
+        if (checkpointCount <= 0) {
+            LOG_ERROR("[DevMenu] No checkpoints available on this track");
+            return;
+        }
+        
+        // Toggle the checkpoint's enabled state
+        bool wasEnabled = Respawn::IsCheckpointEnabled(selectedIndex);
+        if (Respawn::ToggleCheckpoint(selectedIndex)) {
+            bool isNowEnabled = Respawn::IsCheckpointEnabled(selectedIndex);
+            if (isNowEnabled) {
+                LOG_INFO("[DevMenu] Checkpoint " << selectedIndex << " ENABLED - will trigger when crossed");
+            } else {
+                LOG_INFO("[DevMenu] Checkpoint " << selectedIndex << " DISABLED - won't trigger when crossed");
+            }
+            
+            // Update button label to show current state of selected checkpoint
+            std::string stateStr = isNowEnabled ? "ENABLED" : "DISABLED";
+            toggleCheckpointButton->SetName("Toggle Checkpoint " + std::to_string(selectedIndex) + " (" + stateStr + ")");
+        } else {
+            LOG_ERROR("[DevMenu] Failed to toggle checkpoint " << selectedIndex);
+        }
+    });
+    RegisterTweakable(toggleCheckpointButton);
+    mod->AddChild(toggleCheckpointButton);
+
+    // Debug Checkpoint Structure Button
+    auto debugCheckpointButton = std::make_shared<TweakableButton>(
+        10016,
+        "Debug Selected Checkpoint Structure"
+    );
+    debugCheckpointButton->SetOnClickCallback([checkpointIndexSlider]() {
+        int selectedIndex = checkpointIndexSlider->GetValue();
+        Respawn::DebugCheckpointStructure(selectedIndex);
+    });
+    RegisterTweakable(debugCheckpointButton);
+    mod->AddChild(debugCheckpointButton);
+
+    // ============================================================================
+    // Limit Controls
+    // ============================================================================
+
+    // Toggle Fault Limit
+    auto toggleFaultLimit = std::make_shared<TweakableButton>(
+        10006,
+        "Toggle Fault Limit [Click to check status]"
+    );
+    toggleFaultLimit->SetOnClickCallback([toggleFaultLimit]() {
+        bool isDisabled = Respawn::IsFaultValidationDisabled();
+        if (isDisabled) {
+            LOG_INFO("[DevMenu] Fault limit is currently DISABLED. Re-enabling now...");
+            Respawn::EnableFaultValidation();
+            int currentFaults = Respawn::GetFaultCount();
+            uint32_t faultLimit = Respawn::GetFaultLimit();
+            LOG_INFO("[DevMenu] Fault limit ENABLED! (" << faultLimit << " faults, currently at " << currentFaults << ")");
+        } else {
+            LOG_INFO("[DevMenu] Fault limit is currently ENABLED. Disabling now...");
+            Respawn::DisableFaultLimit();
+            Respawn::DisableFaultValidation();
+            LOG_INFO("[DevMenu] Fault limit DISABLED!");
+        }
+        
+        // Update button label to show current state
+        isDisabled = Respawn::IsFaultValidationDisabled();
+        std::string newLabel = isDisabled 
+            ? "Fault Limit: DISABLED (Infinite faults)"
+            : "Fault Limit: ENABLED (500 faults)";
+        toggleFaultLimit->SetName(newLabel);
+    });
+    RegisterTweakable(toggleFaultLimit);
+    mod->AddChild(toggleFaultLimit);
+
+    // Toggle Time Limit
+    auto toggleTimeLimit = std::make_shared<TweakableButton>(
+        10007,
+        "Toggle Time Limit [Click to check status]"
+    );
+    toggleTimeLimit->SetOnClickCallback([toggleTimeLimit]() {
+        bool isDisabled = Respawn::IsTimeValidationDisabled();
+        if (isDisabled) {
+            LOG_INFO("[DevMenu] Time limit is currently DISABLED. Re-enabling now...");
+            Respawn::EnableTimeValidation();
+            int currentTimeMs = Respawn::GetRaceTimeMs();
+            uint32_t timeLimit = Respawn::GetTimeLimit();
+            int timeLimitMs = (int)(timeLimit * 1000 / 60);  // Convert ticks to ms
+            LOG_INFO("[DevMenu] Time limit ENABLED! (" << timeLimitMs / 60 << " minutes, currently at " << currentTimeMs / 1000 << "s)");
+        } else {
+            LOG_INFO("[DevMenu] Time limit is currently ENABLED. Disabling now...");
+            Respawn::DisableTimeLimit();
+            Respawn::DisableTimeValidation();
+            Respawn::DisableRaceUpdateTimerFreeze();  // Also disable timer freeze
+            Respawn::DisableTimeCompletionCheck2();   // And the second time check
+            LOG_INFO("[DevMenu] Time limit DISABLED!");
+        }
+        
+        // Update button label to show current state
+        isDisabled = Respawn::IsTimeValidationDisabled();
+        std::string newLabel = isDisabled 
+            ? "Time Limit: DISABLED (Infinite time)"
+            : "Time Limit: ENABLED (30 minutes)";
+        toggleTimeLimit->SetName(newLabel);
+    });
+    RegisterTweakable(toggleTimeLimit);
+    mod->AddChild(toggleTimeLimit);
+
+    // ============================================================================
+    // Fault Controls
+    // ============================================================================
+
+    // Fault Once
+    auto faultOnce = std::make_shared<TweakableBool>(
+        10008,
+        "Fault Once",
+        false
+    );
+    faultOnce->SetOnChangeCallback([faultOnce](bool value) {
+        if (value) {
+            Respawn::IncrementFaultCounter();
+            faultOnce->SetValue(false);
+        }
+    });
+    RegisterTweakable(faultOnce);
+    mod->AddChild(faultOnce);
+
+    // Add/Remove Faults
+    auto faultAdjust = std::make_shared<TweakableInt>(
+        10009,
+        "Add/Remove Faults",
+        0,      // Default: 0
+        -500,   // Min: -500
+        500     // Max: +500
+    );
+    faultAdjust->SetOnChangeCallback([faultAdjust](int value) {
+        if (value != 0) {
+            Respawn::IncrementFaultCounterBy(value);
+            faultAdjust->SetValue(0);
+        }
+    });
+    RegisterTweakable(faultAdjust);
+    mod->AddChild(faultAdjust);
+
+    // Instant Fault Out (500 faults) - Trigger instant fault out finish
+    auto instantFaultOut = std::make_shared<TweakableButton>(
+        10010,
+        "Instant Fault Out (500 faults)"
+    );
+    instantFaultOut->SetOnClickCallback([]() {
+        Respawn::InstantFaultOut();
+    });
+    RegisterTweakable(instantFaultOut);
+    mod->AddChild(instantFaultOut);
+
+    // ============================================================================
+    // Time Controls
+    // ============================================================================
+
+    // Add/Remove Time (seconds)
+    auto timeAdjust = std::make_shared<TweakableInt>(
+        10011,
+        "Add/Remove Time (seconds)",
+        0,      // Default: 0
+        -1800,  // Min: -30 minutes
+        1800    // Max: +30 minutes
+    );
+    timeAdjust->SetOnChangeCallback([timeAdjust](int value) {
+        if (value != 0) {
+            Respawn::AdjustRaceTimeMs(value * 1000); // Convert to milliseconds
+            timeAdjust->SetValue(0);
+        }
+    });
+    RegisterTweakable(timeAdjust);
+    mod->AddChild(timeAdjust);
+
+    // Instant Time Out (30 minutes) - Trigger instant timeout finish
+    auto instantTimeOut = std::make_shared<TweakableButton>(
+        10012,
+        "Instant Time Out (30 minutes)"
+    );
+    instantTimeOut->SetOnClickCallback([]() {
+        Respawn::InstantTimeOut();
+    });
+    RegisterTweakable(instantTimeOut);
+    mod->AddChild(instantTimeOut);
+
+    // Instant Finish (normal) - Trigger normal instant finish using HandleRaceFinish
+    auto instantFinish = std::make_shared<TweakableButton>(
+        10013,
+        "Instant Finish (normal)"
+    );
+    instantFinish->SetOnClickCallback([]() {
+        LOG_VERBOSE("[DevMenu] Instant Finish button pressed - calling HandleRaceFinish...");
+        if (ActionScript::CallHandleRaceFinish()) {
+            LOG_VERBOSE("[DevMenu] Successfully called HandleRaceFinish!");
+        } else {
+            LOG_ERROR("[DevMenu] Failed to call HandleRaceFinish!");
+        }
+    });
+    RegisterTweakable(instantFinish);
+    mod->AddChild(instantFinish);
+
+    // ============================================================================
+    // Prevent Finish Controls
+    // ============================================================================
+
+    // Toggle Prevent Finish (Disable/Enable Finish Line)
+    // When enabled, crossing the finish line won't end the race
+    auto togglePreventFinish = std::make_shared<TweakableButton>(
+        10017,
+        "Prevent Finish: OFF (Click to toggle)"
+    );
+    togglePreventFinish->SetOnClickCallback([togglePreventFinish]() {
+        bool wasEnabled = Respawn::IsFinishLineEnabled();
+        
+        if (Respawn::ToggleFinishLine()) {
+            bool isNowEnabled = Respawn::IsFinishLineEnabled();
+            
+            if (isNowEnabled) {
+                // Finish line is enabled = race CAN end = prevent finish is OFF
+                LOG_INFO("[DevMenu] Prevent Finish: OFF - Race will end when crossing finish line");
+                togglePreventFinish->SetName("Prevent Finish: OFF (Race will end normally)");
+            } else {
+                // Finish line is disabled = race CAN'T end = prevent finish is ON
+                LOG_INFO("[DevMenu] Prevent Finish: ON - Race will NOT end when crossing finish line");
+                togglePreventFinish->SetName("Prevent Finish: ON (Finish line disabled)");
+            }
+        } else {
+            LOG_ERROR("[DevMenu] Failed to toggle finish line state");
+        }
+    });
+    RegisterTweakable(togglePreventFinish);
+    mod->AddChild(togglePreventFinish);
 
     RegisterTweakable(mod);
     m_rootFolders.push_back(mod);
+}
+
+// Keybindings Tab - Menu bar accessible keybinding configuration
+// ============================================================================
+
+// Thread data structure for keybinding capture
+struct KeybindThreadData {
+    TweakableButton* button;
+    Keybindings::Action action;
+    bool* waitingFlag;
+};
+
+// Helper function to create a keybinding button
+static std::shared_ptr<TweakableButton> CreateKeybindButton(
+    int id,
+    Keybindings::Action action,
+    bool* waitingFlag,
+    DevMenu* devMenu)
+{
+    auto button = std::make_shared<TweakableButton>(
+        id,
+        "Bind " + Keybindings::GetActionName(action) + ": " + 
+        Keybindings::GetKeyName(Keybindings::GetKey(action))
+    );
+    
+    button->SetOnClickCallback([button, action, waitingFlag]() {
+        *waitingFlag = true;
+        button->SetName("Press any key...");
+        LOG_VERBOSE("[DevMenu] Waiting for key press to bind " << Keybindings::GetActionName(action) << "...");
+        
+        // Create thread data
+        KeybindThreadData* data = new KeybindThreadData;
+        data->button = button.get();
+        data->action = action;
+        data->waitingFlag = waitingFlag;
+        
+        // Start a thread to capture the key press
+        CreateThread(NULL, 0, [](LPVOID param) -> DWORD {
+            KeybindThreadData* data = (KeybindThreadData*)param;
+            
+            // Wait for any key press
+            while (*data->waitingFlag) {
+                for (int vk = 0x08; vk <= 0xFE; vk++) {
+                    // Skip mouse buttons
+                    if (vk == VK_LBUTTON || vk == VK_RBUTTON || vk == VK_MBUTTON ||
+                        vk == VK_XBUTTON1 || vk == VK_XBUTTON2) {
+                        continue;
+                    }
+                    
+                    if (GetAsyncKeyState(vk) & 0x8000) {
+                        // Wait for key release
+                        while (GetAsyncKeyState(vk) & 0x8000) {
+                            Sleep(10);
+                        }
+                        
+                        // Set the new key
+                        Keybindings::SetKey(data->action, vk);
+                        std::string keyName = Keybindings::GetKeyName(vk);
+                        data->button->SetName("Bind " + Keybindings::GetActionName(data->action) + ": " + keyName);
+                        LOG_VERBOSE("[DevMenu] " << Keybindings::GetActionName(data->action) << " bound to: " << keyName);
+                        *data->waitingFlag = false;
+                        delete data;
+                        return 0;
+                    }
+                }
+                Sleep(50);
+            }
+            delete data;
+            return 0;
+        }, data, 0, NULL);
+    });
+    
+    return button;
+}
+
+void DevMenu::InitializeKeybindings() {
+    // Static flags for each keybinding (to track if waiting for key press)
+    static bool waitingForInstantFinish = false;
+    static bool waitingForToggleDevMenu = false;
+    static bool waitingForToggleKeybindingsMenu = false;
+    static bool waitingForClearConsole = false;
+    static bool waitingForToggleVerbose = false;
+    static bool waitingForShowHelp = false;
+    static bool waitingForDumpTweakables = false;
+    static bool waitingForCycleHUD = false;
+    static bool waitingForRespawnAtCheckpoint = false;
+    static bool waitingForRespawnPrevCheckpoint = false;
+    static bool waitingForRespawnNextCheckpoint = false;
+    static bool waitingForRespawnForward5 = false;
+    static bool waitingForIncrementFault = false;
+    static bool waitingForDebugFaultCounter = false;
+    static bool waitingForAdd100Faults = false;
+    static bool waitingForSubtract100Faults = false;
+    static bool waitingForResetFaults = false;
+    static bool waitingForDebugTimeCounter = false;
+    static bool waitingForAdd10Seconds = false;
+    static bool waitingForSubtract10Seconds = false;
+    static bool waitingForAdd1Minute = false;
+    static bool waitingForResetTime = false;
+    static bool waitingForRestoreDefaultLimits = false;
+    static bool waitingForDebugLimits = false;
+    static bool waitingForToggleLimitValidation = false;
+    static bool waitingForTogglePause = false;
+    static bool waitingForScanLeaderboardByID = false;
+    static bool waitingForScanCurrentLeaderboard = false;
+    static bool waitingForStartAutoScroll = false;
+    static bool waitingForKillswitch = false;
+    static bool waitingForCycleSearch = false;
+    static bool waitingForDecreaseScrollDelay = false;
+    static bool waitingForIncreaseScrollDelay = false;
+    static bool waitingForTestFetchTrackID = false;
+    static bool waitingForTogglePatch = false;
+    static bool waitingForSaveMultiplayerLogs = false;
+    static bool waitingForCaptureSessionState = false;
+    static bool waitingForTogglePhysicsLogging = false;
+    static bool waitingForDumpPhysicsLog = false;
+    static bool waitingForModifyXPosition = false;
+    static bool waitingForFullCountdownSequence = false;
+    static bool waitingForShowSingleCountdown = false;
+    static bool waitingForToggleLoadScreen = false;
+    
+    // Clear the action and default vectors in case of re-initialization
+    m_keybindingActions.clear();
+    m_keybindingDefaults.clear();
+    
+    // === General Controls ===
+    
+    // Toggle Dev Menu
+    auto toggleDevMenuBtn = CreateKeybindButton(10101, Keybindings::Action::ToggleDevMenu, &waitingForToggleDevMenu, this);
+    RegisterTweakable(toggleDevMenuBtn);
+    m_keybindingItems.push_back(toggleDevMenuBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ToggleDevMenu);
+    m_keybindingDefaults.push_back(VK_HOME);
+    
+    // Toggle Keybindings Menu
+    auto toggleKeybindingsMenuBtn = CreateKeybindButton(10100, Keybindings::Action::ToggleKeybindingsMenu, &waitingForToggleKeybindingsMenu, this);
+    RegisterTweakable(toggleKeybindingsMenuBtn);
+    m_keybindingItems.push_back(toggleKeybindingsMenuBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ToggleKeybindingsMenu);
+    m_keybindingDefaults.push_back('K');
+    
+    // Clear Console
+    auto clearConsoleBtn = CreateKeybindButton(10102, Keybindings::Action::ClearConsole, &waitingForClearConsole, this);
+    RegisterTweakable(clearConsoleBtn);
+    m_keybindingItems.push_back(clearConsoleBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ClearConsole);
+    m_keybindingDefaults.push_back('C');
+    
+    // Toggle Verbose Logging
+    auto toggleVerboseBtn = CreateKeybindButton(10103, Keybindings::Action::ToggleVerboseLogging, &waitingForToggleVerbose, this);
+    RegisterTweakable(toggleVerboseBtn);
+    m_keybindingItems.push_back(toggleVerboseBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ToggleVerboseLogging);
+    m_keybindingDefaults.push_back(VK_OEM_PLUS);
+    
+    // Show Help Text
+    auto showHelpBtn = CreateKeybindButton(10104, Keybindings::Action::ShowHelpText, &waitingForShowHelp, this);
+    RegisterTweakable(showHelpBtn);
+    m_keybindingItems.push_back(showHelpBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ShowHelpText);
+    m_keybindingDefaults.push_back(VK_OEM_MINUS);
+    
+    // Dump Tweakables
+    auto dumpTweakablesBtn = CreateKeybindButton(10105, Keybindings::Action::DumpTweakables, &waitingForDumpTweakables, this);
+    RegisterTweakable(dumpTweakablesBtn);
+    m_keybindingItems.push_back(dumpTweakablesBtn);
+    m_keybindingActions.push_back(Keybindings::Action::DumpTweakables);
+    m_keybindingDefaults.push_back('D');
+    
+    // Instant Finish
+    auto instantFinishBtn = CreateKeybindButton(10106, Keybindings::Action::InstantFinish, &waitingForInstantFinish, this);
+    RegisterTweakable(instantFinishBtn);
+    m_keybindingItems.push_back(instantFinishBtn);
+    m_keybindingActions.push_back(Keybindings::Action::InstantFinish);
+    m_keybindingDefaults.push_back('`');
+    
+    // === Camera Controls ===
+    
+    // Cycle HUD Visibility
+    auto CycleHUDBtn = CreateKeybindButton(10107, Keybindings::Action::CycleHUD, &waitingForCycleHUD, this);
+    RegisterTweakable(CycleHUDBtn);
+    m_keybindingItems.push_back(CycleHUDBtn);
+    m_keybindingActions.push_back(Keybindings::Action::CycleHUD);
+    m_keybindingDefaults.push_back('V');
+    
+    // === Respawn Controls ===
+    
+    // Respawn At Checkpoint
+    auto respawnAtCheckpointBtn = CreateKeybindButton(10108, Keybindings::Action::RespawnAtCheckpoint, &waitingForRespawnAtCheckpoint, this);
+    RegisterTweakable(respawnAtCheckpointBtn);
+    m_keybindingItems.push_back(respawnAtCheckpointBtn);
+    m_keybindingActions.push_back(Keybindings::Action::RespawnAtCheckpoint);
+    m_keybindingDefaults.push_back('W');
+    
+    // Respawn Prev Checkpoint
+    auto respawnPrevCheckpointBtn = CreateKeybindButton(10109, Keybindings::Action::RespawnPrevCheckpoint, &waitingForRespawnPrevCheckpoint, this);
+    RegisterTweakable(respawnPrevCheckpointBtn);
+    m_keybindingItems.push_back(respawnPrevCheckpointBtn);
+    m_keybindingActions.push_back(Keybindings::Action::RespawnPrevCheckpoint);
+    m_keybindingDefaults.push_back('Q');
+    
+    // Respawn Next Checkpoint
+    auto respawnNextCheckpointBtn = CreateKeybindButton(10110, Keybindings::Action::RespawnNextCheckpoint, &waitingForRespawnNextCheckpoint, this);
+    RegisterTweakable(respawnNextCheckpointBtn);
+    m_keybindingItems.push_back(respawnNextCheckpointBtn);
+    m_keybindingActions.push_back(Keybindings::Action::RespawnNextCheckpoint);
+    m_keybindingDefaults.push_back('E');
+    
+    // Respawn Forward 5
+    auto respawnForward5Btn = CreateKeybindButton(10111, Keybindings::Action::RespawnForward5, &waitingForRespawnForward5, this);
+    RegisterTweakable(respawnForward5Btn);
+    m_keybindingItems.push_back(respawnForward5Btn);
+    m_keybindingActions.push_back(Keybindings::Action::RespawnForward5);
+    m_keybindingDefaults.push_back('5');
+    
+    // === Fault Controls ===
+    // Increment Fault
+    auto incrementFaultBtn = CreateKeybindButton(10112, Keybindings::Action::IncrementFault, &waitingForIncrementFault, this);
+    RegisterTweakable(incrementFaultBtn);
+    m_keybindingItems.push_back(incrementFaultBtn);
+    m_keybindingActions.push_back(Keybindings::Action::IncrementFault);
+    m_keybindingDefaults.push_back('F');
+    
+    // Add 100 Faults
+    auto add100FaultsBtn = CreateKeybindButton(10114, Keybindings::Action::Add100Faults, &waitingForAdd100Faults, this);
+    RegisterTweakable(add100FaultsBtn);
+    m_keybindingItems.push_back(add100FaultsBtn);
+    m_keybindingActions.push_back(Keybindings::Action::Add100Faults);
+    m_keybindingDefaults.push_back('J');
+    
+    // Subtract 100 Faults
+    auto subtract100FaultsBtn = CreateKeybindButton(10115, Keybindings::Action::Subtract100Faults, &waitingForSubtract100Faults, this);
+    RegisterTweakable(subtract100FaultsBtn);
+    m_keybindingItems.push_back(subtract100FaultsBtn);
+    m_keybindingActions.push_back(Keybindings::Action::Subtract100Faults);
+    m_keybindingDefaults.push_back('H');
+    
+    // Reset Faults
+    auto resetFaultsBtn = CreateKeybindButton(10116, Keybindings::Action::ResetFaults, &waitingForResetFaults, this);
+    RegisterTweakable(resetFaultsBtn);
+    m_keybindingItems.push_back(resetFaultsBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ResetFaults);
+    m_keybindingDefaults.push_back('1');
+
+    // Reset Time
+    auto resetTimeBtn = CreateKeybindButton(10121, Keybindings::Action::ResetTime, &waitingForResetTime, this);
+    RegisterTweakable(resetTimeBtn);
+    m_keybindingItems.push_back(resetTimeBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ResetTime);
+    m_keybindingDefaults.push_back('2');
+    
+    // === Time Controls ===
+    
+    // Debug Time Counter
+    auto debugTimeCounterBtn = CreateKeybindButton(10117, Keybindings::Action::DebugTimeCounter, &waitingForDebugTimeCounter, this);
+    RegisterTweakable(debugTimeCounterBtn);
+    m_keybindingItems.push_back(debugTimeCounterBtn);
+    m_keybindingActions.push_back(Keybindings::Action::DebugTimeCounter);
+    m_keybindingDefaults.push_back(VK_OEM_4);
+
+    // Debug Fault Counter
+    auto debugFaultCounterBtn = CreateKeybindButton(10113, Keybindings::Action::DebugFaultCounter, &waitingForDebugFaultCounter, this);
+    RegisterTweakable(debugFaultCounterBtn);
+    m_keybindingItems.push_back(debugFaultCounterBtn);
+    m_keybindingActions.push_back(Keybindings::Action::DebugFaultCounter);
+    m_keybindingDefaults.push_back(VK_OEM_6);
+    
+    // Add 10 Seconds
+    auto add10SecondsBtn = CreateKeybindButton(10118, Keybindings::Action::Add60Seconds, &waitingForAdd10Seconds, this);
+    RegisterTweakable(add10SecondsBtn);
+    m_keybindingItems.push_back(add10SecondsBtn);
+    m_keybindingActions.push_back(Keybindings::Action::Add60Seconds);
+    m_keybindingDefaults.push_back('U');
+    
+    // Subtract 10 Seconds
+    auto subtract10SecondsBtn = CreateKeybindButton(10119, Keybindings::Action::Subtract60Seconds, &waitingForSubtract10Seconds, this);
+    RegisterTweakable(subtract10SecondsBtn);
+    m_keybindingItems.push_back(subtract10SecondsBtn);
+    m_keybindingActions.push_back(Keybindings::Action::Subtract60Seconds);
+    m_keybindingDefaults.push_back('I');
+    
+    // Add 1 Minute
+    auto add1MinuteBtn = CreateKeybindButton(10120, Keybindings::Action::Add10Minute, &waitingForAdd1Minute, this);
+    RegisterTweakable(add1MinuteBtn);
+    m_keybindingItems.push_back(add1MinuteBtn);
+    m_keybindingActions.push_back(Keybindings::Action::Add10Minute);
+    m_keybindingDefaults.push_back('Y');
+    
+    // === Limit Controls ===
+    // Toggle Limit Validation
+    auto toggleLimitValidationBtn = CreateKeybindButton(10125, Keybindings::Action::ToggleLimitValidation, &waitingForToggleLimitValidation, this);
+    RegisterTweakable(toggleLimitValidationBtn);
+    m_keybindingItems.push_back(toggleLimitValidationBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ToggleLimitValidation);
+    m_keybindingDefaults.push_back(VK_F4);
+    
+    // === Pause Controls ===
+    
+    // Toggle Pause
+    auto togglePauseBtn = CreateKeybindButton(10126, Keybindings::Action::TogglePause, &waitingForTogglePause, this);
+    RegisterTweakable(togglePauseBtn);
+    m_keybindingItems.push_back(togglePauseBtn);
+    m_keybindingActions.push_back(Keybindings::Action::TogglePause);
+    m_keybindingDefaults.push_back('P');
+    
+    // === Leaderboard Scanner Controls ===
+    
+    // Scan Leaderboard By ID
+    auto scanLeaderboardByIDBtn = CreateKeybindButton(10127, Keybindings::Action::ScanLeaderboardByID, &waitingForScanLeaderboardByID, this);
+    RegisterTweakable(scanLeaderboardByIDBtn);
+    m_keybindingItems.push_back(scanLeaderboardByIDBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ScanLeaderboardByID);
+    m_keybindingDefaults.push_back(VK_F2);
+    
+    // Scan Current Leaderboard
+    auto scanCurrentLeaderboardBtn = CreateKeybindButton(10128, Keybindings::Action::ScanCurrentLeaderboard, &waitingForScanCurrentLeaderboard, this);
+    RegisterTweakable(scanCurrentLeaderboardBtn);
+    m_keybindingItems.push_back(scanCurrentLeaderboardBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ScanCurrentLeaderboard);
+    m_keybindingDefaults.push_back(VK_F3);
+    
+    // === Track Central Auto-Scroll Controls ===
+    
+    // Start Auto Scroll
+    auto startAutoScrollBtn = CreateKeybindButton(10129, Keybindings::Action::StartAutoScroll, &waitingForStartAutoScroll, this);
+    RegisterTweakable(startAutoScrollBtn);
+    m_keybindingItems.push_back(startAutoScrollBtn);
+    m_keybindingActions.push_back(Keybindings::Action::StartAutoScroll);
+    m_keybindingDefaults.push_back(VK_F5);
+    
+    // Killswitch
+    auto killswitchBtn = CreateKeybindButton(10130, Keybindings::Action::Killswitch, &waitingForKillswitch, this);
+    RegisterTweakable(killswitchBtn);
+    m_keybindingItems.push_back(killswitchBtn);
+    m_keybindingActions.push_back(Keybindings::Action::Killswitch);
+    m_keybindingDefaults.push_back(VK_F6);
+    
+    // Cycle Search
+    auto cycleSearchBtn = CreateKeybindButton(10131, Keybindings::Action::CycleSearch, &waitingForCycleSearch, this);
+    RegisterTweakable(cycleSearchBtn);
+    m_keybindingItems.push_back(cycleSearchBtn);
+    m_keybindingActions.push_back(Keybindings::Action::CycleSearch);
+    m_keybindingDefaults.push_back(VK_F7);
+    
+    // Decrease Scroll Delay
+    auto decreaseScrollDelayBtn = CreateKeybindButton(10132, Keybindings::Action::DecreaseScrollDelay, &waitingForDecreaseScrollDelay, this);
+    RegisterTweakable(decreaseScrollDelayBtn);
+    m_keybindingItems.push_back(decreaseScrollDelayBtn);
+    m_keybindingActions.push_back(Keybindings::Action::DecreaseScrollDelay);
+    m_keybindingDefaults.push_back(VK_INSERT);
+    
+    // Increase Scroll Delay
+    auto increaseScrollDelayBtn = CreateKeybindButton(10133, Keybindings::Action::IncreaseScrollDelay, &waitingForIncreaseScrollDelay, this);
+    RegisterTweakable(increaseScrollDelayBtn);
+    m_keybindingItems.push_back(increaseScrollDelayBtn);
+    m_keybindingActions.push_back(Keybindings::Action::IncreaseScrollDelay);
+    m_keybindingDefaults.push_back(VK_DELETE);
+    
+    // === Leaderboard Direct Controls ===
+    
+    // Test Fetch Track ID
+    auto testFetchTrackIDBtn = CreateKeybindButton(10134, Keybindings::Action::TestFetchTrackID, &waitingForTestFetchTrackID, this);
+    RegisterTweakable(testFetchTrackIDBtn);
+    m_keybindingItems.push_back(testFetchTrackIDBtn);
+    m_keybindingActions.push_back(Keybindings::Action::TestFetchTrackID);
+    m_keybindingDefaults.push_back(VK_F10);
+    
+    // === Multiplayer Monitoring Controls ===
+    // Save Multiplayer Logs
+    auto saveMultiplayerLogsBtn = CreateKeybindButton(10136, Keybindings::Action::SaveMultiplayerLogs, &waitingForSaveMultiplayerLogs, this);
+    RegisterTweakable(saveMultiplayerLogsBtn);
+    m_keybindingItems.push_back(saveMultiplayerLogsBtn);
+    m_keybindingActions.push_back(Keybindings::Action::SaveMultiplayerLogs);
+    m_keybindingDefaults.push_back('M');
+    
+    // Capture Session State
+    auto captureSessionStateBtn = CreateKeybindButton(10137, Keybindings::Action::CaptureSessionState, &waitingForCaptureSessionState, this);
+    RegisterTweakable(captureSessionStateBtn);
+    m_keybindingItems.push_back(captureSessionStateBtn);
+    m_keybindingActions.push_back(Keybindings::Action::CaptureSessionState);
+    m_keybindingDefaults.push_back('N');
+    
+    // === ActionScript Controls ===
+    // Full Countdown Sequence
+    auto fullCountdownSequenceBtn = CreateKeybindButton(10141, Keybindings::Action::FullCountdownSequence, &waitingForFullCountdownSequence, this);
+    RegisterTweakable(fullCountdownSequenceBtn);
+    m_keybindingItems.push_back(fullCountdownSequenceBtn);
+    m_keybindingActions.push_back(Keybindings::Action::FullCountdownSequence);
+    m_keybindingDefaults.push_back('Z');
+    
+    // Show Single Countdown
+    auto showSingleCountdownBtn = CreateKeybindButton(10142, Keybindings::Action::ShowSingleCountdown, &waitingForShowSingleCountdown, this);
+    RegisterTweakable(showSingleCountdownBtn);
+    m_keybindingItems.push_back(showSingleCountdownBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ShowSingleCountdown);
+    m_keybindingDefaults.push_back(VK_SHIFT);
+    
+    // Toggle Load Screen
+    auto ToggleLoadScreenBtn = CreateKeybindButton(10143, Keybindings::Action::ToggleLoadScreen, &waitingForToggleLoadScreen, this);
+    RegisterTweakable(ToggleLoadScreenBtn);
+    m_keybindingItems.push_back(ToggleLoadScreenBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ToggleLoadScreen);
+    m_keybindingDefaults.push_back('L');
+    
+    // Save as Default button - explicitly saves current keybindings to config file
+    auto saveKeybindings = std::make_shared<TweakableButton>(
+        10198,
+        "Save as Default"
+    );
+    saveKeybindings->SetOnClickCallback([]() {
+        if (Keybindings::SaveToFile()) {
+            LOG_INFO("[DevMenu] Keybindings saved to config file");
+        } else {
+            LOG_ERROR("[DevMenu] Failed to save keybindings to config file");
+        }
+    });
+    RegisterTweakable(saveKeybindings);
+    m_keybindingItems.push_back(saveKeybindings);
+    
+    // Reset all to defaults button
+    auto resetKeybindings = std::make_shared<TweakableButton>(
+        10199,
+        "Reset All to Defaults"
+    );
+    resetKeybindings->SetOnClickCallback([this]() {
+        // Reset each keybinding to its default using the stored mappings
+        for (size_t i = 0; i < m_keybindingActions.size(); i++) {
+            Keybindings::Action action = m_keybindingActions[i];
+            int defaultKey = m_keybindingDefaults[i];
+            
+            // Reset the keybinding
+            Keybindings::SetKey(action, defaultKey);
+            
+            // Update the button label
+            std::string keyName = Keybindings::GetKeyName(defaultKey);
+            m_keybindingItems[i]->SetName("Bind " + Keybindings::GetActionName(action) + ": " + keyName);
+        }
+        
+        LOG_VERBOSE("[DevMenu] Reset all keybindings to defaults");
+    });
+    RegisterTweakable(resetKeybindings);
+    m_keybindingItems.push_back(resetKeybindings);
 }

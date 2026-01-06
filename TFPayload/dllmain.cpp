@@ -14,7 +14,6 @@
 #include "tracks.h"
 #include "payload.h"
 #include "leaderboard_scanner.h"
-#include "feed_fetcher.h"
 #include "leaderboard_direct.h"
 #include "pause.h"
 #include "devMenu.h"
@@ -23,6 +22,10 @@
 #include "actionscript.h"
 #include "logging.h"
 #include "respawn.h"
+#include "camera.h"
+#include "multiplayer.h"
+#include "keybindings.h"
+#include "bike-swap.h"
 #include <MinHook.h>
 
 // FORWARD DECLARATIONS
@@ -111,14 +114,6 @@ void OnTrackUpdate(const Tracks::TrackInfo& trackInfo)
     }
 }
 
-void OnFeedTrack(const FeedFetcher::TrackMetadata& track)
-{
-    LOG_INFO("[FEED] Track ID: " << track.trackId
-        << " | Name: " << track.trackName
-        << " | Author: " << track.authorName);
-}
-
-
 // SHUTDOWN
 extern "C" __declspec(dllexport) void ShutdownPayload()
 {
@@ -153,10 +148,13 @@ extern "C" __declspec(dllexport) void ShutdownPayload()
 
     Tracks::Shutdown();
     LeaderboardScanner::Shutdown();
-    FeedFetcher::Shutdown();
     LeaderboardDirect::Shutdown();
     Pause::Shutdown();
     Respawn::Shutdown();
+    Camera::Shutdown();
+    Multiplayer::Shutdown();
+    Keybindings::Shutdown();
+    BikeSwap::Shutdown();
 
     LOG_VERBOSE("[Main] All resources cleaned up.");
 }
@@ -208,11 +206,6 @@ extern "C" __declspec(dllexport) void PayloadInit()
     LeaderboardScanner::Initialize(baseAddress);
     LOG_VERBOSE("[TFPayload] Leaderboard scanner initialized");
 
-    // Initialize feed fetcher
-    FeedFetcher::SetTrackCallback(OnFeedTrack);
-    FeedFetcher::Initialize(baseAddress);
-    LOG_VERBOSE("[TFPayload] Feed fetcher initialized");
-
     // Initialize leaderboard direct (patch-based, UI-independent)
     LeaderboardDirect::Initialize(baseAddress);
     LOG_VERBOSE("[TFPayload] Leaderboard direct initialized");
@@ -235,9 +228,36 @@ extern "C" __declspec(dllexport) void PayloadInit()
         LOG_ERROR("[TFPayload] Failed to initialize respawn system!");
     }
 
+    // Initialize camera system
+    if (Camera::Initialize(baseAddress)) {
+        LOG_VERBOSE("[TFPayload] Camera system initialized");
+    } else {
+        LOG_ERROR("[TFPayload] Failed to initialize camera system!");
+    }
+    
+    // Initialize multiplayer monitoring (Phase 1)
+    if (Multiplayer::Initialize(baseAddress)) {
+        LOG_VERBOSE("[TFPayload] Multiplayer monitoring initialized (Phase 1)");
+    } else {
+        LOG_ERROR("[TFPayload] Failed to initialize multiplayer monitoring!");
+    }
+    
+    // Initialize bike swap system
+    if (BikeSwap::Initialize(baseAddress)) {
+        LOG_VERBOSE("[TFPayload] Bike swap system initialized");
+    } else {
+        LOG_ERROR("[TFPayload] Failed to initialize bike swap system!");
+    }
+    
+    // Initialize logging system
+    Logging::Initialize();
+    
+    // Initialize keybindings system BEFORE dev menu
+    Keybindings::Initialize();
+
     // Wait a moment to ensure ProxyDLL has hooked D3D11
     LOG_VERBOSE("[TFPayload] Waiting for ProxyDLL to initialize D3D11...");
-    Sleep(500);
+    Sleep(400);
 
     // Initialize rendering system (connects to ProxyDLL's hook)
     if (!Rendering::Initialize()) {
@@ -275,8 +295,6 @@ extern "C" __declspec(dllexport) void PayloadInit()
     }
 
     LOG_VERBOSE("[TFPayload] Key monitor thread created successfully!");
-    // Initialize logging system
-    Logging::Initialize();
     
     LOG_INFO("[TFPayload] === INITIALIZATION COMPLETE ===");
 }
@@ -293,325 +311,318 @@ struct HotkeyState {
     bool f12 = false;
     bool insert = false;
     bool del = false;
-    bool home = false;
-    bool b = false;
-    bool d = false;
-    bool m = false;
-    bool n = false;
-    bool u = false;
-    bool i = false;
     bool t = false;
     bool l = false;
-    bool c = false;
     bool k = false;
-    bool v = false;
     bool y = false;
     bool p = false;
     bool o = false;
     bool equals = false;
     bool hyphen = false;
     bool clearConsole = false;
+    bool semicolon = false;
 };
+
+
+
+
 
 // HELP TEXT
 void PrintHelpText()
 {
+    // Get keybinding names at runtime
+    std::string InstantFinishKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::InstantFinish));
+    std::string ToggleDevMenuKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleDevMenu));
+    std::string ClearConsoleKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ClearConsole));
+    std::string ToggleVerboseLoggingKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleVerboseLogging));
+    std::string ShowHelpTextKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ShowHelpText));
+    std::string DumpTweakablesKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::DumpTweakables));
+    std::string CycleHUDKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::CycleHUD));
+    std::string RespawnAtCheckpointKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::RespawnAtCheckpoint));
+    std::string RespawnPrevCheckpointKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::RespawnPrevCheckpoint));
+    std::string RespawnNextCheckpointKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::RespawnNextCheckpoint));
+    std::string RespawnForward5Key = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::RespawnForward5));
+    std::string IncrementFaultKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::IncrementFault));
+    std::string DebugFaultCounterKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::DebugFaultCounter));
+    std::string Add100FaultsKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::Add100Faults));
+    std::string Subtract100FaultsKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::Subtract100Faults));
+    std::string ResetFaultsKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ResetFaults));
+    std::string DebugTimeCounterKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::DebugTimeCounter));
+    std::string Add60SecondsKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::Add60Seconds));
+    std::string Subtract60SecondsKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::Subtract60Seconds));
+    std::string Add10MinuteKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::Add10Minute));
+    std::string ResetTimeKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ResetTime));
+    std::string ToggleLimitValidationKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleLimitValidation));
+    // Leaderboard Scanner
+    std::string ScanLeaderboardByIDKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ScanLeaderboardByID));
+    std::string ScanCurrentLeaderboardKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ScanCurrentLeaderboard));
+    // Track Central Auto-Scroll
+    std::string StartAutoScrollKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::StartAutoScroll));
+    std::string KillswitchKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::Killswitch));
+    std::string CycleSearchKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::CycleSearch));
+    std::string DecreaseScrollDelayKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::DecreaseScrollDelay));
+    std::string IncreaseScrollDelayKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::IncreaseScrollDelay));
+    // Leaderboard Direct
+    std::string TestFetchTrackIDKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::TestFetchTrackID));
+    std::string TogglePatchKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::TogglePatch));
+    // Pause controls
+    std::string TogglePauseKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::TogglePause));
+    // Multiplayer Monitoring
+    std::string SaveMultiplayerLogsKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::SaveMultiplayerLogs));
+    std::string CaptureSessionStateKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::CaptureSessionState));
+    // Physics Logging
+    std::string TogglePhysicsLoggingKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::TogglePhysicsLogging));
+    std::string DumpPhysicsLogKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::DumpPhysicsLog));
+    std::string ModifyXPositionKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ModifyXPosition));
+    // ActionScript Commands
+    std::string FullCountdownSequenceKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::FullCountdownSequence));
+    std::string ShowSingleCountdownKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ShowSingleCountdown));
+    std::string ToggleLoadScreen = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleLoadScreen));
+    
     LOG_INFO("  TRIALS FUSION MOD - HOTKEY CONTROLS");
     LOG_INFO("========================================");
-    LOG_INFO("SYSTEM:");
-    LOG_INFO("  C   - Clear debug console");
-    LOG_INFO("  -   - Show this help text");
-    LOG_INFO("  =   - Toggle verbose logging (ON/OFF)");
-    LOG_INFO("  END - Shutdown and unload TFPayload.dll (automatic)");
-    LOG_INFO("  F1  - Reload TFPayload.dll (load/unload toggle)");
+    LOG_INFO("Help Commands:");
+    LOG_INFO("\t" << ClearConsoleKey << "\t\t\t\t- Clear debug console");
+    LOG_INFO("\t" << ShowHelpTextKey << "\t\t\t\t- Show this help text");
+    LOG_INFO("\t" << ToggleVerboseLoggingKey << "\t\t\t\t- Toggle verbose logging (ON/OFF)");
+    LOG_INFO("\tEND\t\t\t\t- Shutdown and unload TFPayload.dll(automatic)");
+    LOG_INFO("\tF1\t\t\t\t- Reload TFPayload.dll (load/unload toggle)");
+    LOG_INFO("\t" << ToggleDevMenuKey << "\t\t\t\t- Open DevMenu");
+    LOG_INFO("\tK\t\t\t\t- Open Keybindings Menu");
     LOG_INFO("");
-    LOG_INFO("LEADERBOARD SCANNER:");
-    LOG_INFO("  F2  - Scan current leaderboard view (friends/overall/myscore) for single track by ID (default: 221120)");
-    LOG_INFO("  F3  - Scan current open leaderboard");
+    LOG_INFO("Track Functions:");
+    LOG_INFO("\t" << InstantFinishKey << "\t\t\t\t- Instant Pass Track");
+    LOG_INFO("\t" << CycleHUDKey << "\t\t\t\t- Cycle HUD Visibility in Track/Replay");
+    LOG_INFO("\t" << TogglePauseKey << "\t\t\t\t- Toggle time/physics ON/OFF");
+    LOG_INFO("\t" << Add60SecondsKey << "\t\t\t\t- Add 1 Minute to Timer");
+    LOG_INFO("\t" << Subtract60SecondsKey << "\t\t\t\t- Subtract 1 Minute from Timer");
+    LOG_INFO("\t" << Add10MinuteKey << "\t\t\t\t- Add 10 minutes to Timer");
+    LOG_INFO("\t" << Add100FaultsKey << "\t\t\t\t- Add 100 faults to fault-counter");
+    LOG_INFO("\t" << Subtract100FaultsKey << "\t\t\t\t- Subtract 100 faults from fault-counter");
+    LOG_INFO("\t" << ResetFaultsKey << "\t\t\t\t- Reset Faults to 0");
+    LOG_INFO("\t" << IncrementFaultKey << "\t\t\t\t- Add 1 fault to fault-counter");
+    LOG_INFO("\t" << ToggleLimitValidationKey << "\t\t\t\t- Toggle Fault/Time Limits");
     LOG_INFO("");
-    LOG_INFO("TRACK CENTRAL AUTO-SCROLL:");
-    LOG_INFO("  F5  - Start auto-scroll");
-    LOG_INFO("  F6  - KILLSWITCH (Emergency stop ALL operations)");
-    LOG_INFO("  F12 - Cycle through searches: Ninja -> Mountain -> Speed");
-    LOG_INFO("  INSERT - Decrease scroll delay (-200ms)");
-    LOG_INFO("  DELETE - Increase scroll delay (+200ms)");
-    LOG_INFO("  NOTE: All tracks auto-saved to F:/tracks_data.csv");
+    LOG_INFO("Leaderboard:");
+    LOG_INFO("\t" << ScanLeaderboardByIDKey << "\t\t\t\t- Scan current leaderboard (friends/overall/myscore) for single track by ID (default: 221120)");
+    LOG_INFO("\t" << ScanCurrentLeaderboardKey << "\t\t\t\t- Scan current open leaderboard");
+    LOG_INFO("\t" << TestFetchTrackIDKey << "\t\t\t\t- Test fetch track ID 221120");
     LOG_INFO("");
-    LOG_INFO("FEED FETCHER:");
-    LOG_INFO("  F8  - Stop feed fetching");
-    LOG_INFO("  F9  - Save feed data to CSV");
+    LOG_INFO("Track Central:");
+    LOG_INFO("\t" << StartAutoScrollKey << "\t\t\t\t- Start auto-scroll search-pages");
+    LOG_INFO("\t" << KillswitchKey << "\t\t\t\t- KILLSWITCH (Emergency stop ALL operations)");
+    LOG_INFO("\t" << CycleSearchKey << "\t\t\t\t- Cycle through searches: Ninja -> Mountain -> Speed");
+    LOG_INFO("\t" << DecreaseScrollDelayKey << "\t\t\t\t- Decrease scroll delay (-200ms)");
+    LOG_INFO("\t" << IncreaseScrollDelayKey << "\t\t\t\t- Increase scroll delay (+200ms)");
+    LOG_VERBOSE("  NOTE: All tracks auto-saved to F:/tracks_data.csv");
     LOG_INFO("");
-    LOG_INFO("LEADERBOARD DIRECT (Patch-based, No UI required!):");
-    LOG_INFO("  F10 - Test fetch track ID 221120");
-    LOG_INFO("  F11 - Toggle patch (bypass track check)");
+    LOG_INFO("Checkpoints:");
+    LOG_INFO("\t" << RespawnAtCheckpointKey << "\t\t\t\t- Respawn at current checkpoint");
+    LOG_INFO("\t" << RespawnNextCheckpointKey << "\t\t\t\t- Respawn at next checkpoint");
+    LOG_INFO("\t" << RespawnPrevCheckpointKey << "\t\t\t\t- Respawn at previous checkpoint");
+    LOG_INFO("\t" << RespawnForward5Key << "\t\t\t\t- Respawn 5 checkpoints ahead");
     LOG_INFO("");
-    LOG_INFO("PAUSE Time/Physics:");
-    LOG_INFO("  0   - Toggle pause/resume");
+    LOG_INFO("Multiplayer(Phase 1):");
+    LOG_INFO("\t" << SaveMultiplayerLogsKey << "\t\t\t\t- Save all multiplayer logs (sessions, packets, stats)");
+    LOG_INFO("\t" << CaptureSessionStateKey << "\t\t\t\t- Capture current session state");
+    LOG_VERBOSE("Logs: F:/mp_session_log.txt, F:/mp_sessions.csv, F:/mp_packets.csv");
     LOG_INFO("");
-    LOG_INFO("SAVE STATES (TAS-style):");
-    LOG_INFO("  F7       - Quick save (slot 0)");
-    LOG_INFO("  F8       - Quick load (slot 0)");
-    LOG_INFO("  SHIFT+1-9 - Save to slot 1-9");
-    LOG_INFO("  1-9      - Load from slot 1-9");
-    LOG_INFO("");
-    LOG_INFO("SAVE PHYSICS (Camera state - using game functions):");
-    LOG_INFO("  1  - Quick save physics (slot 0)");
-    LOG_INFO("  2  - Quick load physics (slot 0)");
-    LOG_INFO("");
-    LOG_INFO("SAVE BIKE (Actual bike entity):");
-    LOG_INFO("  3  - Quick save bike (slot 0)");
-    LOG_INFO("  4  - Quick load bike (slot 0)");
-    LOG_INFO("");
-    LOG_INFO("RESPAWN:");
-    LOG_INFO("  Q  - Respawn at current checkpoint");
-    LOG_INFO("  E  - Respawn at next checkpoint");
-    LOG_INFO("  W  - Respawn at previous checkpoint");
-    LOG_INFO("");
-    LOG_INFO("DEV MENU / TWEAKABLES:");
-    LOG_INFO("  HOME - Toggle Custom ImGui Dev Menu (Renders in-game!)");
-    LOG_INFO("  B    - Dump tweakables data (see what's available)");
-    LOG_INFO("");
-    LOG_INFO("BIKE MEMORY DUMP:");
-    LOG_INFO("  Y    - Dump bike state to F:/bike_dump.txt (CSV format)");
-    LOG_INFO("  U    - Save current bike state (position, velocity, rotation)");
-    LOG_INFO("  I    - Load saved bike state (teleport + set velocity)");
-    LOG_INFO("");
-    LOG_INFO("PHYSICS LOGGING:");
-    LOG_INFO("  P    - Toggle CP skip physics logging (ON/OFF)");
-    LOG_INFO("  O    - Dump physics log to F:/physics_log.csv");
-    LOG_INFO("  X    - Modify X position by +100 units (test if bike/camera moves)");
-    LOG_INFO("");
-    LOG_INFO("SKIP INTRO:");
-    LOG_INFO("  (Automatic on load - video loader is hooked)");
+    LOG_INFO("Dev Menu:");
+    LOG_INFO("\t" << DumpTweakablesKey << "\t\t\t\t- Dump tweakables data (see what's available)");
     LOG_INFO("");
     LOG_INFO("ACTIONSCRIPT COMMANDS:");
-    LOG_INFO("  T        - Full countdown sequence (3, 2, 1, GO, Ready!) with auto-timing");
-    LOG_INFO("  SHIFT+T  - Show single countdown value (39)");
+    LOG_INFO("\t" << FullCountdownSequenceKey << "\t\t\t\t- Full countdown sequence (3, 2, 1, GO, Ready!) with auto-timing");
     LOG_INFO("");
-    LOG_INFO("ACTIONSCRIPT MESSAGING:");
-    LOG_INFO("  L        - Test ActionScript commands (loading screen, clear messages)");
+    LOG_INFO("ACTIONSCRIPT/FLASH COMMAND MESSAGING:");
+    LOG_INFO("\t" << ToggleLoadScreen << "\t\t\t\t- Toggle loading screen");
     LOG_INFO("");
-    LOG_INFO("Results: F:/tracks_data.csv, F:/leaderboard_scans.txt & feed_data.csv");
-    LOG_INFO("========================================\n");
+    LOG_INFO("BIKE SWAP (Runtime Bike Changing):");
+    LOG_INFO("\t[\t\t\t\t- Cycle to previous bike");
+    LOG_INFO("\t]\t\t\t\t- Cycle to next bike");
+    LOG_INFO("\t\\\t\t\t\t- Debug dump bike state");
+    LOG_INFO("");
+    LOG_VERBOSE("Results: F:/tracks_data.csv, F:/leaderboard_scans.txt & feed_data.csv");
 }
 
 // HOTKEY HANDLERS
-void HandleF5(HotkeyState& state)
+void HandleF5()
 {
-    bool f5IsPressed = (GetAsyncKeyState(VK_F5) & 0x8000) != 0;
-    if (f5IsPressed && !state.f5) {
+    if (Keybindings::IsActionPressed(Keybindings::Action::StartAutoScroll)) {
+        std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::StartAutoScroll));
         if (!Tracks::IsAutoScrolling()) {
-            LOG_INFO("\n[F5] ===== TRACK AUTO-SCROLL STARTED =====");
+            LOG_INFO("\n[" << keyName << "] ===== TRACK AUTO-SCROLL STARTED =====");
             Tracks::AutoScrollConfig config;
             config.delayMs = 2000;
             config.maxScrolls = 0;
             config.useRightArrow = true;
             Tracks::StartAutoScroll(config);
-            LOG_INFO("[F5] Auto-scrolling with 2s delay (Right Arrow)");
-            LOG_INFO("[F5] Press F6 to stop");
+            LOG_INFO("[" << keyName << "] Auto-scrolling with 2s delay (Right Arrow)");
+            LOG_INFO("[" << keyName << "] Press F6 to stop");
         }
         else {
-            LOG_INFO("[F5] Auto-scroll already running! Press F6 to stop first.");
+            LOG_INFO("[" << keyName << "] Auto-scroll already running! Press F6 to stop first.");
         }
     }
-    state.f5 = f5IsPressed;
 }
 
-void HandleF6(HotkeyState& state)
+void HandleF6()
 {
-    bool f6IsPressed = (GetAsyncKeyState(VK_F6) & 0x8000) != 0;
-    if (f6IsPressed && !state.f6) {
+    if (Keybindings::IsActionPressed(Keybindings::Action::Killswitch)) {
+        std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::Killswitch));
         if (Tracks::IsKillSwitchActivated()) {
             Tracks::DeactivateKillSwitch();
-            LOG_INFO("[F6] Killswitch DEACTIVATED - ready for new operations");
+            LOG_INFO("[" << keyName << "] Killswitch DEACTIVATED - ready for new operations");
         }
         else {
             Tracks::ActivateKillSwitch();
-            LOG_INFO("[F6] *** KILLSWITCH ACTIVATED ***");
+            LOG_INFO("[" << keyName << "] *** KILLSWITCH ACTIVATED ***");
         }
     }
-    state.f6 = f6IsPressed;
 }
 
-
-void HandleF8(HotkeyState& state)
+void HandleF12()
 {
-    bool f8IsPressed = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
-    if (f8IsPressed && !state.f8) {
-        LOG_VERBOSE("[F8] Stopping feed fetch...");
-        FeedFetcher::StopFetch();
-    }
-    state.f8 = f8IsPressed;
-}
-
-void HandleF9(HotkeyState& state)
-{
-    bool f9IsPressed = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
-    if (f9IsPressed && !state.f9) {
-        LOG_VERBOSE("[F9] Saving feed data...");
-        FeedFetcher::SaveToFile();
-        auto state_data = FeedFetcher::GetState();
-        LOG_VERBOSE("Saved " << state_data.fetchedTracks.size() << " tracks to CSV");
-    }
-    state.f9 = f9IsPressed;
-}
-
-
-void HandleF12(HotkeyState& state)
-{
-    bool f12IsPressed = (GetAsyncKeyState(VK_F12) & 0x8000) != 0;
-    if (f12IsPressed && !state.f12) {
+    if (Keybindings::IsActionPressed(Keybindings::Action::CycleSearch)) {
+        std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::CycleSearch));
         if (!Tracks::IsAutoSearching()) {
-            LOG_VERBOSE("\n[F12] ===== CYCLING TO NEXT SEARCH =====");
+            LOG_VERBOSE("\n[" << keyName << "] ===== CYCLING TO NEXT SEARCH =====");
             Tracks::CycleToNextSearch();
         }
         else {
-            LOG_VERBOSE("[F12] Search/switch operation already in progress! Please wait...");
+            LOG_VERBOSE("[" << keyName << "] Search/switch operation already in progress! Please wait...");
         }
     }
-    state.f12 = f12IsPressed;
 }
 
-void HandleInsert(HotkeyState& state)
+void HandleInsert()
 {
-    bool insertIsPressed = (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0;
-    if (insertIsPressed && !state.insert) {
+    if (Keybindings::IsActionPressed(Keybindings::Action::DecreaseScrollDelay)) {
+        std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::DecreaseScrollDelay));
         auto config = Tracks::GetAutoScrollConfig();
         uint32_t newDelay = (config.delayMs > 200) ? config.delayMs - 200 : 200;
         Tracks::SetAutoScrollDelay(newDelay);
-        LOG_VERBOSE("[INSERT] Scroll delay decreased to " << newDelay << "ms");
+        LOG_VERBOSE("[" << keyName << "] Scroll delay decreased to " << newDelay << "ms");
     }
-    state.insert = insertIsPressed;
 }
 
-void HandleDelete(HotkeyState& state)
+void HandleDelete()
 {
-    bool deleteIsPressed = (GetAsyncKeyState(VK_DELETE) & 0x8000) != 0;
-    if (deleteIsPressed && !state.del) {
+    if (Keybindings::IsActionPressed(Keybindings::Action::IncreaseScrollDelay)) {
+        std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::IncreaseScrollDelay));
         auto config = Tracks::GetAutoScrollConfig();
         uint32_t newDelay = config.delayMs + 200;
         Tracks::SetAutoScrollDelay(newDelay);
-        LOG_VERBOSE("[DELETE] Scroll delay increased to " << newDelay << "ms");
+        LOG_VERBOSE("[" << keyName << "] Scroll delay increased to " << newDelay << "ms");
     }
-    state.del = deleteIsPressed;
 }
 
-void HandleB(HotkeyState& state)
+void HandleDumpTweakables()
 {
-    bool bIsPressed = (GetAsyncKeyState('B') & 0x8000) != 0;
-    if (bIsPressed && !state.b) {
-        LOG_VERBOSE("[B] Dumping tweakables data...");
+    if (Keybindings::IsActionPressed(Keybindings::Action::DumpTweakables)) {
+        std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::DumpTweakables));
+        LOG_VERBOSE("[" << keyName << "] Dumping tweakables data...");
         if (g_DevMenu) {
             g_DevMenu->DumpTweakablesData();
         } else {
-            LOG_ERROR("[B] DevMenu not initialized!");
+            LOG_ERROR("[" << keyName << "] DevMenu not initialized!");
         }
     }
-    state.b = bIsPressed;
 }
 
-void HandleT(HotkeyState& state)
+void HandleT()
 {
-    bool tIsPressed = (GetAsyncKeyState('T') & 0x8000) != 0;
+    // Check for SHIFT+T (ShowSingleCountdown) first
     bool shiftPressed = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     
-    if (tIsPressed && !state.t) {
+    if (shiftPressed && Keybindings::IsActionPressed(Keybindings::Action::ShowSingleCountdown)) {
+        std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ShowSingleCountdown));
         LOG_VERBOSE("");
-        
-        if (shiftPressed) {
-            // SHIFT+T: Show just single integer
-            LOG_VERBOSE("[SHIFT+T] Calling ShowStartCountdownDirect(39)...");
-            if (ActionScript::ShowStartCountdownDirect(39)) {
-                LOG_VERBOSE("[SHIFT+T] Successfully showed countdown value 39");
-            } else {
-                LOG_ERROR("[SHIFT+T] Failed to show countdown");
-            }
+        LOG_VERBOSE("[" << keyName << "] Calling ShowStartCountdownDirect(39)...");
+        if (ActionScript::ShowStartCountdownDirect(39)) {
+            LOG_VERBOSE("[" << keyName << "] Successfully showed countdown value 39");
         } else {
-            // Just T: Full countdown sequence (3, 2, 1, GO)
-            LOG_VERBOSE("[T] Starting full countdown sequence (3, 2, 1, GO)...");
-            if (ActionScript::ShowFullCountdownSequence()) {
-                LOG_VERBOSE("[T] Full countdown sequence completed!");
-            } else {
-                LOG_ERROR("[T] Countdown sequence failed");
-            }
+            LOG_ERROR("[" << keyName << "] Failed to show countdown");
         }
         LOG_VERBOSE("");
     }
-    state.t = tIsPressed;
+    // Check for regular T (FullCountdownSequence)
+    else if (Keybindings::IsActionPressed(Keybindings::Action::FullCountdownSequence)) {
+        std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::FullCountdownSequence));
+        LOG_VERBOSE("");
+        LOG_VERBOSE("[" << keyName << "] Starting full countdown sequence (3, 2, 1, GO)...");
+        if (ActionScript::ShowFullCountdownSequence()) {
+            LOG_VERBOSE("[" << keyName << "] Full countdown sequence completed!");
+        } else {
+            LOG_ERROR("[" << keyName << "] Countdown sequence failed");
+        }
+        LOG_VERBOSE("");
+    }
 }
 
-void HandleL(HotkeyState& state)
+void HandleL()
 {
-    bool lIsPressed = (GetAsyncKeyState('L') & 0x8000) != 0;
-    if (lIsPressed && !state.l) {
+    if (Keybindings::IsActionPressed(Keybindings::Action::ToggleLoadScreen)) {
+        std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleLoadScreen));
         static bool loadingScreenVisible = false;
         
         LOG_VERBOSE("");
-        LOG_VERBOSE("[L] === TOGGLING LOADING SCREEN ===");
+        LOG_VERBOSE("[" << keyName << "] === TOGGLING LOADING SCREEN ===");
         
         // Toggle the loading screen state
         loadingScreenVisible = !loadingScreenVisible;
         
         if (ActionScript::ShowLoadingScreen(loadingScreenVisible, "TESTING FROM C++")) {
-            LOG_VERBOSE("[L] Successfully " << (loadingScreenVisible ? "SHOWED" : "HID") << " loading screen");
+            LOG_VERBOSE("[" << keyName << "] Successfully " << (loadingScreenVisible ? "SHOWED" : "HID") << " loading screen");
         } else {
-            LOG_ERROR("[L] Failed to toggle loading screen");
+            LOG_ERROR("[" << keyName << "] Failed to toggle loading screen");
         }
         
         LOG_VERBOSE("");
     }
-    state.l = lIsPressed;
 }
 
-void HandleV(HotkeyState& state)
+void HandleInstantFinish()
 {
-    bool vIsPressed = (GetAsyncKeyState('V') & 0x8000) != 0;
-    if (vIsPressed && !state.v) {
+    if (Keybindings::IsActionPressed(Keybindings::Action::InstantFinish)) {
+        std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::InstantFinish));
         LOG_VERBOSE("");
-        LOG_VERBOSE("[V] Calling HandleRaceFinish (proper race finish flow)...");
+        LOG_VERBOSE("[" << keyName << "] Calling HandleRaceFinish (proper race finish flow)...");
         if (ActionScript::CallHandleRaceFinish()) {
-            LOG_VERBOSE("[V] HandleRaceFinish called successfully!");
+            LOG_VERBOSE("[" << keyName << "] HandleRaceFinish called successfully!");
         } else {
-            LOG_ERROR("[V] HandleRaceFinish failed");
+            LOG_ERROR("[" << keyName << "] HandleRaceFinish failed");
         }
         LOG_VERBOSE("");
     }
-    state.v = vIsPressed;
 }
 
-void HandleEquals(HotkeyState& state)
+void HandleToggleVerbose()
 {
-    bool equalsIsPressed = (GetAsyncKeyState(VK_OEM_PLUS) & 0x8000) != 0;
-    if (equalsIsPressed && !state.equals) {
+    if (Keybindings::IsActionPressed(Keybindings::Action::ToggleVerboseLogging)) {
         Logging::ToggleVerbose();
     }
-    state.equals = equalsIsPressed;
 }
 
-void HandleHyphen(HotkeyState& state)
+void HandleShowHelp()
 {
-    bool hyphenIsPressed = (GetAsyncKeyState(VK_OEM_MINUS) & 0x8000) != 0;
-    if (hyphenIsPressed && !state.hyphen) {
+    if (Keybindings::IsActionPressed(Keybindings::Action::ShowHelpText)) {
         LOG_INFO("");
         PrintHelpText();
     }
-    state.hyphen = hyphenIsPressed;
 }
 
-void HandleClearConsole(HotkeyState& state)
+void HandleClearConsole()
 {
-    bool cIsPressed = (GetAsyncKeyState('C') & 0x8000) != 0;
-    if (cIsPressed && !state.clearConsole) {
+    if (Keybindings::IsActionPressed(Keybindings::Action::ClearConsole)) {
         system("cls");
-        LOG_VERBOSE("[C] Debug console cleared");
+        std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ClearConsole));
+        LOG_VERBOSE("[" << keyName << "] Debug console cleared");
     }
-    state.clearConsole = cIsPressed;
 }
 
-void HandleHomeImGuiMenu(HotkeyState& state)
+void HandleHomeImGuiMenu()
 {
-    bool homeIsPressed = (GetAsyncKeyState(VK_HOME) & 0x8000) != 0;
-    if (homeIsPressed && !state.home) {
+    if (Keybindings::IsActionPressed(Keybindings::Action::ToggleDevMenu)) {
         if (g_DevMenu) {
             g_DevMenu->Toggle();
             LOG_VERBOSE("[HOME] Custom ImGui Dev Menu " << (g_DevMenu->IsVisible() ? "OPENED" : "CLOSED"));
@@ -619,9 +630,20 @@ void HandleHomeImGuiMenu(HotkeyState& state)
             LOG_ERROR("[HOME] Custom ImGui Dev Menu not initialized!");
         }
     }
-    state.home = homeIsPressed;
 }
 
+void HandleKeybindingsMenu()
+{
+    if (Keybindings::IsActionPressed(Keybindings::Action::ToggleKeybindingsMenu)) {
+        if (g_DevMenu) {
+            g_DevMenu->ToggleKeybindingsWindow();
+            std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleKeybindingsMenu));
+            LOG_VERBOSE("[" << keyName << "] Keybindings Menu " << (g_DevMenu->IsKeybindingsWindowVisible() ? "OPENED" : "CLOSED"));
+        } else {
+            LOG_ERROR("[K] Keybindings Menu not available - DevMenu not initialized!");
+        }
+    }
+}
 // Helper function to check if game window has focus
 static bool IsGameWindowFocused()
 {
@@ -693,26 +715,29 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
             return 0;
         }
 
-        HandleF5(hotkeyState);
-        HandleF6(hotkeyState);
-        HandleF9(hotkeyState);
-        HandleF12(hotkeyState);
-        HandleInsert(hotkeyState);
-        HandleDelete(hotkeyState);
-        HandleB(hotkeyState);
-        HandleT(hotkeyState);
-        HandleL(hotkeyState);
-        HandleV(hotkeyState);
+        HandleF5();
+        HandleF6();
+        HandleF12();
+        HandleInsert();
+        HandleDelete();
+        HandleDumpTweakables();
+        HandleT();
+        HandleL();
+        HandleInstantFinish();
         
-        HandleEquals(hotkeyState);
-        HandleHyphen(hotkeyState);
-        HandleClearConsole(hotkeyState);
-        HandleHomeImGuiMenu(hotkeyState);
+        HandleToggleVerbose();
+        HandleShowHelp();
+        HandleClearConsole();
+        HandleHomeImGuiMenu();
+        HandleKeybindingsMenu();
         
         LeaderboardScanner::CheckHotkey();
         LeaderboardDirect::CheckHotkey();
         Pause::CheckHotkey();
         Respawn::CheckHotkey();
+        Camera::CheckHotkey();
+        Multiplayer::CheckHotkey();
+        BikeSwap::CheckHotkey();
         
         Sleep(80);
     }

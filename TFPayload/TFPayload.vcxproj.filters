@@ -30,9 +30,6 @@
     <ClInclude Include="leaderboard_scanner.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="feed_fetcher.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="leaderboard_direct.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -81,6 +78,18 @@
     <ClInclude Include="respawn.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="camera.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="keybindings.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="multiplayer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="bike-swap.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -90,9 +99,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="leaderboard_scanner.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="feed_fetcher.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="tracks.cpp">
@@ -141,6 +147,18 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="respawn.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="camera.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="keybindings.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="multiplayer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="bike-swap.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

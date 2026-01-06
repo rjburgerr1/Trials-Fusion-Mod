@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "leaderboard_scanner.h"
+#include "Keybindings.h"
+
 #include "leaderboard_direct.h"
 #include "logging.h"
 #include <iostream>
@@ -524,11 +526,8 @@ namespace LeaderboardScanner {
             }
         }
 
-        // Check for F3 key press (scan current leaderboard)
-        static bool f3WasPressed = false;
-        bool f3IsPressed = (GetAsyncKeyState(VK_F3) & 0x8000) != 0;
-
-        if (f3IsPressed && !f3WasPressed) {
+        // Use keybindings for scan current leaderboard
+        if (Keybindings::IsActionPressed(Keybindings::Action::ScanCurrentLeaderboard)) {
             if (!s_state.isScanning) {
                 StartScan();
             }
@@ -537,19 +536,13 @@ namespace LeaderboardScanner {
             }
         }
 
-        f3WasPressed = f3IsPressed;
-
-        // Check for F2 key press (load track by ID - test with a hardcoded ID)
-        static bool f2WasPressed = false;
-        bool f2IsPressed = (GetAsyncKeyState(VK_F2) & 0x8000) != 0;
-
-        if (f2IsPressed && !f2WasPressed && !s_state.isScanning) {
+        // Use keybindings for scan by ID
+        if (Keybindings::IsActionPressed(Keybindings::Action::ScanLeaderboardByID) && !s_state.isScanning) {
             std::string testTrackId = "220120";
-            LOG_INFO("[Scanner] F2 pressed - Loading test track ID: " << testTrackId);
+            std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ScanLeaderboardByID));
+            LOG_INFO("[Scanner] " << keyName << " pressed - Loading test track ID: " << testTrackId);
             ScanTrackById(testTrackId);
         }
-
-        f2WasPressed = f2IsPressed;
         
         // Check for F4 key press (scan multiple tracks)
         static bool f4WasPressed = false;
