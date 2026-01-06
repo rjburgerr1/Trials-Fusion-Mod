@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "pause.h"
 #include "logging.h"
+#include "keybindings.h"
 #include <iostream>
 #include <Windows.h>
 
@@ -22,7 +23,6 @@ namespace Pause {
 
     // State tracking
     static bool g_initialized = false;
-    static bool g_key0WasPressed = false;
 
     bool Initialize(uintptr_t baseAddress) {
         if (g_initialized) {
@@ -63,7 +63,6 @@ namespace Pause {
         g_pauseCallback = nullptr;
         g_resumeCallback = nullptr;
         g_globalStructPtr = nullptr;
-        g_key0WasPressed = false;
     }
 
     void TogglePause() {
@@ -110,16 +109,12 @@ namespace Pause {
             return;
         }
 
-        // Check if '0' key is pressed (VK code is 0x30)
-        bool key0IsPressed = (GetAsyncKeyState(0x30) & 0x8000) != 0;
-
-        // Only trigger on key press (not held)
-        if (key0IsPressed && !g_key0WasPressed) {
-            LOG_VERBOSE("[Pause] '0' key pressed - toggling pause");
+        // Use the keybindings system instead of hardcoded key
+        if (Keybindings::IsActionPressed(Keybindings::Action::TogglePause)) {
+            std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::TogglePause));
+            LOG_VERBOSE("[Pause] '" << keyName << "' key pressed - toggling pause");
             TogglePause();
         }
-
-        g_key0WasPressed = key0IsPressed;
     }
 
     bool IsPaused() {

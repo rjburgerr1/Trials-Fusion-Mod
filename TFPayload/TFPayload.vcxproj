@@ -176,6 +176,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="actionscript.h" />
+    <ClInclude Include="camera.h" />
     <ClInclude Include="devMenu.h" />
     <ClInclude Include="devMenuSync.h" />
     <ClInclude Include="imgui\backends\imgui_impl_dx11.h" />
@@ -186,20 +187,23 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClInclude Include="imgui\imstb_rectpack.h" />
     <ClInclude Include="imgui\imstb_textedit.h" />
     <ClInclude Include="imgui\imstb_truetype.h" />
-    <ClInclude Include="feed_fetcher.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="leaderboard_direct.h" />
     <ClInclude Include="leaderboard_scanner.h" />
+    <ClInclude Include="keybindings.h" />
     <ClInclude Include="logging.h" />
+    <ClInclude Include="multiplayer.h" />
     <ClInclude Include="pause.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="payload.h" />
     <ClInclude Include="rendering.h" />
     <ClInclude Include="respawn.h" />
     <ClInclude Include="tracks.h" />
+    <ClInclude Include="bike-swap.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="actionscript.cpp" />
+    <ClCompile Include="camera.cpp" />
     <ClCompile Include="devMenu.cpp" />
     <ClCompile Include="devMenuSync.cpp" />
     <ClCompile Include="imgui\backends\imgui_impl_dx11.cpp" />
@@ -210,10 +214,11 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClCompile Include="imgui\imgui_tables.cpp" />
     <ClCompile Include="imgui\imgui_widgets.cpp" />
     <ClCompile Include="dllmain.cpp" />
-    <ClCompile Include="feed_fetcher.cpp" />
     <ClCompile Include="leaderboard_direct.cpp" />
     <ClCompile Include="leaderboard_scanner.cpp" />
+    <ClCompile Include="keybindings.cpp" />
     <ClCompile Include="logging.cpp" />
+    <ClCompile Include="multiplayer.cpp" />
     <ClCompile Include="pause.cpp" />
     <ClCompile Include="rendering.cpp" />
     <ClCompile Include="pch.cpp">
@@ -224,6 +229,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     </ClCompile>
     <ClCompile Include="respawn.cpp" />
     <ClCompile Include="tracks.cpp" />
+    <ClCompile Include="bike-swap.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

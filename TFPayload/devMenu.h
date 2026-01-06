@@ -5,6 +5,7 @@
 #include <memory>
 #include <functional>
 #include <unordered_map>
+#include "keybindings.h"
 
 // Forward declarations
 class DevMenuNode;
@@ -15,6 +16,7 @@ enum class TweakableType {
     Float,
     Int,
     Bool,
+    Button,
     Folder
 };
 
@@ -28,6 +30,7 @@ public:
     
     int GetId() const { return m_id; }
     const std::string& GetName() const { return m_name; }
+    void SetName(const std::string& name) { m_name = name; }
     TweakableType GetType() const { return m_type; }
     
     virtual void Render() = 0;
@@ -131,6 +134,30 @@ private:
     std::function<void(bool)> m_onChange;
 };
 
+// Button tweakable (triggers callback when clicked)
+class TweakableButton : public TweakableItem {
+public:
+    TweakableButton(int id, const std::string& name)
+        : TweakableItem(id, name, TweakableType::Button) {}
+    
+    void Render() override;
+    void Reset() override {} // Buttons don't need reset
+    
+    void SetOnClickCallback(std::function<void()> callback) {
+        m_onClick = callback;
+    }
+    
+    // Trigger the click callback directly (for custom button rendering)
+    void TriggerClick() {
+        if (m_onClick) {
+            m_onClick();
+        }
+    }
+
+private:
+    std::function<void()> m_onClick;
+};
+
 // Folder tweakable (contains other tweakables)
 class TweakableFolder : public TweakableItem {
 public:
@@ -174,6 +201,12 @@ public:
     void Show() { m_isVisible = true; }
     void Hide() { m_isVisible = false; }
     bool IsVisible() const { return m_isVisible; }
+    
+    // Toggle keybindings window visibility
+    void ToggleKeybindingsWindow() { m_showKeybindingsWindow = !m_showKeybindingsWindow; }
+    void ShowKeybindingsWindow() { m_showKeybindingsWindow = true; }
+    void HideKeybindingsWindow() { m_showKeybindingsWindow = false; }
+    bool IsKeybindingsWindowVisible() const { return m_showKeybindingsWindow; }
     
     // Reset all values to defaults
     void ResetAll();
@@ -244,12 +277,21 @@ private:
     // NEW: Mod-specific tweakables (not synced to game)
     void InitializeMod();
     
+    // NEW: Keybindings tab (top-level category)
+    void InitializeKeybindings();
+    
     // Helper functions
     void RegisterTweakable(std::shared_ptr<TweakableItem> item);
     bool PassesFilter(const std::string& name);
     
     std::vector<std::shared_ptr<TweakableFolder>> m_rootFolders;
     std::unordered_map<int, std::shared_ptr<TweakableItem>> m_tweakableMap;
+    
+    // Keybindings storage (separate from root folders)
+    std::vector<std::shared_ptr<TweakableItem>> m_keybindingItems;
+    std::vector<Keybindings::Action> m_keybindingActions; // Stores the Action for each keybinding button
+    std::vector<int> m_keybindingDefaults; // Stores the default key for each keybinding button
+    bool m_showKeybindingsWindow;
     
     bool m_isVisible;
     std::string m_searchFilter;

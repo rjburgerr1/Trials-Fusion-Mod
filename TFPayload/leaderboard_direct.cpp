@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "leaderboard_direct.h"
 #include "logging.h"
+#include "Keybindings.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
@@ -519,12 +520,10 @@ namespace LeaderboardDirect {
     // ============================================================
     
     void CheckHotkey() {
-        // F10 = Test fetch
-        static bool f10WasPressed = false;
-        bool f10IsPressed = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;
-
-        if (f10IsPressed && !f10WasPressed) {
-            LOG_INFO("\n[LB - Direct] F10 pressed - Testing leaderboard fetch...");
+        // Use keybindings for Test fetch
+        if (Keybindings::IsActionPressed(Keybindings::Action::TestFetchTrackID)) {
+            std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::TestFetchTrackID));
+            LOG_INFO("\n[LB - Direct] " << keyName << " pressed - Testing leaderboard fetch...");
             
             FetchRequest request;
             request.trackId = "221120";
@@ -534,22 +533,6 @@ namespace LeaderboardDirect {
             
             FetchLeaderboard(request);
         }
-        f10WasPressed = f10IsPressed;
-
-        // F11 = Toggle patch
-        static bool f11WasPressed = false;
-        bool f11IsPressed = (GetAsyncKeyState(VK_F11) & 0x8000) != 0;
-
-        if (f11IsPressed && !f11WasPressed) {
-            LOG_INFO("\n[LB - Direct] F11 pressed - Toggling patch...");
-            
-            if (s_state.isPatchApplied) {
-                RemovePatch();
-            } else {
-                ApplyPatch();
-            }
-        }
-        f11WasPressed = f11IsPressed;
     }
 
 } // namespace LeaderboardDirect

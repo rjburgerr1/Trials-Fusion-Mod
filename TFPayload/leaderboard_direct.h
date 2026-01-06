@@ -114,7 +114,7 @@ namespace LeaderboardDirect {
     // UPDATE / HOTKEYS
     // ============================================================
     
-    // Check hotkeys (F10 = test fetch, F11 = toggle patch)
+    // Check hotkeys (F10 = test fetch)
     void CheckHotkey();
 
 } // namespace LeaderboardDirect

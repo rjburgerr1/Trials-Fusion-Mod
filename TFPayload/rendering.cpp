@@ -83,8 +83,8 @@ void TFPayloadRenderCallback()
             ImGui::End();
         }
         
-        // Try to render DevMenu
-        if (g_DevMenu && g_DevMenu->IsVisible()) {
+        // Try to render DevMenu (or just keybindings window)
+        if (g_DevMenu && (g_DevMenu->IsVisible() || g_DevMenu->IsKeybindingsWindowVisible())) {
             try {
                 g_DevMenu->Render();
             }
