@@ -2,6 +2,7 @@
 #include "pause.h"
 #include "logging.h"
 #include "keybindings.h"
+#include "base-address.h"
 #include <iostream>
 #include <Windows.h>
 
@@ -10,10 +11,27 @@ namespace Pause {
     typedef void(__fastcall* PauseGameCallback_t)(void* inGameServicePtr);
     typedef void(__fastcall* ResumeGameCallback_t)(void* inGameServicePtr);
 
-    // RVA offsets
-    static constexpr uintptr_t PAUSE_CALLBACK_RVA = 0x467950;
-    static constexpr uintptr_t RESUME_CALLBACK_RVA = 0x467960;
-    static constexpr uintptr_t GLOBAL_STRUCT_RVA = 0x104b308;
+    // ============================================================================
+    // RVA offsets - Version-specific addresses
+    // Ghidra base: Uplay = 0x700000, Steam = 0x140000
+    // ============================================================================
+    namespace Uplay {
+        // PauseGameCallback: Ghidra 0x00B67950 - 0x700000 = 0x467950
+        static constexpr uintptr_t PAUSE_CALLBACK_RVA = 0x467950;
+        // ResumeGameCallback: Ghidra 0x00B67960 - 0x700000 = 0x467960
+        static constexpr uintptr_t RESUME_CALLBACK_RVA = 0x467960;
+        // g_pGameManager: Ghidra 0x0174B308 - 0x700000 = 0x104B308
+        static constexpr uintptr_t GLOBAL_STRUCT_RVA = 0x104b308;
+    }
+    
+    namespace Steam {
+        // PauseGameCallback: Ghidra 0x005A72C0 - 0x140000 = 0x4672C0
+        static constexpr uintptr_t PAUSE_CALLBACK_RVA = 0x4672C0;
+        // ResumeGameCallback: Ghidra 0x005A72D0 - 0x140000 = 0x4672D0
+        static constexpr uintptr_t RESUME_CALLBACK_RVA = 0x4672D0;
+        // g_pGameManager: Ghidra 0x0118D308 - 0x140000 = 0x104D308
+        static constexpr uintptr_t GLOBAL_STRUCT_RVA = 0x104d308;
+    }
 
     // Runtime addresses
     static uintptr_t g_baseAddress = 0;
@@ -37,18 +55,40 @@ namespace Pause {
 
         g_baseAddress = baseAddress;
 
+        // Select version-specific RVAs
+        uintptr_t pauseCallbackRVA;
+        uintptr_t resumeCallbackRVA;
+        uintptr_t globalStructRVA;
+        
+        if (BaseAddress::IsSteamVersion()) {
+            LOG_VERBOSE("[Pause] Steam version detected - using Steam addresses");
+            pauseCallbackRVA = Steam::PAUSE_CALLBACK_RVA;
+            resumeCallbackRVA = Steam::RESUME_CALLBACK_RVA;
+            globalStructRVA = Steam::GLOBAL_STRUCT_RVA;
+        } else {
+            LOG_VERBOSE("[Pause] Uplay version detected - using Uplay addresses");
+            pauseCallbackRVA = Uplay::PAUSE_CALLBACK_RVA;
+            resumeCallbackRVA = Uplay::RESUME_CALLBACK_RVA;
+            globalStructRVA = Uplay::GLOBAL_STRUCT_RVA;
+        }
+
         // Calculate addresses
-        g_pauseCallback = reinterpret_cast<PauseGameCallback_t>(baseAddress + PAUSE_CALLBACK_RVA);
-        g_resumeCallback = reinterpret_cast<ResumeGameCallback_t>(baseAddress + RESUME_CALLBACK_RVA);
-        g_globalStructPtr = reinterpret_cast<void**>(baseAddress + GLOBAL_STRUCT_RVA);
+        g_pauseCallback = reinterpret_cast<PauseGameCallback_t>(baseAddress + pauseCallbackRVA);
+        g_resumeCallback = reinterpret_cast<ResumeGameCallback_t>(baseAddress + resumeCallbackRVA);
+        g_globalStructPtr = reinterpret_cast<void**>(baseAddress + globalStructRVA);
+
+        LOG_VERBOSE("[Pause] PauseCallback at 0x" << std::hex << (baseAddress + pauseCallbackRVA));
+        LOG_VERBOSE("[Pause] ResumeCallback at 0x" << std::hex << (baseAddress + resumeCallbackRVA));
+        LOG_VERBOSE("[Pause] GlobalStruct at 0x" << std::hex << (baseAddress + globalStructRVA));
 
         // Verify addresses are valid
         if (IsBadReadPtr(g_globalStructPtr, sizeof(void*))) {
-            LOG_ERROR("[Pause] Invalid global struct pointer at 0x" << std::hex << (baseAddress + GLOBAL_STRUCT_RVA));
+            LOG_ERROR("[Pause] Invalid global struct pointer at 0x" << std::hex << (baseAddress + globalStructRVA));
             return false;
         }
 
         g_initialized = true;
+        LOG_VERBOSE("[Pause] Initialized successfully");
         return true;
     }
 

@@ -26,6 +26,9 @@
 #include "multiplayer.h"
 #include "keybindings.h"
 #include "bike-swap.h"
+#include "acorns.h"
+#include "host-join.h"
+#include "base-address.h"
 #include <MinHook.h>
 
 // FORWARD DECLARATIONS
@@ -153,6 +156,7 @@ extern "C" __declspec(dllexport) void ShutdownPayload()
     Respawn::Shutdown();
     Camera::Shutdown();
     Multiplayer::Shutdown();
+    HostJoin::Shutdown();
     Keybindings::Shutdown();
     BikeSwap::Shutdown();
 
@@ -182,13 +186,16 @@ extern "C" __declspec(dllexport) void PayloadInit()
     const wchar_t* processName = L"trials_fusion.exe";
     const wchar_t* moduleName = L"trials_fusion.exe";
     
-    DWORD_PTR baseAddress = GetModuleBaseAddress(GetProcessID(processName), moduleName);
-    if (baseAddress == 0) {
+    DWORD_PTR rawBaseAddress = GetModuleBaseAddress(GetProcessID(processName), moduleName);
+    if (rawBaseAddress == 0) {
         LOG_ERROR("[TFPayload] Could not retrieve base address!");
         return;
     }
 
-    LOG_VERBOSE("[TFPayload] Game Base Address: " << baseAddress);
+    // NOTE: Don't use GetCorrectedBaseAddress - it incorrectly adds 0x8192 offset
+    // The RVA constants already handle version differences
+    DWORD_PTR baseAddress = rawBaseAddress;
+    LOG_VERBOSE("[TFPayload] Game Base Address: 0x" << std::hex << baseAddress << std::dec);
 
     // Initialize Hooks
     Tracks::SetLoggingEnabled(true);
@@ -215,7 +222,7 @@ extern "C" __declspec(dllexport) void PayloadInit()
     LOG_VERBOSE("[TFPayload] Pause system initialized");
 
     // Initialize ActionScript messaging system
-    if (ActionScript::Initialize()) {
+    if (ActionScript::Initialize(baseAddress)) {
         LOG_VERBOSE("[TFPayload] ActionScript messaging system initialized");
     } else {
         LOG_ERROR("[TFPayload] Failed to initialize ActionScript messaging!");
@@ -242,11 +249,25 @@ extern "C" __declspec(dllexport) void PayloadInit()
         LOG_ERROR("[TFPayload] Failed to initialize multiplayer monitoring!");
     }
     
+    // Initialize host-join system
+    if (HostJoin::Initialize(baseAddress)) {
+        LOG_VERBOSE("[TFPayload] Host-Join system initialized");
+    } else {
+        LOG_ERROR("[TFPayload] Failed to initialize host-join system!");
+    }
+    
     // Initialize bike swap system
     if (BikeSwap::Initialize(baseAddress)) {
         LOG_VERBOSE("[TFPayload] Bike swap system initialized");
     } else {
         LOG_ERROR("[TFPayload] Failed to initialize bike swap system!");
+    }
+    
+    // Initialize acorns system
+    if (Acorns::Initialize(baseAddress)) {
+        LOG_VERBOSE("[TFPayload] Acorns system initialized");
+    } else {
+        LOG_ERROR("[TFPayload] Failed to initialize acorns system!");
     }
     
     // Initialize logging system
@@ -272,7 +293,7 @@ extern "C" __declspec(dllexport) void PayloadInit()
         LOG_VERBOSE("[TFPayload] ImGui Dev Menu initialized");
         
         // Initialize DevMenuSync (connects ImGui to game memory)
-        if (!DevMenuSync::Initialize()) {
+        if (!DevMenuSync::Initialize(baseAddress)) {
             LOG_ERROR("[TFPayload] Failed to initialize DevMenu sync!");
             LOG_WARNING("[TFPayload] Changes in menu will not affect game!");
         } else {
@@ -381,65 +402,63 @@ void PrintHelpText()
     
     LOG_INFO("  TRIALS FUSION MOD - HOTKEY CONTROLS");
     LOG_INFO("========================================");
-    LOG_INFO("Help Commands:");
-    LOG_INFO("\t" << ClearConsoleKey << "\t\t\t\t- Clear debug console");
-    LOG_INFO("\t" << ShowHelpTextKey << "\t\t\t\t- Show this help text");
-    LOG_INFO("\t" << ToggleVerboseLoggingKey << "\t\t\t\t- Toggle verbose logging (ON/OFF)");
-    LOG_INFO("\tEND\t\t\t\t- Shutdown and unload TFPayload.dll(automatic)");
-    LOG_INFO("\tF1\t\t\t\t- Reload TFPayload.dll (load/unload toggle)");
-    LOG_INFO("\t" << ToggleDevMenuKey << "\t\t\t\t- Open DevMenu");
-    LOG_INFO("\tK\t\t\t\t- Open Keybindings Menu");
+    LOG_INFO("\tHelp Commands");
+    LOG_INFO("\t" << ClearConsoleKey << "\t\t\t- Clear debug console");
+    LOG_INFO("\t" << ShowHelpTextKey << "\t\t\t- Show this help text");
+    LOG_INFO("\t" << ToggleVerboseLoggingKey << "\t\t\t- Toggle verbose logging (ON/OFF)");
+    LOG_INFO("\tEND\t\t\t- Shutdown and unload TFPayload.dll(automatic)");
+    LOG_INFO("\tF1\t\t\t- Reload TFPayload.dll (load/unload toggle)");
+    LOG_INFO("\t" << ToggleDevMenuKey << "\t\t\t- Open DevMenu");
+    LOG_INFO("\tK\t\t\t- Open Keybindings Menu");
     LOG_INFO("");
-    LOG_INFO("Track Functions:");
-    LOG_INFO("\t" << InstantFinishKey << "\t\t\t\t- Instant Pass Track");
-    LOG_INFO("\t" << CycleHUDKey << "\t\t\t\t- Cycle HUD Visibility in Track/Replay");
-    LOG_INFO("\t" << TogglePauseKey << "\t\t\t\t- Toggle time/physics ON/OFF");
-    LOG_INFO("\t" << Add60SecondsKey << "\t\t\t\t- Add 1 Minute to Timer");
-    LOG_INFO("\t" << Subtract60SecondsKey << "\t\t\t\t- Subtract 1 Minute from Timer");
-    LOG_INFO("\t" << Add10MinuteKey << "\t\t\t\t- Add 10 minutes to Timer");
-    LOG_INFO("\t" << Add100FaultsKey << "\t\t\t\t- Add 100 faults to fault-counter");
-    LOG_INFO("\t" << Subtract100FaultsKey << "\t\t\t\t- Subtract 100 faults from fault-counter");
-    LOG_INFO("\t" << ResetFaultsKey << "\t\t\t\t- Reset Faults to 0");
-    LOG_INFO("\t" << IncrementFaultKey << "\t\t\t\t- Add 1 fault to fault-counter");
-    LOG_INFO("\t" << ToggleLimitValidationKey << "\t\t\t\t- Toggle Fault/Time Limits");
+    LOG_INFO("\tTrack Functions");
+    LOG_INFO("\t" << InstantFinishKey << "\t\t\t- Instant Pass Track");
+    LOG_INFO("\t" << CycleHUDKey << "\t\t\t- Cycle HUD Visibility in Track/Replay");
+    LOG_INFO("\t" << TogglePauseKey << "\t\t\t- Toggle time/physics ON/OFF");
+    LOG_INFO("\t" << Add60SecondsKey << "\t\t\t- Add 1 Minute to Timer");
+    LOG_INFO("\t" << Subtract60SecondsKey << "\t\t\t- Subtract 1 Minute from Timer");
+    LOG_INFO("\t" << Add10MinuteKey << "\t\t\t- Add 10 minutes to Timer");
+    LOG_INFO("\t" << Add100FaultsKey << "\t\t\t- Add 100 faults to fault-counter");
+    LOG_INFO("\t" << Subtract100FaultsKey << "\t\t\t- Subtract 100 faults from fault-counter");
+    LOG_INFO("\t" << ResetFaultsKey << "\t\t\t- Reset Faults to 0");
+    LOG_INFO("\t" << IncrementFaultKey << "\t\t\t- Add 1 fault to fault-counter");
+    LOG_INFO("\t" << ToggleLimitValidationKey << "\t\t\t- Toggle Fault/Time Limits");
     LOG_INFO("");
-    LOG_INFO("Leaderboard:");
-    LOG_INFO("\t" << ScanLeaderboardByIDKey << "\t\t\t\t- Scan current leaderboard (friends/overall/myscore) for single track by ID (default: 221120)");
-    LOG_INFO("\t" << ScanCurrentLeaderboardKey << "\t\t\t\t- Scan current open leaderboard");
-    LOG_INFO("\t" << TestFetchTrackIDKey << "\t\t\t\t- Test fetch track ID 221120");
+    LOG_INFO("\tLeaderboard");
+    LOG_INFO("\t" << ScanLeaderboardByIDKey << "\t\t\t- Scan current leaderboard (friends/overall/myscore) for single track by ID (default: 221120)");
+    LOG_INFO("\t" << ScanCurrentLeaderboardKey << "\t\t\t- Scan current open leaderboard");
+    LOG_INFO("\t" << TestFetchTrackIDKey << "\t\t\t- Test fetch track ID 221120");
     LOG_INFO("");
-    LOG_INFO("Track Central:");
-    LOG_INFO("\t" << StartAutoScrollKey << "\t\t\t\t- Start auto-scroll search-pages");
-    LOG_INFO("\t" << KillswitchKey << "\t\t\t\t- KILLSWITCH (Emergency stop ALL operations)");
-    LOG_INFO("\t" << CycleSearchKey << "\t\t\t\t- Cycle through searches: Ninja -> Mountain -> Speed");
-    LOG_INFO("\t" << DecreaseScrollDelayKey << "\t\t\t\t- Decrease scroll delay (-200ms)");
-    LOG_INFO("\t" << IncreaseScrollDelayKey << "\t\t\t\t- Increase scroll delay (+200ms)");
+    LOG_INFO("\tTrack Central");
+    LOG_INFO("\t" << StartAutoScrollKey << "\t\t\t- Start auto-scroll search-pages");
+    LOG_INFO("\t" << KillswitchKey << "\t\t\t- KILLSWITCH (Emergency stop ALL operations)");
+    LOG_INFO("\t" << CycleSearchKey << "\t\t\t- Cycle through searches: Ninja -> Mountain -> Speed");
+    LOG_INFO("\t" << DecreaseScrollDelayKey << "\t\t\t- Decrease scroll delay (-200ms)");
+    LOG_INFO("\t" << IncreaseScrollDelayKey << "\t\t\t- Increase scroll delay (+200ms)");
     LOG_VERBOSE("  NOTE: All tracks auto-saved to F:/tracks_data.csv");
     LOG_INFO("");
-    LOG_INFO("Checkpoints:");
-    LOG_INFO("\t" << RespawnAtCheckpointKey << "\t\t\t\t- Respawn at current checkpoint");
-    LOG_INFO("\t" << RespawnNextCheckpointKey << "\t\t\t\t- Respawn at next checkpoint");
-    LOG_INFO("\t" << RespawnPrevCheckpointKey << "\t\t\t\t- Respawn at previous checkpoint");
-    LOG_INFO("\t" << RespawnForward5Key << "\t\t\t\t- Respawn 5 checkpoints ahead");
+    LOG_INFO("\tCheckpoints");
+    LOG_INFO("\t" << RespawnAtCheckpointKey << "\t\t\t- Respawn at current checkpoint");
+    LOG_INFO("\t" << RespawnNextCheckpointKey << "\t\t\t- Respawn at next checkpoint");
+    LOG_INFO("\t" << RespawnPrevCheckpointKey << "\t\t\t- Respawn at previous checkpoint");
+    LOG_INFO("\t" << RespawnForward5Key << "\t\t\t- Respawn 5 checkpoints ahead");
     LOG_INFO("");
-    LOG_INFO("Multiplayer(Phase 1):");
-    LOG_INFO("\t" << SaveMultiplayerLogsKey << "\t\t\t\t- Save all multiplayer logs (sessions, packets, stats)");
-    LOG_INFO("\t" << CaptureSessionStateKey << "\t\t\t\t- Capture current session state");
+    LOG_INFO("\tMultiplayer(Phase 1)");
+    LOG_INFO("\t" << SaveMultiplayerLogsKey << "\t\t\t- Save all multiplayer logs (sessions, packets, stats)");
+    LOG_INFO("\t" << CaptureSessionStateKey << "\t\t\t- Capture current session state");
     LOG_VERBOSE("Logs: F:/mp_session_log.txt, F:/mp_sessions.csv, F:/mp_packets.csv");
     LOG_INFO("");
-    LOG_INFO("Dev Menu:");
-    LOG_INFO("\t" << DumpTweakablesKey << "\t\t\t\t- Dump tweakables data (see what's available)");
+    LOG_INFO("\tDev Menu");
+    LOG_INFO("\t" << DumpTweakablesKey << "\t\t\t- Dump tweakables data (see what's available)");
     LOG_INFO("");
-    LOG_INFO("ACTIONSCRIPT COMMANDS:");
-    LOG_INFO("\t" << FullCountdownSequenceKey << "\t\t\t\t- Full countdown sequence (3, 2, 1, GO, Ready!) with auto-timing");
+    LOG_INFO("\tActionscript Commands");
+    LOG_INFO("\t" << FullCountdownSequenceKey << "\t\t\t- Full countdown sequence (3, 2, 1, GO, Ready!) with auto-timing");
+    LOG_INFO("\t" << ToggleLoadScreen << "\t\t\t- Toggle loading screen");
     LOG_INFO("");
-    LOG_INFO("ACTIONSCRIPT/FLASH COMMAND MESSAGING:");
-    LOG_INFO("\t" << ToggleLoadScreen << "\t\t\t\t- Toggle loading screen");
-    LOG_INFO("");
-    LOG_INFO("BIKE SWAP (Runtime Bike Changing):");
-    LOG_INFO("\t[\t\t\t\t- Cycle to previous bike");
-    LOG_INFO("\t]\t\t\t\t- Cycle to next bike");
-    LOG_INFO("\t\\\t\t\t\t- Debug dump bike state");
+    LOG_INFO("\tBIKE SWAP (Runtime Bike Changing)");
+    LOG_INFO("\t[\t\t\t- Cycle to previous bike");
+    LOG_INFO("\t]\t\t\t- Cycle to next bike");
+    LOG_INFO("\t\\\t\t\t- Debug dump bike state");
     LOG_INFO("");
     LOG_VERBOSE("Results: F:/tracks_data.csv, F:/leaderboard_scans.txt & feed_data.csv");
 }

@@ -2,57 +2,205 @@
 #include "respawn.h"
 #include "logging.h"
 #include "keybindings.h"
+#include "base-address.h"
 #include <iostream>
 #include <Windows.h>
 
 namespace Respawn {
     // ============================================================================
-    // Game Memory Addresses (RVA offsets from base 0x700000)
+    // Game Memory Addresses - UPLAY VERSION (RVA offsets - base 0x700000)
     // ============================================================================
 
-    static constexpr uintptr_t GLOBAL_STRUCT_RVA = 0x104b308;
-    static constexpr uintptr_t HANDLE_PLAYER_RESPAWN_RVA = 0x205ae0;
-    static constexpr uintptr_t EXECUTE_TASK_WITH_LOCKING_RVA = 0x56e50;
-    static constexpr uintptr_t EXECUTE_ASYNC_TASK_RVA = 0x59830;
+    // Core function addresses - Uplay
+    static constexpr uintptr_t GLOBAL_STRUCT_RVA_UPLAY = 0x104b308;
+    static constexpr uintptr_t HANDLE_PLAYER_RESPAWN_RVA_UPLAY = 0x205ae0;
+    static constexpr uintptr_t EXECUTE_TASK_WITH_LOCKING_RVA_UPLAY = 0x56e50;
+    static constexpr uintptr_t EXECUTE_ASYNC_TASK_RVA_UPLAY = 0x59830;
 
+    // ============================================================================
+    // Game Memory Addresses - STEAM VERSION (RVA offsets - base 0x140000)
+    // ============================================================================
+
+    // Core function addresses - Steam
+    static constexpr uintptr_t GLOBAL_STRUCT_RVA_STEAM = 0x104d308;
+    static constexpr uintptr_t HANDLE_PLAYER_RESPAWN_RVA_STEAM = 0x205420;
+    static constexpr uintptr_t EXECUTE_TASK_WITH_LOCKING_RVA_STEAM = 0x14b50;
+    static constexpr uintptr_t EXECUTE_ASYNC_TASK_RVA_STEAM = 0x7e1360;  // Fixed: was 0x1b4060
+
+    // ============================================================================
+    // Helper functions to get correct RVA based on detected version
+    // ============================================================================
+
+    static uintptr_t GetGlobalStructRVA() {
+        return BaseAddress::IsSteamVersion() ? GLOBAL_STRUCT_RVA_STEAM : GLOBAL_STRUCT_RVA_UPLAY;
+    }
+
+    static uintptr_t GetHandlePlayerRespawnRVA() {
+        return BaseAddress::IsSteamVersion() ? HANDLE_PLAYER_RESPAWN_RVA_STEAM : HANDLE_PLAYER_RESPAWN_RVA_UPLAY;
+    }
+
+    static uintptr_t GetExecuteTaskWithLockingRVA() {
+        return BaseAddress::IsSteamVersion() ? EXECUTE_TASK_WITH_LOCKING_RVA_STEAM : EXECUTE_TASK_WITH_LOCKING_RVA_UPLAY;
+    }
+
+    static uintptr_t GetExecuteAsyncTaskRVA() {
+        return BaseAddress::IsSteamVersion() ? EXECUTE_ASYNC_TASK_RVA_STEAM : EXECUTE_ASYNC_TASK_RVA_UPLAY;
+    }
+
+    // Structure offsets
     static constexpr uintptr_t FAULT_COUNTER_OFFSET = 0x898;
     static constexpr uintptr_t GAME_MANAGER_TIME_OFFSET = 0x14;
 
-    // Limit bypass patch locations
-    static constexpr uintptr_t TIME_LIMIT_CMP_RVA = 0x276e08;
-    static constexpr uintptr_t FAULT_LIMIT_CMP_RVA = 0x276e4f;
-    static constexpr uintptr_t COMPLETION_COND_FAULT_JNC_RVA = 0x231567;
-    static constexpr uintptr_t COMPLETION_COND_TIME_JNC_RVA = 0x23155e;
-    static constexpr uintptr_t COMPLETION_COND_TIME2_JC_RVA = 0x23158e;
-    static constexpr uintptr_t UPDATE_RACE_END_PUSH_RVA = 0x280d93;
-    static constexpr uintptr_t RACEUPDATE_TIMER_CHECK_RVA = 0x28f1b6;
+    // Limit bypass patch locations - Uplay
+    static constexpr uintptr_t TIME_LIMIT_CMP_RVA_UPLAY = 0x276e08;
+    static constexpr uintptr_t FAULT_LIMIT_CMP_RVA_UPLAY = 0x276e4f;
+    static constexpr uintptr_t COMPLETION_COND_FAULT_JNC_RVA_UPLAY = 0x231567;
+    static constexpr uintptr_t COMPLETION_COND_TIME_JNC_RVA_UPLAY = 0x23155e;
+    static constexpr uintptr_t COMPLETION_COND_TIME2_JC_RVA_UPLAY = 0x23158e;
 
-    // Multiplayer limit checks (in check_race_completion_conditions)
-    static constexpr uintptr_t MULTIPLAYER_MODE1_TIME_CMP_RVA = 0x231484;  // 0x931484 - 0x700000
-    static constexpr uintptr_t MULTIPLAYER_MODE1_TIME_JNC_RVA = 0x23148b;  // 0x93148b - 0x700000
-    static constexpr uintptr_t MULTIPLAYER_MODE1_FAULT_CALL_RVA = 0x23148f; // 0x93148f - 0x700000 (CALL CheckTimerThreshold)
-    static constexpr uintptr_t MULTIPLAYER_MODE1_FAULT_JNZ_RVA = 0x231496;  // 0x931496 - 0x700000 (JNZ respawn)
-    static constexpr uintptr_t MULTIPLAYER_MODE2_TIME_CMP_RVA = 0x2313d4;  // 0x9313d4 - 0x700000
-    static constexpr uintptr_t MULTIPLAYER_MODE2_TIME_JNC_RVA = 0x2313db;  // 0x9313db - 0x700000
-    static constexpr uintptr_t MULTIPLAYER_MODE2_FAULT_CALL_RVA = 0x2313df; // 0x9313df - 0x700000 (CALL CheckTimerThreshold)
-    static constexpr uintptr_t MULTIPLAYER_MODE2_FAULT_JNZ_RVA = 0x2313e6;  // 0x9313e6 - 0x700000 (JNZ respawn)
+    // Limit bypass patch locations - Steam
+    static constexpr uintptr_t TIME_LIMIT_CMP_RVA_STEAM = 0x276888;
+    static constexpr uintptr_t FAULT_LIMIT_CMP_RVA_STEAM = 0x2768cf;
+    static constexpr uintptr_t COMPLETION_COND_FAULT_JNC_RVA_STEAM = 0x230cb7;
+    static constexpr uintptr_t COMPLETION_COND_TIME_JNC_RVA_STEAM = 0x230cae;
+    static constexpr uintptr_t COMPLETION_COND_TIME2_JC_RVA_STEAM = 0x230cde;
 
-    // Finish line check patch location
-    static constexpr uintptr_t PROCESS_CHECKPOINT_FINISH_CHECK_RVA = 0x228db2; // JNZ at 0x928db2
-    
-    // Checkpoint trigger bit check location - add early return if checkpoint already triggered
-    static constexpr uintptr_t PROCESS_CHECKPOINT_EARLY_CHECK_RVA = 0x228d88; // MOV EAX,dword ptr [ESI] at 0x928d88
-    
-    // UpdateCheckpointsInRange call to ProcessCheckpointReached location (second call in loop)
-    static constexpr uintptr_t UPDATE_CHECKPOINTS_CALL_RVA = 0x2297ac; // PUSH ECX at 0x9297ac (start of block to skip)
-    
-    // UpdateCheckpointsInRange first call to ProcessCheckpointReached (at start of function)
-    // This call happens when the current checkpoint equals the first valid element
-    static constexpr uintptr_t UPDATE_CHECKPOINTS_FIRST_CALL_RVA = 0x229529; // XORPS XMM0,XMM0 at 0x929529 (start of first call block)
+    // Helper functions to get correct patch RVA based on detected version
+    static uintptr_t GetTimeLimitCmpRVA() {
+        return BaseAddress::IsSteamVersion() ? TIME_LIMIT_CMP_RVA_STEAM : TIME_LIMIT_CMP_RVA_UPLAY;
+    }
+
+    static uintptr_t GetFaultLimitCmpRVA() {
+        return BaseAddress::IsSteamVersion() ? FAULT_LIMIT_CMP_RVA_STEAM : FAULT_LIMIT_CMP_RVA_UPLAY;
+    }
+
+    static uintptr_t GetCompletionCondFaultJncRVA() {
+        return BaseAddress::IsSteamVersion() ? COMPLETION_COND_FAULT_JNC_RVA_STEAM : COMPLETION_COND_FAULT_JNC_RVA_UPLAY;
+    }
+
+    static uintptr_t GetCompletionCondTimeJncRVA() {
+        return BaseAddress::IsSteamVersion() ? COMPLETION_COND_TIME_JNC_RVA_STEAM : COMPLETION_COND_TIME_JNC_RVA_UPLAY;
+    }
+
+    static uintptr_t GetCompletionCondTime2JcRVA() {
+        return BaseAddress::IsSteamVersion() ? COMPLETION_COND_TIME2_JC_RVA_STEAM : COMPLETION_COND_TIME2_JC_RVA_UPLAY;
+    }
+    // UpdateRaceEndState patch locations - Uplay
+    static constexpr uintptr_t UPDATE_RACE_END_PUSH_RVA_UPLAY = 0x280d93;
+    // UpdateRaceEndState patch locations - Steam
+    static constexpr uintptr_t UPDATE_RACE_END_PUSH_RVA_STEAM = 0x2807d3;
+
+    // RaceUpdate timer check locations - Uplay
+    static constexpr uintptr_t RACEUPDATE_TIMER_CHECK_RVA_UPLAY = 0x28f1b6;
+    // RaceUpdate timer check locations - Steam
+    static constexpr uintptr_t RACEUPDATE_TIMER_CHECK_RVA_STEAM = 0x28eb46;
+
+    // Multiplayer limit checks - Uplay
+    static constexpr uintptr_t MULTIPLAYER_MODE1_TIME_CMP_RVA_UPLAY = 0x231484;
+    static constexpr uintptr_t MULTIPLAYER_MODE1_TIME_JNC_RVA_UPLAY = 0x23148b;
+    static constexpr uintptr_t MULTIPLAYER_MODE1_FAULT_CALL_RVA_UPLAY = 0x23148f;
+    static constexpr uintptr_t MULTIPLAYER_MODE1_FAULT_JNZ_RVA_UPLAY = 0x231496;
+    static constexpr uintptr_t MULTIPLAYER_MODE2_TIME_CMP_RVA_UPLAY = 0x2313d4;
+    static constexpr uintptr_t MULTIPLAYER_MODE2_TIME_JNC_RVA_UPLAY = 0x2313db;
+    static constexpr uintptr_t MULTIPLAYER_MODE2_FAULT_CALL_RVA_UPLAY = 0x2313df;
+    static constexpr uintptr_t MULTIPLAYER_MODE2_FAULT_JNZ_RVA_UPLAY = 0x2313e6;
+
+    // Multiplayer limit checks - Steam
+    static constexpr uintptr_t MULTIPLAYER_MODE1_TIME_CMP_RVA_STEAM = 0x230bd4;
+    static constexpr uintptr_t MULTIPLAYER_MODE1_TIME_JNC_RVA_STEAM = 0x230bdb;
+    static constexpr uintptr_t MULTIPLAYER_MODE1_FAULT_CALL_RVA_STEAM = 0x230bdf;
+    static constexpr uintptr_t MULTIPLAYER_MODE1_FAULT_JNZ_RVA_STEAM = 0x230be6;
+    static constexpr uintptr_t MULTIPLAYER_MODE2_TIME_CMP_RVA_STEAM = 0x230b24;
+    static constexpr uintptr_t MULTIPLAYER_MODE2_TIME_JNC_RVA_STEAM = 0x230b2b;
+    static constexpr uintptr_t MULTIPLAYER_MODE2_FAULT_CALL_RVA_STEAM = 0x230b2f;
+    static constexpr uintptr_t MULTIPLAYER_MODE2_FAULT_JNZ_RVA_STEAM = 0x230b36;
+
+    // ============================================================================
+    // Helper functions to get correct RVAs based on detected version
+    // ============================================================================
+
+    static uintptr_t GetUpdateRaceEndPushRVA() {
+        return BaseAddress::IsSteamVersion() ? UPDATE_RACE_END_PUSH_RVA_STEAM : UPDATE_RACE_END_PUSH_RVA_UPLAY;
+    }
+
+    static uintptr_t GetRaceUpdateTimerCheckRVA() {
+        return BaseAddress::IsSteamVersion() ? RACEUPDATE_TIMER_CHECK_RVA_STEAM : RACEUPDATE_TIMER_CHECK_RVA_UPLAY;
+    }
+
+    static uintptr_t GetMultiplayerMode1TimeCmpRVA() {
+        return BaseAddress::IsSteamVersion() ? MULTIPLAYER_MODE1_TIME_CMP_RVA_STEAM : MULTIPLAYER_MODE1_TIME_CMP_RVA_UPLAY;
+    }
+
+    static uintptr_t GetMultiplayerMode1TimeJncRVA() {
+        return BaseAddress::IsSteamVersion() ? MULTIPLAYER_MODE1_TIME_JNC_RVA_STEAM : MULTIPLAYER_MODE1_TIME_JNC_RVA_UPLAY;
+    }
+
+    static uintptr_t GetMultiplayerMode1FaultCallRVA() {
+        return BaseAddress::IsSteamVersion() ? MULTIPLAYER_MODE1_FAULT_CALL_RVA_STEAM : MULTIPLAYER_MODE1_FAULT_CALL_RVA_UPLAY;
+    }
+
+    static uintptr_t GetMultiplayerMode1FaultJnzRVA() {
+        return BaseAddress::IsSteamVersion() ? MULTIPLAYER_MODE1_FAULT_JNZ_RVA_STEAM : MULTIPLAYER_MODE1_FAULT_JNZ_RVA_UPLAY;
+    }
+
+    static uintptr_t GetMultiplayerMode2TimeCmpRVA() {
+        return BaseAddress::IsSteamVersion() ? MULTIPLAYER_MODE2_TIME_CMP_RVA_STEAM : MULTIPLAYER_MODE2_TIME_CMP_RVA_UPLAY;
+    }
+
+    static uintptr_t GetMultiplayerMode2TimeJncRVA() {
+        return BaseAddress::IsSteamVersion() ? MULTIPLAYER_MODE2_TIME_JNC_RVA_STEAM : MULTIPLAYER_MODE2_TIME_JNC_RVA_UPLAY;
+    }
+
+    static uintptr_t GetMultiplayerMode2FaultCallRVA() {
+        return BaseAddress::IsSteamVersion() ? MULTIPLAYER_MODE2_FAULT_CALL_RVA_STEAM : MULTIPLAYER_MODE2_FAULT_CALL_RVA_UPLAY;
+    }
+
+    static uintptr_t GetMultiplayerMode2FaultJnzRVA() {
+        return BaseAddress::IsSteamVersion() ? MULTIPLAYER_MODE2_FAULT_JNZ_RVA_STEAM : MULTIPLAYER_MODE2_FAULT_JNZ_RVA_UPLAY;
+    }
+
+    // Checkpoint patch locations - Uplay
+    static constexpr uintptr_t PROCESS_CHECKPOINT_FINISH_CHECK_RVA_UPLAY = 0x228db2;
+    static constexpr uintptr_t PROCESS_CHECKPOINT_EARLY_CHECK_RVA_UPLAY = 0x228d88;
+    static constexpr uintptr_t UPDATE_CHECKPOINTS_CALL_RVA_UPLAY = 0x2297ac;
+    static constexpr uintptr_t UPDATE_CHECKPOINTS_FIRST_CALL_RVA_UPLAY = 0x229529;
+
+    // Checkpoint patch locations - Steam
+    static constexpr uintptr_t PROCESS_CHECKPOINT_FINISH_CHECK_RVA_STEAM = 0x228682;
+    static constexpr uintptr_t PROCESS_CHECKPOINT_EARLY_CHECK_RVA_STEAM = 0x228658;
+    static constexpr uintptr_t UPDATE_CHECKPOINTS_CALL_RVA_STEAM = 0x22907c;
+    static constexpr uintptr_t UPDATE_CHECKPOINTS_FIRST_CALL_RVA_STEAM = 0x228df9;
+
+    // Helper functions for checkpoint patch RVAs
+    static uintptr_t GetProcessCheckpointFinishCheckRVA() {
+        return BaseAddress::IsSteamVersion() ? PROCESS_CHECKPOINT_FINISH_CHECK_RVA_STEAM : PROCESS_CHECKPOINT_FINISH_CHECK_RVA_UPLAY;
+    }
+
+    static uintptr_t GetProcessCheckpointEarlyCheckRVA() {
+        return BaseAddress::IsSteamVersion() ? PROCESS_CHECKPOINT_EARLY_CHECK_RVA_STEAM : PROCESS_CHECKPOINT_EARLY_CHECK_RVA_UPLAY;
+    }
+
+    static uintptr_t GetUpdateCheckpointsCallRVA() {
+        return BaseAddress::IsSteamVersion() ? UPDATE_CHECKPOINTS_CALL_RVA_STEAM : UPDATE_CHECKPOINTS_CALL_RVA_UPLAY;
+    }
+
+    static uintptr_t GetUpdateCheckpointsFirstCallRVA() {
+        return BaseAddress::IsSteamVersion() ? UPDATE_CHECKPOINTS_FIRST_CALL_RVA_STEAM : UPDATE_CHECKPOINTS_FIRST_CALL_RVA_UPLAY;
+    }
+
+    // Forward declarations of Instant Finish RVA helpers (defined later with their constants)
+    static uintptr_t GetInitObjectStructRVA();
 
     // Default limits
     static constexpr uint32_t DEFAULT_TIME_LIMIT = 0x1A5E0;    // 30 minutes
     static constexpr uint32_t DEFAULT_FAULT_LIMIT = 0x1F4;     // 500 faults
+
+    // Checkpoint structure offsets
+    static constexpr uintptr_t CHECKPOINT_INNER_PTR_OFFSET = 0x00;
+    static constexpr uintptr_t INNER_TO_FLAGS_OFFSET = 0x44;
+    static constexpr uintptr_t FLAGS_OFFSET_8 = 0x08;
+    static constexpr uintptr_t FLAGS_OFFSET_A = 0x0A;
+    static constexpr uint16_t CHECKPOINT_TRIGGERED_BIT = 0x10;
 
     // ============================================================================
     // Function Pointer Types
@@ -627,7 +775,7 @@ namespace Respawn {
             return false;
         }
 
-        uintptr_t patchAddr = g_baseAddress + FAULT_LIMIT_CMP_RVA;
+        uintptr_t patchAddr = g_baseAddress + GetFaultLimitCmpRVA();
 
         DWORD oldProtect;
         if (!VirtualProtect((void*)patchAddr, sizeof(uint32_t), PAGE_EXECUTE_READWRITE, &oldProtect)) {
@@ -648,7 +796,7 @@ namespace Respawn {
             return DEFAULT_FAULT_LIMIT;
         }
 
-        uintptr_t patchAddr = g_baseAddress + FAULT_LIMIT_CMP_RVA;
+        uintptr_t patchAddr = g_baseAddress + GetFaultLimitCmpRVA();
         if (IsBadReadPtr((void*)patchAddr, sizeof(uint32_t))) {
             return DEFAULT_FAULT_LIMIT;
         }
@@ -662,7 +810,7 @@ namespace Respawn {
             return false;
         }
 
-        uintptr_t patchAddr = g_baseAddress + TIME_LIMIT_CMP_RVA;
+        uintptr_t patchAddr = g_baseAddress + GetTimeLimitCmpRVA();
 
         DWORD oldProtect;
         if (!VirtualProtect((void*)patchAddr, sizeof(uint32_t), PAGE_EXECUTE_READWRITE, &oldProtect)) {
@@ -683,7 +831,7 @@ namespace Respawn {
             return DEFAULT_TIME_LIMIT;
         }
 
-        uintptr_t patchAddr = g_baseAddress + TIME_LIMIT_CMP_RVA;
+        uintptr_t patchAddr = g_baseAddress + GetTimeLimitCmpRVA();
         if (IsBadReadPtr((void*)patchAddr, sizeof(uint32_t))) {
             return DEFAULT_TIME_LIMIT;
         }
@@ -713,7 +861,7 @@ namespace Respawn {
             return false;
         }
 
-        uintptr_t jncAddr = g_baseAddress + COMPLETION_COND_FAULT_JNC_RVA;
+        uintptr_t jncAddr = g_baseAddress + GetCompletionCondFaultJncRVA();
 
         LOG_VERBOSE("[CompletionFix] Patching fault limit check at 0x" << std::hex << jncAddr);
 
@@ -762,7 +910,7 @@ namespace Respawn {
             return false;
         }
 
-        uintptr_t jncAddr = g_baseAddress + COMPLETION_COND_TIME_JNC_RVA;
+        uintptr_t jncAddr = g_baseAddress + GetCompletionCondTimeJncRVA();
 
         LOG_VERBOSE("[TimeFix] Patching time limit check #1 at 0x" << std::hex << jncAddr);
 
@@ -811,7 +959,7 @@ namespace Respawn {
             return false;
         }
 
-        uintptr_t jcAddr = g_baseAddress + COMPLETION_COND_TIME2_JC_RVA;
+        uintptr_t jcAddr = g_baseAddress + GetCompletionCondTime2JcRVA();
 
         LOG_VERBOSE("[TimeFix2] Patching time limit check #2 at 0x" << std::hex << jcAddr);
 
@@ -853,7 +1001,7 @@ namespace Respawn {
             return false;
         }
 
-        uintptr_t pushAddr = g_baseAddress + UPDATE_RACE_END_PUSH_RVA;
+        uintptr_t pushAddr = g_baseAddress + GetUpdateRaceEndPushRVA();
 
         LOG_VERBOSE("[FinalFix] Patching UpdateRaceEndState at 0x" << std::hex << pushAddr);
 
@@ -902,7 +1050,7 @@ namespace Respawn {
             return false;
         }
 
-        uintptr_t jncAddr = g_baseAddress + RACEUPDATE_TIMER_CHECK_RVA + 6;
+        uintptr_t jncAddr = g_baseAddress + GetRaceUpdateTimerCheckRVA() + 6;
 
         LOG_VERBOSE("[TimerFreezeFix] Patching timer freeze JNC in RaceUpdate at 0x" << std::hex << jncAddr);
 
@@ -959,7 +1107,7 @@ namespace Respawn {
         bool success = true;
 
         // Patch multiplayer mode 1 time check
-        uintptr_t mp1JncAddr = g_baseAddress + MULTIPLAYER_MODE1_TIME_JNC_RVA;
+        uintptr_t mp1JncAddr = g_baseAddress + GetMultiplayerMode1TimeJncRVA();
         LOG_VERBOSE("[MPTimeFix] Patching multiplayer mode 1 time check at 0x" << std::hex << mp1JncAddr);
 
         if (IsBadReadPtr((void*)mp1JncAddr, 6)) {
@@ -1000,7 +1148,7 @@ namespace Respawn {
         }
 
         // Patch multiplayer mode 2 time check
-        uintptr_t mp2JncAddr = g_baseAddress + MULTIPLAYER_MODE2_TIME_JNC_RVA;
+        uintptr_t mp2JncAddr = g_baseAddress + GetMultiplayerMode2TimeJncRVA();
         LOG_VERBOSE("[MPTimeFix] Patching multiplayer mode 2 time check at 0x" << std::hex << mp2JncAddr);
 
         if (IsBadReadPtr((void*)mp2JncAddr, 6)) {
@@ -1056,7 +1204,7 @@ namespace Respawn {
         bool success = true;
 
         // Patch multiplayer mode 1 fault check (NOP the JNZ that respawns on fault >= 500)
-        uintptr_t mp1JnzAddr = g_baseAddress + MULTIPLAYER_MODE1_FAULT_JNZ_RVA;
+        uintptr_t mp1JnzAddr = g_baseAddress + GetMultiplayerMode1FaultJnzRVA();
         LOG_VERBOSE("[MPFaultFix] Patching multiplayer mode 1 fault check at 0x" << std::hex << mp1JnzAddr);
 
         if (IsBadReadPtr((void*)mp1JnzAddr, 6)) {
@@ -1098,7 +1246,7 @@ namespace Respawn {
         }
 
         // Patch multiplayer mode 2 fault check
-        uintptr_t mp2JnzAddr = g_baseAddress + MULTIPLAYER_MODE2_FAULT_JNZ_RVA;
+        uintptr_t mp2JnzAddr = g_baseAddress + GetMultiplayerMode2FaultJnzRVA();
         LOG_VERBOSE("[MPFaultFix] Patching multiplayer mode 2 fault check at 0x" << std::hex << mp2JnzAddr);
 
         if (IsBadReadPtr((void*)mp2JnzAddr, 6)) {
@@ -1194,7 +1342,7 @@ namespace Respawn {
             return false;
         }
 
-        uintptr_t jncAddr = g_baseAddress + COMPLETION_COND_FAULT_JNC_RVA;
+        uintptr_t jncAddr = g_baseAddress + GetCompletionCondFaultJncRVA();
 
         LOG_VERBOSE("[CompletionRestore] Restoring fault limit check at 0x" << std::hex << jncAddr);
 
@@ -1239,7 +1387,7 @@ namespace Respawn {
             return false;
         }
 
-        uintptr_t jncAddr = g_baseAddress + COMPLETION_COND_TIME_JNC_RVA;
+        uintptr_t jncAddr = g_baseAddress + GetCompletionCondTimeJncRVA();
 
         LOG_VERBOSE("[TimeRestore] Restoring time limit check #1 at 0x" << std::hex << jncAddr);
 
@@ -1283,7 +1431,7 @@ namespace Respawn {
             return false;
         }
 
-        uintptr_t jcAddr = g_baseAddress + COMPLETION_COND_TIME2_JC_RVA;
+        uintptr_t jcAddr = g_baseAddress + GetCompletionCondTime2JcRVA();
 
         LOG_VERBOSE("[TimeRestore2] Restoring time limit check #2 at 0x" << std::hex << jcAddr);
 
@@ -1327,7 +1475,7 @@ namespace Respawn {
             return false;
         }
 
-        uintptr_t pushAddr = g_baseAddress + UPDATE_RACE_END_PUSH_RVA;
+        uintptr_t pushAddr = g_baseAddress + GetUpdateRaceEndPushRVA();
 
         LOG_VERBOSE("[FinalRestore] Restoring UpdateRaceEndState at 0x" << std::hex << pushAddr);
 
@@ -1366,7 +1514,7 @@ namespace Respawn {
         // We need to calculate the relative offset at runtime
         
         uintptr_t callInstrAddr = pushAddr + 5;  // Address of the CALL instruction
-        uintptr_t callTarget = g_baseAddress + 0x55a00;  // InitializeObjectStruct
+        uintptr_t callTarget = g_baseAddress + GetInitObjectStructRVA();  // InitializeObjectStruct (version-aware)
         uintptr_t nextInstrAddr = callInstrAddr + 5;  // Address after CALL
         int32_t relativeOffset = (int32_t)(callTarget - nextInstrAddr);
         
@@ -1391,7 +1539,7 @@ namespace Respawn {
             return false;
         }
 
-        uintptr_t jncAddr = g_baseAddress + RACEUPDATE_TIMER_CHECK_RVA + 6;
+        uintptr_t jncAddr = g_baseAddress + GetRaceUpdateTimerCheckRVA() + 6;
 
         LOG_VERBOSE("[TimerFreezeRestore] Restoring timer freeze JNC in RaceUpdate at 0x" << std::hex << jncAddr);
 
@@ -1438,7 +1586,7 @@ namespace Respawn {
         bool success = true;
 
         // Restore multiplayer mode 1 time check
-        uintptr_t mp1JncAddr = g_baseAddress + MULTIPLAYER_MODE1_TIME_JNC_RVA;
+        uintptr_t mp1JncAddr = g_baseAddress + GetMultiplayerMode1TimeJncRVA();
         LOG_VERBOSE("[MPTimeRestore] Restoring multiplayer mode 1 time check at 0x" << std::hex << mp1JncAddr);
 
         if (IsBadReadPtr((void*)mp1JncAddr, 6)) {
@@ -1467,7 +1615,7 @@ namespace Respawn {
         }
 
         // Restore multiplayer mode 2 time check
-        uintptr_t mp2JncAddr = g_baseAddress + MULTIPLAYER_MODE2_TIME_JNC_RVA;
+        uintptr_t mp2JncAddr = g_baseAddress + GetMultiplayerMode2TimeJncRVA();
         LOG_VERBOSE("[MPTimeRestore] Restoring multiplayer mode 2 time check at 0x" << std::hex << mp2JncAddr);
 
         if (IsBadReadPtr((void*)mp2JncAddr, 6)) {
@@ -1511,7 +1659,7 @@ namespace Respawn {
         bool success = true;
 
         // Restore multiplayer mode 1 fault check
-        uintptr_t mp1JnzAddr = g_baseAddress + MULTIPLAYER_MODE1_FAULT_JNZ_RVA;
+        uintptr_t mp1JnzAddr = g_baseAddress + GetMultiplayerMode1FaultJnzRVA();
         LOG_VERBOSE("[MPFaultRestore] Restoring multiplayer mode 1 fault check at 0x" << std::hex << mp1JnzAddr);
 
         if (IsBadReadPtr((void*)mp1JnzAddr, 6)) {
@@ -1540,7 +1688,7 @@ namespace Respawn {
         }
 
         // Restore multiplayer mode 2 fault check
-        uintptr_t mp2JnzAddr = g_baseAddress + MULTIPLAYER_MODE2_FAULT_JNZ_RVA;
+        uintptr_t mp2JnzAddr = g_baseAddress + GetMultiplayerMode2FaultJnzRVA();
         LOG_VERBOSE("[MPFaultRestore] Restoring multiplayer mode 2 fault check at 0x" << std::hex << mp2JnzAddr);
 
         if (IsBadReadPtr((void*)mp2JnzAddr, 6)) {
@@ -1645,7 +1793,7 @@ namespace Respawn {
         }
 
         // Check if the fault limit check is patched (NOPed out)
-        uintptr_t jncAddr = g_baseAddress + COMPLETION_COND_FAULT_JNC_RVA;
+        uintptr_t jncAddr = g_baseAddress + GetCompletionCondFaultJncRVA();
 
         if (IsBadReadPtr((void*)jncAddr, 2)) {
             return false;
@@ -1663,7 +1811,7 @@ namespace Respawn {
         }
 
         // Check if the time limit check is patched (NOPed out)
-        uintptr_t jncAddr = g_baseAddress + COMPLETION_COND_TIME_JNC_RVA;
+        uintptr_t jncAddr = g_baseAddress + GetCompletionCondTimeJncRVA();
 
         if (IsBadReadPtr((void*)jncAddr, 2)) {
             return false;
@@ -1684,10 +1832,34 @@ namespace Respawn {
     typedef void*(__cdecl* AllocateMemoryFunc)(int size);  // Returns pointer in EAX
     typedef int(__thiscall* CalculatePlayerValueFunc)(void* manager);  // Takes manager as 'this'
 
-    static constexpr uintptr_t SEND_MESSAGE_RVA = 0x67a040;           // SendMessage @ 0xd7a040
-    static constexpr uintptr_t INIT_OBJECT_STRUCT_RVA = 0x55a00;      // InitializeObjectStruct @ 0x755a00
-    static constexpr uintptr_t ALLOCATE_MEMORY_RVA = 0xc340;          // AllocateMemory @ 0x70c340
-    static constexpr uintptr_t CALCULATE_PLAYER_VALUE_RVA = 0x256f50;  // CalculatePlayerValue @ 0x956f50
+    // Instant Finish function addresses - Uplay (RVA offsets - base 0x700000)
+    static constexpr uintptr_t SEND_MESSAGE_RVA_UPLAY = 0x67a040;           // SendMessage @ 0xd7a040
+    static constexpr uintptr_t INIT_OBJECT_STRUCT_RVA_UPLAY = 0x55a00;      // InitializeObjectStruct @ 0x755a00
+    static constexpr uintptr_t ALLOCATE_MEMORY_RVA_UPLAY = 0xc340;          // AllocateMemory @ 0x70c340
+    static constexpr uintptr_t CALCULATE_PLAYER_VALUE_RVA_UPLAY = 0x256f50;  // CalculatePlayerValue @ 0x956f50
+
+    // Instant Finish function addresses - Steam (RVA offsets - base 0x140000)
+    static constexpr uintptr_t SEND_MESSAGE_RVA_STEAM = 0x678b10;           // SendMessage @ 0x7b8b10
+    static constexpr uintptr_t INIT_OBJECT_STRUCT_RVA_STEAM = 0x55a70;      // InitializeObjectStruct @ 0x195a70
+    static constexpr uintptr_t ALLOCATE_MEMORY_RVA_STEAM = 0xc410;          // AllocateMemory @ 0x14c410
+    static constexpr uintptr_t CALCULATE_PLAYER_VALUE_RVA_STEAM = 0x2569a0;  // CalculatePlayerValue @ 0x3969a0
+
+    // Helper functions for Instant Finish RVAs
+    static uintptr_t GetSendMessageRVA() {
+        return BaseAddress::IsSteamVersion() ? SEND_MESSAGE_RVA_STEAM : SEND_MESSAGE_RVA_UPLAY;
+    }
+
+    static uintptr_t GetInitObjectStructRVA() {
+        return BaseAddress::IsSteamVersion() ? INIT_OBJECT_STRUCT_RVA_STEAM : INIT_OBJECT_STRUCT_RVA_UPLAY;
+    }
+
+    static uintptr_t GetAllocateMemoryRVA() {
+        return BaseAddress::IsSteamVersion() ? ALLOCATE_MEMORY_RVA_STEAM : ALLOCATE_MEMORY_RVA_UPLAY;
+    }
+
+    static uintptr_t GetCalculatePlayerValueRVA() {
+        return BaseAddress::IsSteamVersion() ? CALCULATE_PLAYER_VALUE_RVA_STEAM : CALCULATE_PLAYER_VALUE_RVA_UPLAY;
+    }
 
     // SEH-safe helper functions
     static void* SafeAllocateMemory(AllocateMemoryFunc func, int size, bool* success) {
@@ -1775,11 +1947,11 @@ namespace Respawn {
         LOG_VERBOSE("[InstantFinish] Manager: 0x" << std::hex << reinterpret_cast<uintptr_t>(manager));
         LOG_VERBOSE("[InstantFinish] MessageQueue: 0x" << std::hex << reinterpret_cast<uintptr_t>(messageQueue));
 
-        // Get function pointers
-        SendMessageFunc sendMessage = reinterpret_cast<SendMessageFunc>(g_baseAddress + SEND_MESSAGE_RVA);
-        AllocateMemoryFunc allocateMemory = reinterpret_cast<AllocateMemoryFunc>(g_baseAddress + ALLOCATE_MEMORY_RVA);
-        InitializeObjectStructFunc initObjectStruct = reinterpret_cast<InitializeObjectStructFunc>(g_baseAddress + INIT_OBJECT_STRUCT_RVA);
-        CalculatePlayerValueFunc calculatePlayerValue = reinterpret_cast<CalculatePlayerValueFunc>(g_baseAddress + CALCULATE_PLAYER_VALUE_RVA);
+        // Get function pointers (using version-aware RVAs)
+        SendMessageFunc sendMessage = reinterpret_cast<SendMessageFunc>(g_baseAddress + GetSendMessageRVA());
+        AllocateMemoryFunc allocateMemory = reinterpret_cast<AllocateMemoryFunc>(g_baseAddress + GetAllocateMemoryRVA());
+        InitializeObjectStructFunc initObjectStruct = reinterpret_cast<InitializeObjectStructFunc>(g_baseAddress + GetInitObjectStructRVA());
+        CalculatePlayerValueFunc calculatePlayerValue = reinterpret_cast<CalculatePlayerValueFunc>(g_baseAddress + GetCalculatePlayerValueRVA());
 
         // Allocate message object (0x18 bytes)
         bool success = false;
@@ -1851,11 +2023,19 @@ namespace Respawn {
             return false;
         }
 
+        // Log version detection
+        if (BaseAddress::IsSteamVersion()) {
+            LOG_INFO("[Respawn] Steam version detected - using Steam addresses");
+        } else {
+            LOG_INFO("[Respawn] Uplay version detected - using Uplay addresses");
+        }
+
         g_baseAddress = baseAddress;
-        g_globalStructPtr = reinterpret_cast<void**>(baseAddress + GLOBAL_STRUCT_RVA);
-        g_handlePlayerRespawnFunc = reinterpret_cast<HandlePlayerRespawnFunc>(baseAddress + HANDLE_PLAYER_RESPAWN_RVA);
-        g_executeTaskWithLocking = reinterpret_cast<ExecuteTaskWithLockingFunc>(baseAddress + EXECUTE_TASK_WITH_LOCKING_RVA);
-        g_executeAsyncTask = reinterpret_cast<ExecuteAsyncTaskFunc>(baseAddress + EXECUTE_ASYNC_TASK_RVA);
+        // Use version-aware helper functions to get correct RVAs
+        g_globalStructPtr = reinterpret_cast<void**>(baseAddress + GetGlobalStructRVA());
+        g_handlePlayerRespawnFunc = reinterpret_cast<HandlePlayerRespawnFunc>(baseAddress + GetHandlePlayerRespawnRVA());
+        g_executeTaskWithLocking = reinterpret_cast<ExecuteTaskWithLockingFunc>(baseAddress + GetExecuteTaskWithLockingRVA());
+        g_executeAsyncTask = reinterpret_cast<ExecuteAsyncTaskFunc>(baseAddress + GetExecuteAsyncTaskRVA());
 
         if (IsBadReadPtr(g_globalStructPtr, sizeof(void*))) {
             LOG_ERROR("[Respawn] Invalid global struct pointer");
@@ -2072,15 +2252,12 @@ namespace Respawn {
     // This shows checkpoint[0] -> triggerStruct, triggerStruct+0x44 -> flagsStruct
     // The flags at flagsStruct+8 and flagsStruct+10 control checkpoint state
     
-    // Offset within checkpoint to get the inner struct pointer
-    static constexpr uintptr_t CHECKPOINT_INNER_PTR_OFFSET = 0x00;
-    // Offset within inner struct to get the flags struct
-    static constexpr uintptr_t INNER_TO_FLAGS_OFFSET = 0x44;
-    // Offsets within flags struct for the enable bits
-    static constexpr uintptr_t FLAGS_OFFSET_8 = 0x08;  // ushort
-    static constexpr uintptr_t FLAGS_OFFSET_A = 0x0A;  // ushort (offset 10 decimal)
-    // The bit that's set when checkpoint is triggered (0x10 = bit 4)
-    static constexpr uint16_t CHECKPOINT_TRIGGERED_BIT = 0x10;
+    // Checkpoint structure constants defined at the top of the file:
+    // - CHECKPOINT_INNER_PTR_OFFSET = 0x00
+    // - INNER_TO_FLAGS_OFFSET = 0x44
+    // - FLAGS_OFFSET_8 = 0x08
+    // - FLAGS_OFFSET_A = 0x0A
+    // - CHECKPOINT_TRIGGERED_BIT = 0x10
 
     void* GetCheckpointPointer(int index) {
         if (!g_initialized) {
@@ -2480,7 +2657,7 @@ namespace Respawn {
         // Jump distance: 0x9297c3 - 0x9297ac = 0x17 bytes
         // JMP short can handle this (2 bytes: EB 15 - offset is 0x15 because it's relative to next instruction)
         
-        uintptr_t patchAddr = g_baseAddress + UPDATE_CHECKPOINTS_CALL_RVA; // 0x9297ac (PUSH ECX)
+        uintptr_t patchAddr = g_baseAddress + GetUpdateCheckpointsCallRVA();
         
         LOG_VERBOSE("[UpdateCheckpointsPatch] Patching checkpoint processing block at 0x" << std::hex << patchAddr);
         
@@ -2533,7 +2710,7 @@ namespace Respawn {
             return false;
         }
         
-        uintptr_t patchAddr = g_baseAddress + UPDATE_CHECKPOINTS_CALL_RVA;
+        uintptr_t patchAddr = g_baseAddress + GetUpdateCheckpointsCallRVA();
         
         LOG_VERBOSE("[UpdateCheckpointsUnpatch] Restoring checkpoint processing block at 0x" << std::hex << patchAddr);
         
@@ -2626,7 +2803,7 @@ namespace Respawn {
         // We want to jump from 0x929529 to 0x929540
         // JMP short offset = 0x929540 - 0x92952b = 0x15 (21 bytes)
         
-        uintptr_t patchAddr = g_baseAddress + UPDATE_CHECKPOINTS_FIRST_CALL_RVA;
+        uintptr_t patchAddr = g_baseAddress + GetUpdateCheckpointsFirstCallRVA();
         
         LOG_VERBOSE("[UpdateCheckpointsFirstPatch] Patching first checkpoint call at 0x" << std::hex << patchAddr);
         
@@ -2680,7 +2857,7 @@ namespace Respawn {
             return false;
         }
         
-        uintptr_t patchAddr = g_baseAddress + UPDATE_CHECKPOINTS_FIRST_CALL_RVA;
+        uintptr_t patchAddr = g_baseAddress + GetUpdateCheckpointsFirstCallRVA();
         
         LOG_VERBOSE("[UpdateCheckpointsFirstUnpatch] Restoring first checkpoint call at 0x" << std::hex << patchAddr);
         
@@ -2785,7 +2962,7 @@ namespace Respawn {
         // Original has: MOV ECX,0x10 (5 bytes) + OR [EAX+0xa],CX (4 bytes) + OR [EAX+0x8],CX (4 bytes) = 13 bytes
         // Perfect match!
         
-        uintptr_t patchAddr = g_baseAddress + PROCESS_CHECKPOINT_EARLY_CHECK_RVA + 0xD; // Start at 0x928d95
+        uintptr_t patchAddr = g_baseAddress + GetProcessCheckpointEarlyCheckRVA() + 0xD;
         
         LOG_VERBOSE("[CheckpointEarlyReturn] Patching checkpoint early return at 0x" << std::hex << patchAddr);
         
@@ -2848,7 +3025,7 @@ namespace Respawn {
             return false;
         }
         
-        uintptr_t patchAddr = g_baseAddress + PROCESS_CHECKPOINT_EARLY_CHECK_RVA + 0xD;
+        uintptr_t patchAddr = g_baseAddress + GetProcessCheckpointEarlyCheckRVA() + 0xD;
         
         LOG_VERBOSE("[CheckpointEarlyReturnRestore] Restoring original checkpoint code at 0x" << std::hex << patchAddr);
         
@@ -2911,7 +3088,7 @@ namespace Respawn {
 
         // This patches the JNZ instruction that skips the finish logic
         // When finish line is disabled, we want to ALWAYS skip (convert JNZ to JMP)
-        uintptr_t jnzAddr = g_baseAddress + PROCESS_CHECKPOINT_FINISH_CHECK_RVA;
+        uintptr_t jnzAddr = g_baseAddress + GetProcessCheckpointFinishCheckRVA();
         
         LOG_VERBOSE("[FinishLinePatch] Patching finish line check at 0x" << std::hex << jnzAddr);
         
@@ -2964,7 +3141,7 @@ namespace Respawn {
             return false;
         }
         
-        uintptr_t jmpAddr = g_baseAddress + PROCESS_CHECKPOINT_FINISH_CHECK_RVA;
+        uintptr_t jmpAddr = g_baseAddress + GetProcessCheckpointFinishCheckRVA();
         
         LOG_VERBOSE("[FinishLineUnpatch] Restoring finish line check at 0x" << std::hex << jmpAddr);
         

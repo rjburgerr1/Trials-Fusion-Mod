@@ -23,6 +23,14 @@ namespace Logging {
     // Check if verbose logging is enabled
     bool IsVerboseEnabled();
     
+    // Set verbose logging state directly
+    void SetVerbose(bool enabled);
+    
+    // Config persistence
+    bool SaveConfig();
+    bool LoadConfig();
+    std::string GetConfigPath();
+    
     // Write to log file
     void WriteToFile(const std::string& msg);
 

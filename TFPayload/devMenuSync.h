@@ -17,7 +17,7 @@ namespace DevMenuSync {
     extern std::unordered_map<int, TweakableMemoryInfo> g_tweakableMemoryMap;
 
     // Initialize the sync system - scans game memory to find all tweakables
-    bool Initialize();
+    bool Initialize(uintptr_t baseAddress);
 
     // Shutdown
     void Shutdown();
@@ -66,5 +66,8 @@ namespace DevMenuSync {
     void SyncToGame();
 
     // Scan game memory and build the memory map
-    bool ScanGameMemory();
+    bool ScanGameMemory(uintptr_t baseAddress);
+
+    // Debug: print info about a specific tweakable ID
+    void DebugPrintTweakable(int id);
 }

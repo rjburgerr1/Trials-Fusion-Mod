@@ -90,6 +90,15 @@
     <ClInclude Include="bike-swap.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="base-address.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="acorns.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="host-join.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -159,6 +168,15 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="bike-swap.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="base-address.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="acorns.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="host-join.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

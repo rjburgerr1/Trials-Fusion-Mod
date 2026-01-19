@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "tracks.h"
 #include "logging.h"
+#include "base-address.h"
 #include <MinHook.h>
 #include <iostream>
 #include <fstream>
@@ -1026,6 +1027,12 @@ namespace Tracks {
     }
 
     bool Initialize() {
+        // Check if Steam version - skip initialization until addresses are mapped
+        if (BaseAddress::IsSteamVersion()) {
+            LOG_WARNING("[Track] Steam version detected - track hook disabled (addresses not yet mapped)");
+            return false;
+        }
+
         g_logFile.open("tracks_debug.log", std::ios::out | std::ios::trunc);
         LOG_VERBOSE("[Track] Track Hook Initializing");
 

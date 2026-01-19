@@ -88,7 +88,8 @@
       <AdditionalDependencies>d3d11.lib;dxgi.lib;"F:\VSProjects\minhook\build\VC17\lib\Release\libMinHook.x86.lib";%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)$(Configuration)\$(ProjectName).dll" "F:\Trials Fusion\datapack"</Command>
+      <Command>copy /Y "$(SolutionDir)$(Configuration)\$(ProjectName).dll" "F:\Trials Fusion\datapack"
+copy /Y "$(SolutionDir)$(Configuration)\$(ProjectName).dll" "F:\SteamLibrary\steamapps\common\Trials Fusion\datapack"</Command>
     </PostBuildEvent>
     <PreBuildEvent>
       <Command>REM 1. Define the path to the project directory.
@@ -125,7 +126,8 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;"F:\VSProjects\minhook\build\VC17\lib\Release\libMinHook.x86.lib";%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)$(Configuration)\$(ProjectName).dll" "F:\Trials Fusion\datapack"</Command>
+      <Command>copy /Y "$(SolutionDir)$(Configuration)\$(ProjectName).dll" "F:\Trials Fusion\datapack"
+copy /Y "$(SolutionDir)$(Configuration)\$(ProjectName).dll" "F:\SteamLibrary\steamapps\common\Trials Fusion\datapack"</Command>
     </PostBuildEvent>
     <PreBuildEvent>
       <Command>REM 1. Define the path to the project directory.
@@ -176,9 +178,11 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="actionscript.h" />
+    <ClInclude Include="base-address.h" />
     <ClInclude Include="camera.h" />
     <ClInclude Include="devMenu.h" />
     <ClInclude Include="devMenuSync.h" />
+    <ClInclude Include="host-join.h" />
     <ClInclude Include="imgui\backends\imgui_impl_dx11.h" />
     <ClInclude Include="imgui\backends\imgui_impl_win32.h" />
     <ClInclude Include="imgui\imconfig.h" />
@@ -200,12 +204,15 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClInclude Include="respawn.h" />
     <ClInclude Include="tracks.h" />
     <ClInclude Include="bike-swap.h" />
+    <ClInclude Include="acorns.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="actionscript.cpp" />
+    <ClCompile Include="base-address.cpp" />
     <ClCompile Include="camera.cpp" />
     <ClCompile Include="devMenu.cpp" />
     <ClCompile Include="devMenuSync.cpp" />
+    <ClCompile Include="host-join.cpp" />
     <ClCompile Include="imgui\backends\imgui_impl_dx11.cpp" />
     <ClCompile Include="imgui\backends\imgui_impl_win32.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
@@ -230,6 +237,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClCompile Include="respawn.cpp" />
     <ClCompile Include="tracks.cpp" />
     <ClCompile Include="bike-swap.cpp" />
+    <ClCompile Include="acorns.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

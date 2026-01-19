@@ -3,6 +3,7 @@
 #include "multiplayer.h"
 #include "logging.h"
 #include "keybindings.h"
+#include "base-address.h"
 #include <MinHook.h>
 #include <chrono>
 #include <sstream>
@@ -945,33 +946,80 @@ namespace Multiplayer {
         }
         
         g_BaseAddress = baseAddress;
+        bool isSteam = BaseAddress::IsSteamVersion();
+        
         LOG_VERBOSE("[MP] Initializing multiplayer monitoring system...");
         LOG_VERBOSE("[MP] Base address: 0x" << std::hex << baseAddress);
+        LOG_VERBOSE("[MP] Version: " << (isSteam ? "Steam" : "Uplay"));
         
-        // Calculate addresses (RVA + base - ghidra base 0x700000)
-        DWORD_PTR ghidraBase = 0x700000;
+        // Steam version: Enable hooks in batches for testing
+        // Set this to control how many hooks to enable (0 = none, 1 = first 3, 2 = first 6, etc.)
+        // Batch 1: PrepareAndLoadMultiplayerMenu, SendStartLiveQuickGame, SendCreatePrivateRace
+        // Batch 2: SendStartPrivateRace, start_matchmaking, HandleMultiplayerLobbyStart
+        // Batch 3: BroadcastGameStartToPlayers, SendMoveToLiveLobby, MoveToLocalMultiplayerLobby
+        // Batch 4: SetMultiplayerJoinMode, StartRace, StartMultiplayerSession
+        // Batch 5: HandleSessionCreateEvent, HandleSessionJoinRequest, SetMultiplayerMode
+        const int STEAM_HOOK_BATCH = 1;  // Change this to test more hooks (0-5)
         
-        // Key function addresses from Ghidra
-        DWORD_PTR prepareAndLoadMultiplayerMenuAddr = baseAddress + (0x00ae9530 - ghidraBase);
-        DWORD_PTR sendStartLiveQuickGameAddr = baseAddress + (0x009dbd20 - ghidraBase);
-        DWORD_PTR sendCreatePrivateRaceAddr = baseAddress + (0x009dbee0 - ghidraBase);
-        DWORD_PTR sendStartPrivateRaceAddr = baseAddress + (0x009dbf60 - ghidraBase);
-        DWORD_PTR startMatchmakingAddr = baseAddress + (0x00f0cc20 - ghidraBase);
-        DWORD_PTR handleMultiplayerLobbyStartAddr = baseAddress + (0x009d9380 - ghidraBase);
-        DWORD_PTR broadcastGameStartToPlayersAddr = baseAddress + (0x00ecaf30 - ghidraBase);
-        DWORD_PTR sendMoveToLiveLobbyAddr = baseAddress + (0x009dbad0 - ghidraBase);
-        DWORD_PTR moveToLocalMultiplayerLobbyAddr = baseAddress + (0x00ab78e0 - ghidraBase);
-        DWORD_PTR initMultiplayerSessionAddr = baseAddress + (0x9D8C90 - ghidraBase);
-        DWORD_PTR createGameplaySessionAddr = baseAddress + (0x122E8F0 - ghidraBase);
-        DWORD_PTR processNetworkPacketsAddr = baseAddress + (0xE711E0 - ghidraBase);
-        DWORD_PTR handleNetworkPacketAddr = baseAddress + (0x86CC60 - ghidraBase);
-        DWORD_PTR updateMultiplayerStateAddr = baseAddress + (0xAB9020 - ghidraBase);
-        DWORD_PTR setMultiplayerModeAddr = baseAddress + (0x00abd1a0 - ghidraBase);
-        DWORD_PTR notifyNetworkEventAddr = baseAddress + (0xAB8F80 - ghidraBase);
-        // SetMultiplayerJoinMode - Ghidra address 0x00abbc00
-        DWORD_PTR setMultiplayerJoinModeAddr = baseAddress + (0x00abbc00 - ghidraBase);
-        // StartRace - Ghidra address 0x009da450 - actual race launch
-        DWORD_PTR startRaceAddr = baseAddress + (0x009da450 - ghidraBase);
+        if (isSteam) {
+            LOG_WARNING("[MP] Steam version detected - enabling hook batch " << STEAM_HOOK_BATCH << " of 5");
+            if (STEAM_HOOK_BATCH == 0) {
+                LOG_WARNING("[MP] All hooks disabled for Steam - set STEAM_HOOK_BATCH > 0 to enable");
+                return true;
+            }
+        }
+        
+        // Calculate addresses based on version
+        // Uplay uses Ghidra base 0x700000, Steam uses Ghidra base 0x400000
+        DWORD_PTR ghidraBase = isSteam ? 0x400000 : 0x700000;
+        
+        // Address mapping: Uplay Ghidra -> Steam Ghidra
+        // PrepareAndLoadMultiplayerMenu: 0x00ae9530 -> 0x00528370
+        // SendStartLiveQuickGame:        0x009dbd20 -> 0x0041b480
+        // SendCreatePrivateRace:         0x009dbee0 -> 0x0041b250
+        // SendStartPrivateRace:          0x009dbf60 -> 0x0041b8b0
+        // start_matchmaking:             0x00f0cc20 -> 0x0094c310
+        // HandleMultiplayerLobbyStart:   0x009d9380 -> 0x00418990
+        // BroadcastGameStartToPlayers:   0x00ecaf30 -> 0x0090a380
+        // SendMoveToLiveLobby:           0x009dbad0 -> 0x00582e50
+        // MoveToLocalMultiplayerLobby:   0x00ab78e0 -> 0x004f70b0
+        // InitMultiplayerSession:        0x009d8c90 -> 0x004182a0
+        // CreateGameplaySession:         0x0122e8f0 -> NOT FOUND
+        // ProcessNetworkPackets:         0x00e711e0 -> 0x008af660
+        // HandleNetworkPacket:           0x0086cc60 -> 0x002ac830
+        // UpdateMultiplayerState:        0x00ab9020 -> NOT FOUND
+        // SetMultiplayerMode:            0x00abd1a0 -> 0x004fc8e0
+        // NotifyNetworkEvent:            0x00ab8f80 -> 0x004f8760
+        // SetMultiplayerJoinMode:        0x00abbc00 -> 0x004fb370
+        // StartRace:                     0x009da450 -> 0x00419a60
+        // LoadAndStartRace:              0x00c4c060 -> NOT FOUND
+        // StartMultiplayerSession:       0x00aea5e0 -> 0x00529420
+        // HandleSessionCreateEvent:      0x0126db50 -> 0x00cae4f0
+        // HandleSessionJoinRequest:      0x0126dc30 -> 0x00cae5d0
+        
+        // Key function addresses
+        DWORD_PTR prepareAndLoadMultiplayerMenuAddr = baseAddress + ((isSteam ? 0x00528370 : 0x00ae9530) - ghidraBase);
+        DWORD_PTR sendStartLiveQuickGameAddr = baseAddress + ((isSteam ? 0x0041b480 : 0x009dbd20) - ghidraBase);
+        DWORD_PTR sendCreatePrivateRaceAddr = baseAddress + ((isSteam ? 0x0041b250 : 0x009dbee0) - ghidraBase);
+        DWORD_PTR sendStartPrivateRaceAddr = baseAddress + ((isSteam ? 0x0041b8b0 : 0x009dbf60) - ghidraBase);
+        DWORD_PTR startMatchmakingAddr = baseAddress + ((isSteam ? 0x0094c310 : 0x00f0cc20) - ghidraBase);
+        DWORD_PTR handleMultiplayerLobbyStartAddr = baseAddress + ((isSteam ? 0x00418990 : 0x009d9380) - ghidraBase);
+        DWORD_PTR broadcastGameStartToPlayersAddr = baseAddress + ((isSteam ? 0x0090a380 : 0x00ecaf30) - ghidraBase);
+        DWORD_PTR sendMoveToLiveLobbyAddr = baseAddress + ((isSteam ? 0x00582e50 : 0x009dbad0) - ghidraBase);
+        DWORD_PTR moveToLocalMultiplayerLobbyAddr = baseAddress + ((isSteam ? 0x004f70b0 : 0x00ab78e0) - ghidraBase);
+        DWORD_PTR initMultiplayerSessionAddr = baseAddress + ((isSteam ? 0x004182a0 : 0x009d8c90) - ghidraBase);
+        // CreateGameplaySession: NOT FOUND in Steam - will skip this hook for Steam
+        DWORD_PTR createGameplaySessionAddr = isSteam ? 0 : (baseAddress + (0x0122e8f0 - ghidraBase));
+        DWORD_PTR processNetworkPacketsAddr = baseAddress + ((isSteam ? 0x008af660 : 0x00e711e0) - ghidraBase);
+        DWORD_PTR handleNetworkPacketAddr = baseAddress + ((isSteam ? 0x002ac830 : 0x0086cc60) - ghidraBase);
+        // UpdateMultiplayerState: NOT FOUND in Steam - will skip this hook for Steam
+        DWORD_PTR updateMultiplayerStateAddr = isSteam ? 0 : (baseAddress + (0x00ab9020 - ghidraBase));
+        DWORD_PTR setMultiplayerModeAddr = baseAddress + ((isSteam ? 0x004fc8e0 : 0x00abd1a0) - ghidraBase);
+        DWORD_PTR notifyNetworkEventAddr = baseAddress + ((isSteam ? 0x004f8760 : 0x00ab8f80) - ghidraBase);
+        // SetMultiplayerJoinMode
+        DWORD_PTR setMultiplayerJoinModeAddr = baseAddress + ((isSteam ? 0x004fb370 : 0x00abbc00) - ghidraBase);
+        // StartRace - actual race launch
+        DWORD_PTR startRaceAddr = baseAddress + ((isSteam ? 0x00419a60 : 0x009da450) - ghidraBase);
         
         LOG_VERBOSE("[MP] Hook addresses calculated:");
         LOG_VERBOSE("[MP]   PrepareAndLoadMultiplayerMenu: 0x" << std::hex << prepareAndLoadMultiplayerMenuAddr);
@@ -1006,6 +1054,15 @@ namespace Multiplayer {
         
         MH_STATUS status;
         int hooksEnabled = 0;
+        
+        // For Steam, only install hooks if batch level allows
+        // Batch 1: hooks 1-3, Batch 2: hooks 1-6, etc.
+        // For Uplay, install all hooks (set steamBatch to 99)
+        int steamBatch = isSteam ? STEAM_HOOK_BATCH : 99;
+        
+        // ============= BATCH 1: Hooks 1-3 =============
+        if (steamBatch >= 1) {
+        LOG_VERBOSE("[MP] === BATCH 1: PrepareAndLoadMultiplayerMenu, SendStartLiveQuickGame, SendCreatePrivateRace ===");
         
         // TEST 0: PrepareAndLoadMultiplayerMenu (MOST LIKELY to be called when clicking multiplayer!)
         LOG_VERBOSE("[MP] Installing PrepareAndLoadMultiplayerMenu hook...");
@@ -1051,6 +1108,11 @@ namespace Multiplayer {
         } else {
             LOG_ERROR("[MP] ✗ Failed to hook SendCreatePrivateRace: " << MH_StatusToString(status));
         }
+        } // End BATCH 1
+        
+        // ============= BATCH 2: Hooks 4-6 =============
+        if (steamBatch >= 2) {
+        LOG_VERBOSE("[MP] === BATCH 2: SendStartPrivateRace, start_matchmaking, HandleMultiplayerLobbyStart ===");
         
         // NEW: Hook for Private Match START button
         LOG_VERBOSE("[MP] Installing SendStartPrivateRace hook...");
@@ -1096,6 +1158,11 @@ namespace Multiplayer {
         } else {
             LOG_ERROR("[MP] ✗ Failed to hook HandleMultiplayerLobbyStart: " << MH_StatusToString(status));
         }
+        } // End BATCH 2
+        
+        // ============= BATCH 3: Hooks 7-9 =============
+        if (steamBatch >= 3) {
+        LOG_VERBOSE("[MP] === BATCH 3: BroadcastGameStartToPlayers, SendMoveToLiveLobby, MoveToLocalMultiplayerLobby ===");
         
         // NEW: Hook for race launch (when game actually starts)
         LOG_VERBOSE("[MP] Installing BroadcastGameStartToPlayers hook...");
@@ -1141,6 +1208,11 @@ namespace Multiplayer {
         } else {
             LOG_ERROR("[MP] ✗ Failed to hook MoveToLocalMultiplayerLobby: " << MH_StatusToString(status));
         }
+        } // End BATCH 3
+        
+        // ============= BATCH 4: Hooks 10-12 =============
+        if (steamBatch >= 4) {
+        LOG_VERBOSE("[MP] === BATCH 4: SetMultiplayerJoinMode, StartRace, StartMultiplayerSession ===");
         
         // NEW: Hook for SetMultiplayerJoinMode - called when clicking Private Match buttons
         LOG_VERBOSE("[MP] Installing SetMultiplayerJoinMode hook...");
@@ -1173,25 +1245,30 @@ namespace Multiplayer {
         }
         
         // NEW: LoadAndStartRace - RVA from 0x00c4c060 - THIS IS THE KEY ONE!
-        DWORD_PTR loadAndStartRaceAddr = baseAddress + (0x00c4c060 - ghidraBase);
-        LOG_VERBOSE("[MP] Installing LoadAndStartRace hook...");
-        LOG_VERBOSE("[MP]   LoadAndStartRace: 0x" << std::hex << loadAndStartRaceAddr);
-        status = MH_CreateHook(
-            (LPVOID)loadAndStartRaceAddr,
-            (LPVOID)&Hook_LoadAndStartRace,
-            (LPVOID*)&g_OriginalLoadAndStartRace
-        );
-        if (status == MH_OK) {
-            MH_EnableHook((LPVOID)loadAndStartRaceAddr);
-            LOG_VERBOSE("[MP] ✓ LoadAndStartRace hook installed");
-            hooksEnabled++;
+        // LoadAndStartRace: NOT FOUND in Steam - skip for Steam version
+        DWORD_PTR loadAndStartRaceAddr = isSteam ? 0 : (baseAddress + (0x00c4c060 - ghidraBase));
+        if (loadAndStartRaceAddr != 0) {
+            LOG_VERBOSE("[MP] Installing LoadAndStartRace hook...");
+            LOG_VERBOSE("[MP]   LoadAndStartRace: 0x" << std::hex << loadAndStartRaceAddr);
+            status = MH_CreateHook(
+                (LPVOID)loadAndStartRaceAddr,
+                (LPVOID)&Hook_LoadAndStartRace,
+                (LPVOID*)&g_OriginalLoadAndStartRace
+            );
+            if (status == MH_OK) {
+                MH_EnableHook((LPVOID)loadAndStartRaceAddr);
+                LOG_VERBOSE("[MP] ✓ LoadAndStartRace hook installed");
+                hooksEnabled++;
+            } else {
+                LOG_ERROR("[MP] ✗ Failed to hook LoadAndStartRace: " << MH_StatusToString(status));
+            }
         } else {
-            LOG_ERROR("[MP] ✗ Failed to hook LoadAndStartRace: " << MH_StatusToString(status));
+            LOG_WARNING("[MP] Skipping LoadAndStartRace hook (not mapped for Steam version)");
         }
         
-        // NEW: StartMultiplayerSession - RVA from 0x00aea5e0
+        // NEW: StartMultiplayerSession - RVA from Uplay 0x00aea5e0 -> Steam 0x00529420
         // This is called when clicking Private Match button
-        DWORD_PTR startMultiplayerSessionAddr = baseAddress + (0x00aea5e0 - ghidraBase);
+        DWORD_PTR startMultiplayerSessionAddr = baseAddress + ((isSteam ? 0x00529420 : 0x00aea5e0) - ghidraBase);
         LOG_VERBOSE("[MP] Installing StartMultiplayerSession hook...");
         LOG_VERBOSE("[MP]   StartMultiplayerSession: 0x" << std::hex << startMultiplayerSessionAddr);
         status = MH_CreateHook(
@@ -1206,10 +1283,15 @@ namespace Multiplayer {
         } else {
             LOG_ERROR("[MP] ✗ Failed to hook StartMultiplayerSession: " << MH_StatusToString(status));
         }
+        } // End BATCH 4
         
-        // NEW: HandleSessionCreateEvent - RVA from 0x0126db50
+        // ============= BATCH 5: Hooks 13-15 =============
+        if (steamBatch >= 5) {
+        LOG_VERBOSE("[MP] === BATCH 5: HandleSessionCreateEvent, HandleSessionJoinRequest, SetMultiplayerMode ===");
+        
+        // NEW: HandleSessionCreateEvent - RVA from Uplay 0x0126db50 -> Steam 0x00cae4f0
         // This is called when a session is created and contains the session ID!
-        DWORD_PTR handleSessionCreateEventAddr = baseAddress + (0x0126db50 - ghidraBase);
+        DWORD_PTR handleSessionCreateEventAddr = baseAddress + ((isSteam ? 0x00cae4f0 : 0x0126db50) - ghidraBase);
         LOG_VERBOSE("[MP] Installing HandleSessionCreateEvent hook...");
         LOG_VERBOSE("[MP]   HandleSessionCreateEvent: 0x" << std::hex << handleSessionCreateEventAddr);
         
@@ -1236,9 +1318,9 @@ namespace Multiplayer {
             LOG_ERROR("[MP] ✗ HandleSessionCreateEvent address is invalid - cannot read memory");
         }
         
-        // NEW: HandleSessionJoinRequest - RVA from 0x0126dc30
+        // NEW: HandleSessionJoinRequest - RVA from Uplay 0x0126dc30 -> Steam 0x00cae5d0
         // This is called when joining a session and contains the target session ID!
-        DWORD_PTR handleSessionJoinRequestAddr = baseAddress + (0x0126dc30 - ghidraBase);
+        DWORD_PTR handleSessionJoinRequestAddr = baseAddress + ((isSteam ? 0x00cae5d0 : 0x0126dc30) - ghidraBase);
         LOG_VERBOSE("[MP] Installing HandleSessionJoinRequest hook...");
         LOG_VERBOSE("[MP]   HandleSessionJoinRequest: 0x" << std::hex << handleSessionJoinRequestAddr);
         status = MH_CreateHook(
@@ -1285,6 +1367,7 @@ namespace Multiplayer {
             LOG_ERROR("[MP] ✗ SetMultiplayerMode address is INVALID - cannot read memory!");
             LOG_ERROR("[MP] This means the address calculation is wrong.");
         }
+        } // End BATCH 5
         
         LOG_VERBOSE("[MP] === Multiplayer monitoring initialized ===");
         LOG_VERBOSE("[MP] Hooks enabled: " << hooksEnabled << "/15");

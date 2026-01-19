@@ -7,6 +7,9 @@
 #include "actionscript.h"
 #include "keybindings.h"
 #include "multiplayer.h"
+#include "acorns.h"
+#include "host-join.h"
+#include "base-address.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -24,6 +27,7 @@ std::shared_ptr<TweakableFloat> CreateSyncedFloat(int id, const std::string& nam
         LOG_VERBOSE("Float changed: " << name << " (ID=" << id << ") = " << newValue);
         if (!DevMenuSync::WriteValue<float>(id, newValue)) {
             LOG_WARNING("Failed to write Float ID=" << id << " to game memory!");
+            DevMenuSync::DebugPrintTweakable(id);
         }
         else {
             LOG_VERBOSE("Successfully wrote Float ID=" << id << " to game memory");
@@ -41,6 +45,7 @@ std::shared_ptr<TweakableInt> CreateSyncedInt(int id, const std::string& name,
         LOG_VERBOSE("Int changed: " << name << " (ID=" << id << ") = " << newValue);
         if (!DevMenuSync::WriteValue<int>(id, newValue)) {
             LOG_WARNING("Failed to write Int ID=" << id << " to game memory!");
+            DevMenuSync::DebugPrintTweakable(id);
         }
         else {
             LOG_VERBOSE("Successfully wrote Int ID=" << id << " to game memory");
@@ -58,6 +63,7 @@ std::shared_ptr<TweakableBool> CreateSyncedBool(int id, const std::string& name,
         // Game uses int for bool (0 or 1)
         if (!DevMenuSync::WriteValue<int>(id, newValue ? 1 : 0)) {
             LOG_WARNING("Failed to write Bool ID=" << id << " to game memory!");
+            DevMenuSync::DebugPrintTweakable(id);
         }
         else {
             LOG_VERBOSE("Successfully wrote Bool ID=" << id << " to game memory");
@@ -3165,9 +3171,48 @@ void DevMenu::InitializeDebugLocalization() {
 typedef void* (__fastcall* InitializeDevMenuDataFunc)(int param_1);
 typedef void(__cdecl* BuildTweakablesListFunc)(void* this_ptr, void* outputArray, int categoryId);
 
-const uintptr_t INIT_DEV_MENU_DATA_ADDR = 0x00cef440;
-const uintptr_t BUILD_TWEAKABLES_LIST_ADDR = 0x00d623e0;
-const uintptr_t GLOBAL_DEV_MENU_DATA = 0x01755230;
+// ============================================================================
+// Game Memory Addresses - UPLAY VERSION (RVA offsets - Ghidra base 0x700000)
+// ============================================================================
+
+// InitializeDevMenuData: Ghidra 0x00d648c0, RVA = 0x00d648c0 - 0x700000 = 0x6648c0
+static constexpr uintptr_t INIT_DEV_MENU_DATA_RVA_UPLAY = 0x6648c0;
+
+// BuildTweakablesList: Ghidra 0x00d623e0, RVA = 0x00d623e0 - 0x700000 = 0x6623e0
+static constexpr uintptr_t BUILD_TWEAKABLES_LIST_RVA_UPLAY = 0x6623e0;
+
+// DAT_01755230 (g_pDevMenuData): Ghidra 0x01755230, RVA = 0x01755230 - 0x700000 = 0x1055230
+static constexpr uintptr_t GLOBAL_DEV_MENU_DATA_RVA_UPLAY = 0x1055230;
+
+// ============================================================================
+// Game Memory Addresses - STEAM VERSION (RVA offsets - Ghidra base 0x140000)
+// ============================================================================
+
+// InitializeDevMenuData: Ghidra 0x007a3360, RVA = 0x007a3360 - 0x140000 = 0x663360
+static constexpr uintptr_t INIT_DEV_MENU_DATA_RVA_STEAM = 0x663360;
+
+// BuildTweakablesList: Ghidra 0x007a0e80 (estimated), RVA = 0x007a0e80 - 0x140000 = 0x660e80
+// TODO: This address is estimated based on relative offset - verify in Steam Ghidra
+static constexpr uintptr_t BUILD_TWEAKABLES_LIST_RVA_STEAM = 0x660e80;
+
+// DAT_01197230 (g_pDevMenuData): Ghidra 0x01197230, RVA = 0x01197230 - 0x140000 = 0x1057230
+static constexpr uintptr_t GLOBAL_DEV_MENU_DATA_RVA_STEAM = 0x1057230;
+
+// ============================================================================
+// Helper functions to get correct RVA based on detected version
+// ============================================================================
+
+static uintptr_t GetInitDevMenuDataRVA() {
+    return BaseAddress::IsSteamVersion() ? INIT_DEV_MENU_DATA_RVA_STEAM : INIT_DEV_MENU_DATA_RVA_UPLAY;
+}
+
+static uintptr_t GetBuildTweakablesListRVA() {
+    return BaseAddress::IsSteamVersion() ? BUILD_TWEAKABLES_LIST_RVA_STEAM : BUILD_TWEAKABLES_LIST_RVA_UPLAY;
+}
+
+static uintptr_t GetGlobalDevMenuDataRVA() {
+    return BaseAddress::IsSteamVersion() ? GLOBAL_DEV_MENU_DATA_RVA_STEAM : GLOBAL_DEV_MENU_DATA_RVA_UPLAY;
+}
 
 // Helper functions to safely read values (SEH-enabled, no C++ objects)
 static bool SafeReadName(char* namePtr, char* buffer, int bufferSize) {
@@ -3326,10 +3371,15 @@ static void DumpCategoryRecursive(void* devMenuData, uintptr_t buildTweakablesLi
 void DevMenu::DumpTweakablesData() {
     LOG_INFO("===== DUMPING ALL TWEAKABLES (RECURSIVE) =====");
 
+    // Check if Steam version and warn about unverified address
+    if (BaseAddress::IsSteamVersion()) {
+        LOG_WARNING("[DevMenu] Steam version detected - BuildTweakablesList address is estimated and may not work");
+    }
+
     uintptr_t baseAddress = (uintptr_t)GetModuleHandle(NULL);
 
-    // Get pointer to global dev menu data
-    void** globalDevMenuDataPtr = (void**)(baseAddress + GLOBAL_DEV_MENU_DATA - 0x700000);
+    // Get pointer to global dev menu data using version-aware RVA
+    void** globalDevMenuDataPtr = (void**)(baseAddress + GetGlobalDevMenuDataRVA());
     void* devMenuData = *globalDevMenuDataPtr;
 
     LOG_VERBOSE("Base address: 0x" << std::hex << baseAddress);
@@ -3337,7 +3387,7 @@ void DevMenu::DumpTweakablesData() {
 
     if (devMenuData == nullptr) {
         LOG_INFO("Initializing dev menu data...");
-        InitializeDevMenuDataFunc initDevMenuData = (InitializeDevMenuDataFunc)(baseAddress + INIT_DEV_MENU_DATA_ADDR - 0x700000);
+        InitializeDevMenuDataFunc initDevMenuData = (InitializeDevMenuDataFunc)(baseAddress + GetInitDevMenuDataRVA());
         devMenuData = initDevMenuData(0);
         *globalDevMenuDataPtr = devMenuData;
     }
@@ -3349,7 +3399,7 @@ void DevMenu::DumpTweakablesData() {
 
     LOG_INFO("Dev menu data @ 0x" << std::hex << (uintptr_t)devMenuData);
 
-    uintptr_t buildTweakablesListAddr = baseAddress + BUILD_TWEAKABLES_LIST_ADDR - 0x700000;
+    uintptr_t buildTweakablesListAddr = baseAddress + GetBuildTweakablesListRVA();
     LOG_VERBOSE("BuildTweakablesList @ 0x" << std::hex << buildTweakablesListAddr);
     LOG_INFO("");
 
@@ -3716,6 +3766,168 @@ void DevMenu::InitializeMod() {
     });
     RegisterTweakable(togglePreventFinish);
     mod->AddChild(togglePreventFinish);
+
+    // ============================================================================
+    // Host-Join Controls
+    // ============================================================================
+
+    // Create a subfolder for Host-Join controls
+    auto hostJoinFolder = std::make_shared<TweakableFolder>(10030, "Host-Join (Private Match)");
+    
+    // Scan for Session ID button
+    auto scanSessionIdBtn = std::make_shared<TweakableButton>(
+        10036,
+        "Scan for Session ID"
+    );
+    scanSessionIdBtn->SetOnClickCallback([]() {
+        LOG_INFO("[DevMenu] Scanning for session ID...");
+        HostJoin::RefreshSessionId();
+        uint32_t sessionId = HostJoin::GetCurrentSessionId();
+        if (sessionId != 0) {
+            LOG_INFO("[DevMenu] Found Session ID: 0x" << std::hex << std::uppercase << sessionId);
+            LOG_INFO("[DevMenu] Session ID has been saved to F:/session_id.txt");
+        } else {
+            LOG_INFO("[DevMenu] Scan complete - check log for candidates");
+        }
+    });
+    RegisterTweakable(scanSessionIdBtn);
+    hostJoinFolder->AddChild(scanSessionIdBtn);
+    
+    // Show Current Session ID button
+    auto showSessionIdBtn = std::make_shared<TweakableButton>(
+        10031,
+        "Show Current Session ID"
+    );
+    showSessionIdBtn->SetOnClickCallback([]() {
+        uint32_t sessionId = HostJoin::GetCurrentSessionId();
+        if (sessionId != 0) {
+            LOG_INFO("[DevMenu] Current Session ID: 0x" << std::hex << std::uppercase << sessionId);
+            LOG_INFO("[DevMenu] Share this ID with other players to let them join!");
+        } else {
+            LOG_INFO("[DevMenu] Not hosting a session. Enter a private match lobby to capture session ID.");
+        }
+    });
+    RegisterTweakable(showSessionIdBtn);
+    hostJoinFolder->AddChild(showSessionIdBtn);
+    
+    // Copy Session ID to Clipboard button
+    auto copySessionIdBtn = std::make_shared<TweakableButton>(
+        10032,
+        "Copy Session ID to Clipboard"
+    );
+    copySessionIdBtn->SetOnClickCallback([]() {
+        if (HostJoin::CopySessionIdToClipboard()) {
+            LOG_INFO("[DevMenu] Session ID copied to clipboard!");
+        } else {
+            LOG_ERROR("[DevMenu] No session ID to copy - enter a private match lobby first");
+        }
+    });
+    RegisterTweakable(copySessionIdBtn);
+    hostJoinFolder->AddChild(copySessionIdBtn);
+    
+    // Paste Session ID from Clipboard button
+    auto pasteSessionIdBtn = std::make_shared<TweakableButton>(
+        10033,
+        "Paste Session ID from Clipboard"
+    );
+    pasteSessionIdBtn->SetOnClickCallback([]() {
+        if (HostJoin::PasteSessionIdFromClipboard()) {
+            uint32_t targetId = HostJoin::GetTargetSessionId();
+            LOG_INFO("[DevMenu] Session ID pasted: 0x" << std::hex << std::uppercase << targetId);
+        } else {
+            LOG_ERROR("[DevMenu] Failed to paste session ID from clipboard");
+        }
+    });
+    RegisterTweakable(pasteSessionIdBtn);
+    hostJoinFolder->AddChild(pasteSessionIdBtn);
+    
+    // Join Session button
+    auto joinSessionBtn = std::make_shared<TweakableButton>(
+        10034,
+        "Join Session (use target ID)"
+    );
+    joinSessionBtn->SetOnClickCallback([]() {
+        uint32_t targetId = HostJoin::GetTargetSessionId();
+        if (targetId == 0) {
+            LOG_ERROR("[DevMenu] No target session ID set! Paste a session ID first.");
+            return;
+        }
+        LOG_INFO("[DevMenu] Attempting to join session: 0x" << std::hex << std::uppercase << targetId);
+        if (HostJoin::JoinSession()) {
+            LOG_INFO("[DevMenu] Join request sent!");
+        } else {
+            LOG_ERROR("[DevMenu] Join request may have failed - check logs");
+        }
+    });
+    RegisterTweakable(joinSessionBtn);
+    hostJoinFolder->AddChild(joinSessionBtn);
+    
+    // Show Host-Join Status button
+    auto showStatusBtn = std::make_shared<TweakableButton>(
+        10035,
+        "Show Host-Join Status"
+    );
+    showStatusBtn->SetOnClickCallback([]() {
+        LOG_INFO("[DevMenu] === Host-Join Status ===");
+        LOG_INFO("[DevMenu] Is Hosting: " << (HostJoin::IsHostingSession() ? "Yes" : "No"));
+        LOG_INFO("[DevMenu] Current Session ID: 0x" << std::hex << std::uppercase << HostJoin::GetCurrentSessionId());
+        LOG_INFO("[DevMenu] Target Session ID: 0x" << std::hex << std::uppercase << HostJoin::GetTargetSessionId());
+        LOG_INFO("[DevMenu] Status: " << HostJoin::GetStatusMessage());
+    });
+    RegisterTweakable(showStatusBtn);
+    hostJoinFolder->AddChild(showStatusBtn);
+    
+    RegisterTweakable(hostJoinFolder);
+    mod->AddChild(hostJoinFolder);
+
+    // ============================================================================
+    // Acorns Controls
+    // ============================================================================
+
+    // Get Balance Button
+    auto getBalanceButton = std::make_shared<TweakableButton>(
+        10020,
+        "Get Current Balance"
+    );
+    getBalanceButton->SetOnClickCallback([]() {
+        int balance = Acorns::GetBalance();
+        if (balance >= 0) {
+            LOG_INFO("[DevMenu] Current acorn balance: " << balance);
+        } else {
+            LOG_WARNING("[DevMenu] Could not retrieve balance - are you in-game?");
+        }
+    });
+    RegisterTweakable(getBalanceButton);
+    mod->AddChild(getBalanceButton);
+
+    // Add Acorns Amount Slider
+    auto acornsAmount = std::make_shared<TweakableInt>(
+        10018,
+        "Acorns Amount to Add",
+        100,      // Default: 100
+        -10000,   // Min: -10000 (to remove acorns)
+        10000     // Max: +10000
+    );
+    RegisterTweakable(acornsAmount);
+    mod->AddChild(acornsAmount);
+
+    // Add Acorns Button
+    auto addAcornsButton = std::make_shared<TweakableButton>(
+        10019,
+        "Add Acorns to Balance"
+    );
+    addAcornsButton->SetOnClickCallback([acornsAmount]() {
+        int amount = acornsAmount->GetValue();
+        LOG_INFO("[DevMenu] Adding " << amount << " acorns to player balance");
+        
+        if (Acorns::AddToBalance(amount)) {
+            LOG_INFO("[DevMenu] Successfully added " << amount << " acorns!");
+        } else {
+            LOG_ERROR("[DevMenu] Failed to add acorns - check if player profile is loaded");
+        }
+    });
+    RegisterTweakable(addAcornsButton);
+    mod->AddChild(addAcornsButton);
 
     RegisterTweakable(mod);
     m_rootFolders.push_back(mod);
