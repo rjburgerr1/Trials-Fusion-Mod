@@ -13,7 +13,7 @@ DEINIT_TRIGGER.txt
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
-
+TFPayload/uplay-to-steam.csv
 ADDRESS_MAPPING_PROMPT.txt
 uplay-to-steam.csv
 # Mono auto generated files
