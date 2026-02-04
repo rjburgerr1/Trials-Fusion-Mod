@@ -5,14 +5,14 @@
 
 namespace BaseAddress {
     bool IsSteamVersion() {
-        // Method 1: Check for steam_api64.dll (most reliable)
-        HMODULE steamModule = GetModuleHandleA("steam_api64.dll");
+        // Method 1: Check for steam_api.dll (32-bit version for Trials Fusion)
+        HMODULE steamModule = GetModuleHandleA("steam_api.dll");
         if (steamModule != nullptr) {
             return true;
         }
         
-        // Method 2: Check for steamclient64.dll (backup)
-        steamModule = GetModuleHandleA("steamclient64.dll");
+        // Method 2: Check for steamclient.dll
+        steamModule = GetModuleHandleA("steamclient.dll");
         if (steamModule != nullptr) {
             return true;
         }

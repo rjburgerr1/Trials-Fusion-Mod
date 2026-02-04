@@ -8,25 +8,25 @@
 namespace DevMenuSync {
     static uintptr_t g_BaseAddress = 0;
     std::unordered_map<int, TweakableMemoryInfo> g_tweakableMemoryMap;
-    
-    // InitializeDevMenuData: Ghidra 0x014648c0, RVA = 0x014648c0 - 0x700000 = 0xd648c0
-    static constexpr uintptr_t INIT_DEV_MENU_DATA_RVA_UPLAY = 0x00d648c0;
-    
-    // BuildTweakablesList: Ghidra 0x014623e0, RVA = 0x014623e0 - 0x700000 = 0xd623e0
-    static constexpr uintptr_t BUILD_TWEAKABLES_LIST_RVA_UPLAY = 0x00d623e0;
-    
-    // g_DevMenuData: Ghidra 0x01755230, RVA = 0x01755230 - 0x700000 = 0x1055230
+
+    // InitializeDevMenuData: Ghidra 0x00d648c0, RVA = 0x00d648c0 - 0x00700000 = 0x006648c0
+    static constexpr uintptr_t INIT_DEV_MENU_DATA_RVA_UPLAY = 0x006648c0;
+
+    // BuildTweakablesList: Ghidra 0x00d623e0, RVA = 0x00d623e0 - 0x00700000 = 0x006623e0
+    static constexpr uintptr_t BUILD_TWEAKABLES_LIST_RVA_UPLAY = 0x006623e0;
+
+    // g_DevMenuData: Ghidra 0x017552 30, RVA = 0x01755230 - 0x00700000 = 0x01055230
     static constexpr uintptr_t GLOBAL_DEV_MENU_DATA_RVA_UPLAY = 0x01055230;
 
     // InitializeDevMenuData: Ghidra 0x008e3360, RVA = 0x008e3360 - 0x140000 = 0x7a3360
     // MAPPED via CSV: Uplay 0x00d648c0 -> Steam 0x007a3360
     static constexpr uintptr_t INIT_DEV_MENU_DATA_RVA_STEAM = 0x007a3360;
-    
+
     // BuildTweakablesList: FUN_007a0e80 (confirmed via getChildTweakablesForId -> FUN_00689c20 -> FUN_007a0e80)
     // Steam Ghidra: 0x007a0e80, RVA = 0x007a0e80 - 0x140000 = 0x00660e80
     // Verified by ActionScript callback registration and function signature match
     static constexpr uintptr_t BUILD_TWEAKABLES_LIST_RVA_STEAM = 0x00660e80;
-    
+
     // g_DevMenuData: Multiple locations found
     // DAT_01197230 (from CSV mapping): RVA = 0x01057230 - gives valid devMenuData ptr
     // DAT_011939e8 (used by ActionScript callbacks): RVA = 0x010539e8 - gives NULL
@@ -36,15 +36,15 @@ namespace DevMenuSync {
     // ============================================================================
     // Helper functions to get correct RVA based on detected version
     // ============================================================================
-    
+
     static uintptr_t GetInitDevMenuDataRVA() {
         return BaseAddress::IsSteamVersion() ? INIT_DEV_MENU_DATA_RVA_STEAM : INIT_DEV_MENU_DATA_RVA_UPLAY;
     }
-    
+
     static uintptr_t GetBuildTweakablesListRVA() {
         return BaseAddress::IsSteamVersion() ? BUILD_TWEAKABLES_LIST_RVA_STEAM : BUILD_TWEAKABLES_LIST_RVA_UPLAY;
     }
-    
+
     static uintptr_t GetGlobalDevMenuDataRVA() {
         return BaseAddress::IsSteamVersion() ? GLOBAL_DEV_MENU_DATA_RVA_STEAM : GLOBAL_DEV_MENU_DATA_RVA_UPLAY;
     }
@@ -54,7 +54,7 @@ namespace DevMenuSync {
     // ============================================================================
     // Low-level unsafe call wrappers (C-style functions for __try/__except)
     // ============================================================================
-    
+
     // Safe wrapper for calling BuildTweakablesList
     static int SafeCallBuildTweakablesList(void* devMenuData, int* outputArray, int categoryId, uintptr_t funcAddr) {
         __try {
@@ -70,7 +70,7 @@ namespace DevMenuSync {
             return 0; // Failure
         }
     }
-    
+
     // Safe wrapper for calling InitializeDevMenuData
     static void* SafeCallInitializeDevMenuData(uintptr_t funcAddr) {
         void* result = nullptr;
@@ -83,7 +83,7 @@ namespace DevMenuSync {
         }
         return result;
     }
-    
+
     // Safe wrapper for reading a pointer
     static int SafeReadPointer(void** ptrAddr, void** outValue) {
         __try {
@@ -94,7 +94,7 @@ namespace DevMenuSync {
             return 0;
         }
     }
-    
+
     // Safe wrapper for reading int from memory
     static int SafeReadInt(void* address, int* outValue) {
         __try {
@@ -105,7 +105,7 @@ namespace DevMenuSync {
             return 0;
         }
     }
-    
+
     // Safe wrapper for reading float from memory
     static int SafeReadFloat(void* address, float* outValue) {
         __try {
@@ -116,7 +116,7 @@ namespace DevMenuSync {
             return 0;
         }
     }
-    
+
     // Safe wrapper for writing a pointer
     static int SafeWritePointer(void** ptrAddr, void* value) {
         __try {
@@ -130,29 +130,30 @@ namespace DevMenuSync {
 
     bool Initialize(uintptr_t baseAddress) {
         LOG_VERBOSE("[DevMenuSync] Initializing sync system...");
-        
+
         if (baseAddress == 0) {
             LOG_ERROR("[DevMenuSync] Invalid base address!");
             return false;
         }
-        
+
         g_BaseAddress = baseAddress;
-        
+
         // Log version detection
         if (BaseAddress::IsSteamVersion()) {
             LOG_VERBOSE("[DevMenuSync] Steam version detected");
             LOG_VERBOSE("[DevMenuSync]   BuildTweakablesList RVA: 0x" << std::hex << BUILD_TWEAKABLES_LIST_RVA_STEAM);
             LOG_VERBOSE("[DevMenuSync]   InitDevMenuData RVA: 0x" << std::hex << INIT_DEV_MENU_DATA_RVA_STEAM);
             LOG_VERBOSE("[DevMenuSync]   GlobalDevMenuData RVA: 0x" << std::hex << GLOBAL_DEV_MENU_DATA_RVA_STEAM);
-        } else {
+        }
+        else {
             LOG_VERBOSE("[DevMenuSync] Uplay version detected");
             LOG_VERBOSE("[DevMenuSync]   BuildTweakablesList RVA: 0x" << std::hex << BUILD_TWEAKABLES_LIST_RVA_UPLAY);
             LOG_VERBOSE("[DevMenuSync]   InitDevMenuData RVA: 0x" << std::hex << INIT_DEV_MENU_DATA_RVA_UPLAY);
             LOG_VERBOSE("[DevMenuSync]   GlobalDevMenuData RVA: 0x" << std::hex << GLOBAL_DEV_MENU_DATA_RVA_UPLAY);
         }
-        
+
         g_BaseAddress = baseAddress;
-        
+
         if (!ScanGameMemory(baseAddress)) {
             LOG_ERROR("[DevMenuSync] Failed to scan game memory!");
             return false;
@@ -177,13 +178,13 @@ namespace DevMenuSync {
     void DebugPrintTweakable(int id) {
         LOG_INFO("[DevMenuSync] === DEBUG for ID " << id << " ===");
         LOG_INFO("[DevMenuSync] Map size: " << g_tweakableMemoryMap.size());
-        
+
         auto* info = GetMemoryInfo(id);
         if (!info) {
             LOG_WARNING("[DevMenuSync] ID " << id << " NOT FOUND in map!");
             return;
         }
-        
+
         LOG_INFO("[DevMenuSync] ID " << id << " found:");
         LOG_INFO("[DevMenuSync]   valuePtr: 0x" << std::hex << (uintptr_t)info->valuePtr);
         LOG_INFO("[DevMenuSync]   type: " << std::dec << info->type);
@@ -192,17 +193,24 @@ namespace DevMenuSync {
 
     // Recursive function to scan a category and all its children
     void ScanCategoryRecursive(void* devMenuData, uintptr_t buildTweakablesListAddr, int categoryId) {
-        LOG_VERBOSE("[DevMenuSync] ScanCategoryRecursive: categoryId=" << categoryId);
-        
+        LOG_INFO("[DevMenuSync] >>> ScanCategoryRecursive ENTERED: categoryId=" << categoryId);
+
         int outputArray[3] = { 0, 2, 0 };
         void* arrayData = malloc(8);
         outputArray[2] = (int)arrayData;
 
+        LOG_INFO("[DevMenuSync] About to call BuildTweakablesList...");
+        LOG_INFO("[DevMenuSync]   devMenuData: 0x" << std::hex << (uintptr_t)devMenuData);
+        LOG_INFO("[DevMenuSync]   buildTweakablesListAddr: 0x" << std::hex << buildTweakablesListAddr);
+        LOG_INFO("[DevMenuSync]   categoryId: " << std::dec << categoryId);
+
         // Call BuildTweakablesList safely
         int success = SafeCallBuildTweakablesList(devMenuData, outputArray, categoryId, buildTweakablesListAddr);
-        
+
+        LOG_INFO("[DevMenuSync] BuildTweakablesList call completed, success=" << success);
+
         if (!success) {
-            LOG_ERROR("[DevMenuSync] CRASH in BuildTweakablesList! CategoryID: " << categoryId);
+            LOG_ERROR("[DevMenuSync] !!! CRASH/FAILURE in BuildTweakablesList! CategoryID: " << categoryId);
             LOG_ERROR("[DevMenuSync] devMenuData: 0x" << std::hex << (uintptr_t)devMenuData);
             LOG_ERROR("[DevMenuSync] buildTweakablesListAddr: 0x" << buildTweakablesListAddr);
             free(arrayData);
@@ -225,8 +233,8 @@ namespace DevMenuSync {
 
                 // For non-folder types, store the memory location
                 if (type >= 1 && type <= 3) {
-                    void** valuePtr = (void**)(data + 0x1bc/4);
-                    
+                    void** valuePtr = (void**)(data + 0x1bc / 4);
+
                     TweakableMemoryInfo info;
                     info.valuePtr = *valuePtr;
                     info.type = type;
@@ -250,12 +258,23 @@ namespace DevMenuSync {
     bool ScanGameMemory(uintptr_t baseAddress) {
         LOG_VERBOSE("[DevMenuSync] ScanGameMemory called with baseAddress: 0x" << std::hex << baseAddress);
 
+        // CRITICAL: Log version detection first
+        bool isSteam = BaseAddress::IsSteamVersion();
+        LOG_INFO("[DevMenuSync] ========================================");
+        LOG_INFO("[DevMenuSync] Version Detection: " << (isSteam ? "STEAM" : "UPLAY"));
+        LOG_INFO("[DevMenuSync] ========================================");
+        LOG_INFO("[DevMenuSync] Using RVAs:");
+        LOG_INFO("[DevMenuSync]   GlobalDevMenuData: 0x" << std::hex << GetGlobalDevMenuDataRVA());
+        LOG_INFO("[DevMenuSync]   InitDevMenuData: 0x" << std::hex << GetInitDevMenuDataRVA());
+        LOG_INFO("[DevMenuSync]   BuildTweakablesList: 0x" << std::hex << GetBuildTweakablesListRVA());
+        LOG_INFO("[DevMenuSync] ========================================");
+
         // Get pointer to global dev menu data using version-aware helper
         void** globalDevMenuDataPtr = (void**)(baseAddress + GetGlobalDevMenuDataRVA());
-        
+
         LOG_VERBOSE("[DevMenuSync] Global dev menu data pointer at: 0x" << std::hex << (uintptr_t)globalDevMenuDataPtr);
-        LOG_VERBOSE("[DevMenuSync] Using RVA: 0x" << std::hex << GetGlobalDevMenuDataRVA());
-        
+        LOG_VERBOSE("[DevMenuSync] Calculated from baseAddress 0x" << std::hex << baseAddress << " + RVA 0x" << GetGlobalDevMenuDataRVA());
+
         void* devMenuData = nullptr;
         if (!SafeReadPointer(globalDevMenuDataPtr, &devMenuData)) {
             LOG_ERROR("[DevMenuSync] Failed to read global dev menu data pointer!");
@@ -267,18 +286,18 @@ namespace DevMenuSync {
         if (devMenuData == nullptr) {
             LOG_VERBOSE("[DevMenuSync] devMenuData is NULL, calling InitializeDevMenuData...");
             uintptr_t initDevMenuDataAddr = baseAddress + GetInitDevMenuDataRVA();
-            
+
             LOG_VERBOSE("[DevMenuSync] Calling InitializeDevMenuData at: 0x" << std::hex << initDevMenuDataAddr);
-            
+
             devMenuData = SafeCallInitializeDevMenuData(initDevMenuDataAddr);
-            
+
             if (devMenuData == nullptr) {
                 LOG_ERROR("[DevMenuSync] CRASH or NULL return from InitializeDevMenuData!");
                 return false;
             }
-            
+
             LOG_VERBOSE("[DevMenuSync] InitializeDevMenuData returned: 0x" << std::hex << (uintptr_t)devMenuData);
-            
+
             // Write back to global (with safety check)
             if (!SafeWritePointer(globalDevMenuDataPtr, devMenuData)) {
                 LOG_ERROR("[DevMenuSync] Failed to write devMenuData back to global!");
@@ -291,14 +310,14 @@ namespace DevMenuSync {
         }
 
         LOG_VERBOSE("[DevMenuSync] Dev menu data @ 0x" << std::hex << (uintptr_t)devMenuData);
-        
+
         // Debug: dump first few values of devMenuData structure
         unsigned int* devMenuDataInts = (unsigned int*)devMenuData;
         LOG_VERBOSE("[DevMenuSync] devMenuData[0] (offset 0x00): 0x" << std::hex << devMenuDataInts[0]);
         LOG_VERBOSE("[DevMenuSync] devMenuData[1] (offset 0x04): 0x" << std::hex << devMenuDataInts[1]);
         LOG_VERBOSE("[DevMenuSync] devMenuData[2] (offset 0x08): 0x" << std::hex << devMenuDataInts[2]);
         LOG_VERBOSE("[DevMenuSync] devMenuData[3] (offset 0x0c): 0x" << std::hex << devMenuDataInts[3]);
-        
+
         // Check what BuildTweakablesList would check for categoryId=0
         // It checks: *(*(devMenuData + 4 + categoryId*4) + 4) == 0
         void* ptrAtOffset4 = (void*)devMenuDataInts[1];  // devMenuData + 4
@@ -316,12 +335,20 @@ namespace DevMenuSync {
 
         // Clear existing map
         g_tweakableMemoryMap.clear();
-        LOG_VERBOSE("[DevMenuSync] Starting recursive scan from category 0...");
+
+        LOG_INFO("[DevMenuSync] ===== STARTING RECURSIVE SCAN =====");
+        LOG_INFO("[DevMenuSync] About to call ScanCategoryRecursive with:");
+        LOG_INFO("[DevMenuSync]   devMenuData: 0x" << std::hex << (uintptr_t)devMenuData);
+        LOG_INFO("[DevMenuSync]   buildTweakablesListAddr: 0x" << std::hex << buildTweakablesListAddr);
+        LOG_INFO("[DevMenuSync]   categoryId: 0");
+        LOG_INFO("[DevMenuSync] =====================================");
 
         // Start recursive scan from category 0 (top level)
         ScanCategoryRecursive(devMenuData, buildTweakablesListAddr, 0);
 
-        LOG_VERBOSE("[DevMenuSync] Scan complete! Found " << std::dec << g_tweakableMemoryMap.size() << " tweakables in game memory.");
+        LOG_INFO("[DevMenuSync] ===== SCAN COMPLETE =====");
+        LOG_INFO("[DevMenuSync] Found " << std::dec << g_tweakableMemoryMap.size() << " tweakables in game memory.");
+        LOG_INFO("[DevMenuSync] ==========================");
         return true;
     }
 
@@ -341,7 +368,8 @@ namespace DevMenuSync {
                     int gameValue = 0;
                     if (SafeReadInt(memInfo.valuePtr, &gameValue)) {
                         tweakable->SetValue(gameValue != 0);
-                    } else {
+                    }
+                    else {
                         memInfo.isValid = false;
                     }
                 }
@@ -352,7 +380,8 @@ namespace DevMenuSync {
                     int gameValue = 0;
                     if (SafeReadInt(memInfo.valuePtr, &gameValue)) {
                         tweakable->SetValue(gameValue);
-                    } else {
+                    }
+                    else {
                         memInfo.isValid = false;
                     }
                 }
@@ -363,7 +392,8 @@ namespace DevMenuSync {
                     float gameValue = 0.0f;
                     if (SafeReadFloat(memInfo.valuePtr, &gameValue)) {
                         tweakable->SetValue(gameValue);
-                    } else {
+                    }
+                    else {
                         memInfo.isValid = false;
                     }
                 }

@@ -87,9 +87,6 @@
     <ClInclude Include="multiplayer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="bike-swap.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="base-address.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -97,6 +94,21 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="host-join.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="prevent-finish.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gamemode.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="limits.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="money.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="bike-swap.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -167,9 +179,6 @@
     <ClCompile Include="multiplayer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="bike-swap.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="base-address.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -177,6 +186,21 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="host-join.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="prevent-finish.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gamemode.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="limits.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="money.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="bike-swap.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -31,18 +31,17 @@ namespace Logging {
     bool LoadConfig();
     std::string GetConfigPath();
     
-    // Write to log file
+    // Write to log file AND console
     void WriteToFile(const std::string& msg);
     
-    // Write to log file immediately (for crash debugging) - pure C, no exceptions
-    void WriteImmediate(const char* msg);
+    // Helper to write to console only
+    void WriteToConsole(const char* msg);
 
     // Logging macros for different levels
     #define LOG_INFO(...) \
         do { \
             std::ostringstream oss; \
             oss << __VA_ARGS__; \
-            std::cout << oss.str() << std::endl; \
             Logging::WriteToFile(oss.str()); \
         } while(0)
 
@@ -51,7 +50,6 @@ namespace Logging {
             if (Logging::IsVerboseEnabled()) { \
                 std::ostringstream oss; \
                 oss << "[VERBOSE] " << __VA_ARGS__; \
-                std::cout << oss.str() << std::endl; \
                 Logging::WriteToFile(oss.str()); \
             } \
         } while(0)
@@ -60,7 +58,6 @@ namespace Logging {
         do { \
             std::ostringstream oss; \
             oss << "[WARNING] " << __VA_ARGS__; \
-            std::cout << oss.str() << std::endl; \
             Logging::WriteToFile(oss.str()); \
         } while(0)
 
@@ -68,22 +65,6 @@ namespace Logging {
         do { \
             std::ostringstream oss; \
             oss << "[ERROR] " << __VA_ARGS__; \
-            std::cout << oss.str() << std::endl; \
             Logging::WriteToFile(oss.str()); \
         } while(0)
-
-    // Hook entry/exit logging - writes immediately to file for crash debugging
-    // Use this at the START of every hooked function to track which hook crashes
-    #define LOG_HOOK_ENTRY(hookName) \
-        Logging::WriteImmediate("[HOOK ENTRY] " hookName)
-    
-    #define LOG_HOOK_EXIT(hookName) \
-        Logging::WriteImmediate("[HOOK EXIT] " hookName)
-    
-    // For init functions - log before calling
-    #define LOG_INIT_START(moduleName) \
-        Logging::WriteImmediate("[INIT START] " moduleName)
-    
-    #define LOG_INIT_END(moduleName) \
-        Logging::WriteImmediate("[INIT END] " moduleName)
 }

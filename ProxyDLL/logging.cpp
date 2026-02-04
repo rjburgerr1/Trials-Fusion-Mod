@@ -1,16 +1,18 @@
-#include "pch.h"
 #include "logging.h"
+#include <Windows.h>
 #include <ctime>
 #include <iomanip>
 #include <fstream>
 #include <sstream>
-#include <Windows.h>
 
 namespace Logging {
     bool g_verboseLoggingEnabled = false;
     std::ofstream g_logFile;
     static std::string s_gameDirectory;
-
+    
+    // Use raw Windows API file writing as well for critical messages
+    static HANDLE g_hLogFile = INVALID_HANDLE_VALUE;
+    
     // Get the directory where the game executable is located
     static std::string GetGameDirectory() {
         if (!s_gameDirectory.empty()) {
@@ -39,43 +41,91 @@ namespace Logging {
         // Fallback to current directory
         return "./";
     }
+    
+    void WriteToWindowsLog(const char* msg) {
+        if (g_hLogFile == INVALID_HANDLE_VALUE) {
+            // Try game directory first
+            std::string logPath = GetGameDirectory() + "proxy_debug.log";
+            g_hLogFile = CreateFileA(
+                logPath.c_str(),
+                GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                NULL,
+                CREATE_ALWAYS,
+                FILE_ATTRIBUTE_NORMAL,
+                NULL
+            );
+            
+            // Fallback to current directory if that fails
+            if (g_hLogFile == INVALID_HANDLE_VALUE) {
+                g_hLogFile = CreateFileA(
+                    "proxy_debug.log",
+                    GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    NULL,
+                    CREATE_ALWAYS,
+                    FILE_ATTRIBUTE_NORMAL,
+                    NULL
+                );
+            }
+        }
+        
+        if (g_hLogFile != INVALID_HANDLE_VALUE) {
+            DWORD written;
+            WriteFile(g_hLogFile, msg, (DWORD)strlen(msg), &written, NULL);
+            WriteFile(g_hLogFile, "\r\n", 2, &written, NULL);
+            FlushFileBuffers(g_hLogFile);
+        }
+    }
+    
+    void WriteToConsole(const char* msg) {
+        // Only write to console if it actually exists
+        HWND consoleWindow = GetConsoleWindow();
+        if (!consoleWindow) {
+            // Console doesn't exist yet, skip console output
+            return;
+        }
+        
+        // Try WriteConsole first (more reliable)
+        HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (hConsole != INVALID_HANDLE_VALUE && hConsole != NULL) {
+            DWORD written;
+            WriteConsoleA(hConsole, msg, (DWORD)strlen(msg), &written, NULL);
+            WriteConsoleA(hConsole, "\n", 1, &written, NULL);
+        } else {
+            // Fallback to std::cout only if WriteConsole failed
+            std::cout << msg << std::endl;
+            std::cout.flush();
+        }
+    }
 
     void Initialize() {
-        // Try to load saved state, default to enabled if no config exists
-        if (!LoadConfig()) {
-            g_verboseLoggingEnabled = true;  // Default to enabled for new installs
-            SaveConfig();  // Create the config file
-        }
+        // ALWAYS start with verbose logging OFF
+        // User can toggle it on with '=' key, and it will be saved
+        g_verboseLoggingEnabled = false;
         
-        // Clear crash trace file at startup (so we can see just this session's activity)
-        std::string crashTracePath = GetGameDirectory() + "tfpayload_crash_trace.txt";
-        FILE* crashFile = nullptr;
-        fopen_s(&crashFile, crashTracePath.c_str(), "w");
-        if (crashFile) {
-            fprintf(crashFile, "=== TFPayload Crash Trace Started ===\n");
-            fprintf(crashFile, "This file logs hook entries/exits to identify crashes.\n");
-            fprintf(crashFile, "The last entry before a crash indicates the failing module.\n\n");
-            fclose(crashFile);
-        }
+        // Load config to see if user previously enabled it
+        LoadConfig();
         
         // Open log file in the game directory
-        std::string logPath = GetGameDirectory() + "tfpayload_log.txt";
+        std::string logPath = GetGameDirectory() + "proxydll_log.txt";
         g_logFile.open(logPath, std::ios::out | std::ios::trunc);
         if (g_logFile.is_open()) {
             // Write header with timestamp
             auto now = std::time(nullptr);
             struct tm tm;
             localtime_s(&tm, &now);
-            g_logFile << "=== TFPayload Log Started at " 
+            g_logFile << "=== ProxyDLL Log Started at " 
                       << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") 
                       << " ===" << std::endl;
             g_logFile.flush();
         }
         
-        std::cout << "[Logging] System initialized. Verbose logging: " 
-                  << (g_verboseLoggingEnabled ? "ON" : "OFF") << std::endl;
-        std::cout << "[Logging] Log file: " << logPath << std::endl;
-        std::cout << "[Logging] Press '=' to toggle verbose logging" << std::endl;
+        // Silent initialization - TFPayload will handle user-facing logging messages
+        WriteToWindowsLog(("[ProxyDLL] Log file: " + logPath).c_str());
+        WriteToWindowsLog(("[ProxyDLL] Verbose logging: " + std::string(g_verboseLoggingEnabled ? "ON" : "OFF")).c_str());
+        
+        WriteToWindowsLog("=== ProxyDLL Logging System Initialized ===");
     }
     
     void Shutdown() {
@@ -86,18 +136,19 @@ namespace Logging {
             g_logFile << "=== Log Ended ===" << std::endl;
             g_logFile.close();
         }
+        
+        if (g_hLogFile != INVALID_HANDLE_VALUE) {
+            WriteToWindowsLog("=== ProxyDLL Logging System Shutdown ===");
+            CloseHandle(g_hLogFile);
+            g_hLogFile = INVALID_HANDLE_VALUE;
+        }
     }
 
     void ToggleVerbose() {
         g_verboseLoggingEnabled = !g_verboseLoggingEnabled;
-        
-        // Print a clean, single message
-        std::cout << "Verbose logging " << (g_verboseLoggingEnabled ? "ENABLED" : "DISABLED") << std::endl;
-        
-        WriteToFile(std::string("Verbose logging ") + (g_verboseLoggingEnabled ? "ENABLED" : "DISABLED"));
-        
-        // Save the new state
+        // Save the new state (no console output - TFPayload handles that)
         SaveConfig();
+        WriteToWindowsLog(("[ProxyDLL] Verbose logging " + std::string(g_verboseLoggingEnabled ? "ENABLED" : "DISABLED")).c_str());
     }
     
     void SetVerbose(bool enabled) {
@@ -110,40 +161,21 @@ namespace Logging {
     }
     
     void WriteToFile(const std::string& msg) {
+        // Write to Windows log file first (most reliable, always works)
+        WriteToWindowsLog(msg.c_str());
+        
+        // Write to ofstream log if available
         if (g_logFile.is_open()) {
             g_logFile << msg << std::endl;
             g_logFile.flush();  // Flush immediately to catch crashes
         }
-    }
-    
-    // Pure C immediate write - no C++ objects, no exceptions
-    // Opens file, writes, flushes, closes - guaranteed to persist before crash
-    // Works even BEFORE Logging::Initialize() is called
-    void WriteImmediate(const char* msg) {
-        // Write to the existing log file stream if open
-        if (g_logFile.is_open()) {
-            g_logFile << msg << std::endl;
-            g_logFile.flush();
-        }
         
-        // Also write to a separate crash-safe file using pure C file I/O
-        // Use GetGameDirectory which works standalone
-        std::string crashLogPath = GetGameDirectory() + "tfpayload_crash_trace.txt";
-        FILE* crashFile = nullptr;
-        fopen_s(&crashFile, crashLogPath.c_str(), "a");
-        if (crashFile) {
-            fprintf(crashFile, "%s\n", msg);
-            fflush(crashFile);
-            fclose(crashFile);
-        }
-        
-        // Also write to console for immediate feedback
-        printf("%s\n", msg);
+        // Write to console last (only if console exists)
+        WriteToConsole(msg.c_str());
     }
     
     std::string GetConfigPath() {
-        // Save to game directory
-        return GetGameDirectory() + "tfpayload_logging.cfg";
+        return GetGameDirectory() + "proxydll_logging.cfg";
     }
     
     bool SaveConfig() {
@@ -151,11 +183,12 @@ namespace Logging {
         
         std::ofstream file(configPath);
         if (!file.is_open()) {
-            std::cout << "[Logging] Failed to save config to: " << configPath << std::endl;
+            std::string errMsg = std::string("[Logging] Failed to save config to: ") + configPath;
+            WriteToConsole(errMsg.c_str());
             return false;
         }
         
-        file << "# TFPayload Logging Configuration" << std::endl;
+        file << "# ProxyDLL Logging Configuration" << std::endl;
         file << "# This file is auto-generated. Edit with caution." << std::endl;
         file << std::endl;
         file << "VerboseLogging=" << (g_verboseLoggingEnabled ? "1" : "0") << std::endl;

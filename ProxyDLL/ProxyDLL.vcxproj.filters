@@ -45,10 +45,10 @@
     <ClInclude Include="ProxyDbgcore.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Keybinds.h">
+    <ClInclude Include="SkipIntro.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="SkipIntro.h">
+    <ClInclude Include="logging.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -83,10 +83,10 @@
     <ClCompile Include="ProxyDbgcore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Keybinds.cpp">
+    <ClCompile Include="SkipIntro.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="SkipIntro.cpp">
+    <ClCompile Include="logging.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -15,7 +15,7 @@ DEINIT_TRIGGER.txt
 *.userprefs
 
 ADDRESS_MAPPING_PROMPT.txt
-
+uplay-to-steam.csv
 # Mono auto generated files
 mono_crash.*
 

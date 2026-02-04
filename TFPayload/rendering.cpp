@@ -3,8 +3,11 @@
 #include "rendering.h"
 #include "devMenu.h"
 #include "logging.h"
+#include "prevent-finish.h"
+#include "gamemode.h"
 #include "imgui/imgui.h"
 #include <iostream>
+#include <algorithm>
 
 struct ImGuiContext; // Forward declare
 
@@ -17,13 +20,20 @@ static RegisterRenderCallbackFn g_RegisterCallback = nullptr;
 static UnregisterRenderCallbackFn g_UnregisterCallback = nullptr;
 static GetImGuiContextFn g_GetImGuiContext = nullptr;
 static bool g_IsRegistered = false;
-static int g_TestFrameCount = 0;
-static bool g_ShowTestWindow = true;
-static bool g_LastDevMenuVisible = false;
 
 // Safe callback with protection
 void TFPayloadRenderCallback()
 {
+    // =========================================================================
+    // NOTE: BikeSwap::ProcessPendingSwap() has been moved to the game update
+    // hook instead of the render callback to avoid crashes when changing
+    // bike meshes during rendering.
+    // =========================================================================
+    
+    // =========================================================================
+    // IMGUI RENDERING
+    // =========================================================================
+    
     // Get and set ImGui context from ProxyDLL
     if (g_GetImGuiContext) {
         ImGuiContext* ctx = g_GetImGuiContext();
@@ -41,47 +51,82 @@ void TFPayloadRenderCallback()
         return;
     }
 
-    g_TestFrameCount++;
     try {
-        // Debug: Check DevMenu state changes
-        if (g_DevMenu) {
-            bool currentVisible = g_DevMenu->IsVisible();
-            if (currentVisible != g_LastDevMenuVisible) {
-                LOG_VERBOSE("[Render] DevMenu visibility changed: " 
-                          << (currentVisible ? "VISIBLE" : "HIDDEN"));
-                g_LastDevMenuVisible = currentVisible;
-            }
-        }
-
-        // Simple test window that's always visible
-        if (g_ShowTestWindow) {
-            ImGui::SetNextWindowPos(ImVec2(400, 100), ImGuiCond_FirstUseEver);
-            ImGui::SetNextWindowSize(ImVec2(400, 200), ImGuiCond_FirstUseEver);
+        // =========================================================================
+        // PREVENT FINISH ON-SCREEN INDICATOR
+        // =========================================================================
+        
+        // Display "Finish: BLOCKED" in red at the top middle of screen when enabled
+        // Only show while actively playing a track — suppress in menus, replays, etc.
+        if (PreventFinish::IsEnabled() && GameMode::IsPlaying() && PreventFinish::GetStatusString()) {
+            const char* statusText = PreventFinish::GetStatusString();
             
-            if (ImGui::Begin("TFPayload Status", &g_ShowTestWindow)) {
-                ImGui::Text("TFPayload is rendering!");
-                ImGui::Text("Frame count: %d", g_TestFrameCount);
-                ImGui::Text("ImGui context: 0x%p", ImGui::GetCurrentContext());
-                ImGui::Separator();
+            // Check if finishing is blocked
+            if (strstr(statusText, "BLOCKED") != nullptr) {
+                // Get viewport/display size
+                ImGuiIO& io = ImGui::GetIO();
+                float screenWidth = io.DisplaySize.x;
+                float screenHeight = io.DisplaySize.y;
                 
-                if (g_DevMenu) {
-                    bool isVisible = g_DevMenu->IsVisible();
-                    ImGui::Text("DevMenu exists: YES");
-                    ImGui::Text("DevMenu visible: %s", isVisible ? "YES" : "NO");
-                    
-                    if (ImGui::Button(isVisible ? "Hide Dev Menu" : "Show Dev Menu")) {
-                        LOG_VERBOSE("[Render] Button clicked, toggling menu...");
-                        g_DevMenu->Toggle();
-                    }
-                    
-                    ImGui::Separator();
-                    ImGui::TextColored(ImVec4(1, 1, 0, 1), "Press HOME to toggle");
-                } else {
-                    ImGui::TextColored(ImVec4(1, 0, 0, 1), "DevMenu: NOT INITIALIZED");
+                // Text to display
+                const char* displayText = "Finish: BLOCKED";
+                
+                // Calculate text size to center it
+                ImVec2 textSize = ImGui::CalcTextSize(displayText);
+                const char* buttonText = "Reset to Allow Finish";
+                ImVec2 buttonSize = ImVec2(150, 0); // Auto height
+                
+                // Calculate total width needed (text + padding + button + padding)
+                float totalWidth = textSize.x + 20 + buttonSize.x + 20;
+                float totalHeight = (textSize.y > 20.0f ? textSize.y : 20.0f) + 20; // Padding
+                
+                float windowX = (screenWidth - totalWidth) * 0.5f;
+                float windowY = 20.0f; // 20 pixels from top
+                
+                // Create a window with semi-transparent dark background
+                ImGui::SetNextWindowPos(ImVec2(windowX, windowY));
+                ImGui::SetNextWindowSize(ImVec2(totalWidth, totalHeight));
+                
+                // Push background color - semi-transparent dark gray
+                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.1f, 0.1f, 0.1f, 0.85f));
+                ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.0f, 0.0f, 0.8f)); // Red border
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 5.0f);
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 10));
+                
+                ImGui::Begin("PreventFinishOverlay", nullptr,
+                    ImGuiWindowFlags_NoTitleBar |
+                    ImGuiWindowFlags_NoResize |
+                    ImGuiWindowFlags_NoMove |
+                    ImGuiWindowFlags_NoScrollbar |
+                    ImGuiWindowFlags_NoSavedSettings);
+                
+                // Draw the text in red
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.0f, 0.0f, 1.0f)); // Red
+                ImGui::Text("%s", displayText);
+                ImGui::PopStyleColor();
+                
+                ImGui::SameLine();
+                ImGui::Spacing();
+                ImGui::SameLine();
+                
+                // Add reset button
+                if (ImGui::Button(buttonText, buttonSize)) {
+                    // Call the reset function from PreventFinish
+                    // This will reset all bike/rider values to defaults and re-enable finishing
+                    PreventFinish::ResetToAllowFinish();
                 }
+                
+                ImGui::End();
+                
+                ImGui::PopStyleVar(3);
+                ImGui::PopStyleColor(2);
             }
-            ImGui::End();
         }
+        
+        // =========================================================================
+        // DEVMENU RENDERING
+        // =========================================================================
         
         // Try to render DevMenu (or just keybindings window)
         if (g_DevMenu && (g_DevMenu->IsVisible() || g_DevMenu->IsKeybindingsWindowVisible())) {

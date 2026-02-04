@@ -179,9 +179,11 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
   <ItemGroup>
     <ClInclude Include="actionscript.h" />
     <ClInclude Include="base-address.h" />
+    <ClInclude Include="bike-swap.h" />
     <ClInclude Include="camera.h" />
     <ClInclude Include="devMenu.h" />
     <ClInclude Include="devMenuSync.h" />
+    <ClInclude Include="gamemode.h" />
     <ClInclude Include="host-join.h" />
     <ClInclude Include="imgui\backends\imgui_impl_dx11.h" />
     <ClInclude Include="imgui\backends\imgui_impl_win32.h" />
@@ -195,23 +197,27 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClInclude Include="leaderboard_direct.h" />
     <ClInclude Include="leaderboard_scanner.h" />
     <ClInclude Include="keybindings.h" />
+    <ClInclude Include="limits.h" />
     <ClInclude Include="logging.h" />
+    <ClInclude Include="money.h" />
     <ClInclude Include="multiplayer.h" />
     <ClInclude Include="pause.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="payload.h" />
+    <ClInclude Include="prevent-finish.h" />
     <ClInclude Include="rendering.h" />
     <ClInclude Include="respawn.h" />
     <ClInclude Include="tracks.h" />
-    <ClInclude Include="bike-swap.h" />
     <ClInclude Include="acorns.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="actionscript.cpp" />
     <ClCompile Include="base-address.cpp" />
+    <ClCompile Include="bike-swap.cpp" />
     <ClCompile Include="camera.cpp" />
     <ClCompile Include="devMenu.cpp" />
     <ClCompile Include="devMenuSync.cpp" />
+    <ClCompile Include="gamemode.cpp" />
     <ClCompile Include="host-join.cpp" />
     <ClCompile Include="imgui\backends\imgui_impl_dx11.cpp" />
     <ClCompile Include="imgui\backends\imgui_impl_win32.cpp" />
@@ -224,9 +230,12 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClCompile Include="leaderboard_direct.cpp" />
     <ClCompile Include="leaderboard_scanner.cpp" />
     <ClCompile Include="keybindings.cpp" />
+    <ClCompile Include="limits.cpp" />
     <ClCompile Include="logging.cpp" />
+    <ClCompile Include="money.cpp" />
     <ClCompile Include="multiplayer.cpp" />
     <ClCompile Include="pause.cpp" />
+    <ClCompile Include="prevent-finish.cpp" />
     <ClCompile Include="rendering.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
@@ -236,7 +245,6 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     </ClCompile>
     <ClCompile Include="respawn.cpp" />
     <ClCompile Include="tracks.cpp" />
-    <ClCompile Include="bike-swap.cpp" />
     <ClCompile Include="acorns.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

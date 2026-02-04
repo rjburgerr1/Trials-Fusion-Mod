@@ -146,7 +146,7 @@ namespace Multiplayer {
             << (details.empty() ? "" : ": " + details));
         
         // Also write to dedicated session log file
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[" << GetTimestampString() << "] " << event;
             if (!details.empty()) {
@@ -210,6 +210,7 @@ namespace Multiplayer {
     // === HOOK FUNCTIONS ===
     
     void* __fastcall Hook_MultiplayerServiceConstructor(void* thisPtr, void* edx, void* param1, void* param2, void* param3) {
+        LOG_HOOK_ENTRY("MultiplayerServiceConstructor");
         LogSessionEvent("MultiplayerServiceConstructor CALLED", 
             "thisPtr: 0x" + std::to_string((uintptr_t)thisPtr));
         
@@ -317,13 +318,14 @@ namespace Multiplayer {
     }
     
     void __fastcall Hook_PrepareAndLoadMultiplayerMenu(int param_1, void* edx) {
+        LOG_HOOK_ENTRY("PrepareAndLoadMultiplayerMenu");
         LOG_VERBOSE("");
         LOG_VERBOSE("[MP-HOOK] ===== PREPARE AND LOAD MULTIPLAYER MENU =====");
         LOG_VERBOSE("[MP-HOOK] User clicked MULTIPLAYER from main menu!");
         LOG_VERBOSE("[MP-HOOK] param_1: 0x" << std::hex << param_1);
         
         // Log to file
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[PrepareAndLoadMultiplayerMenu] CLICKED MULTIPLAYER!" << std::endl;
             logFile.close();
@@ -340,6 +342,7 @@ namespace Multiplayer {
     }
     
     void __fastcall Hook_SendStartLiveQuickGameMessage(int param_1, void* edx) {
+        LOG_HOOK_ENTRY("SendStartLiveQuickGameMessage");
         // Call original FIRST to prevent crashes
         if (g_OriginalSendStartLiveQuickGameMessage) {
             g_OriginalSendStartLiveQuickGameMessage(param_1, edx);
@@ -351,13 +354,14 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] param_1: 0x" << std::hex << param_1);
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[SendStartLiveQuickGameMessage] RANKED MATCH STARTED" << std::endl;
         }
     }
     
     void __fastcall Hook_SendCreatePrivateRaceMessage(int param_1, void* edx) {
+        LOG_HOOK_ENTRY("SendCreatePrivateRaceMessage");
         // Call original FIRST to prevent crashes
         if (g_OriginalSendCreatePrivateRaceMessage) {
             g_OriginalSendCreatePrivateRaceMessage(param_1, edx);
@@ -369,13 +373,14 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] param_1: 0x" << std::hex << param_1);
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[SendCreatePrivateRaceMessage] PRIVATE MATCH CREATED" << std::endl;
         }
     }
     
     void __fastcall Hook_SendStartPrivateRaceMessage(int param_1, void* edx) {
+        LOG_HOOK_ENTRY("SendStartPrivateRaceMessage");
         // Call original FIRST to prevent crashes
         if (g_OriginalSendStartPrivateRaceMessage) {
             g_OriginalSendStartPrivateRaceMessage(param_1, edx);
@@ -388,13 +393,14 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] param_1: 0x" << std::hex << param_1);
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[SendStartPrivateRaceMessage] PRIVATE RACE STARTED" << std::endl;
         }
     }
     
     void __fastcall Hook_start_matchmaking(void* thisPtr, void* edx, unsigned int param_1, int* param_2) {
+        LOG_HOOK_ENTRY("start_matchmaking");
         // Call original FIRST to prevent crashes
         if (g_Original_start_matchmaking) {
             g_Original_start_matchmaking(thisPtr, edx, param_1, param_2);
@@ -407,13 +413,14 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] param_1: " << std::dec << param_1);
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[start_matchmaking] MATCHMAKING STARTED" << std::endl;
         }
     }
     
     void __fastcall Hook_HandleMultiplayerLobbyStart(void* thisPtr, void* edx, char param_1) {
+        LOG_HOOK_ENTRY("HandleMultiplayerLobbyStart");
         // Call original FIRST to prevent crashes  
         if (g_OriginalHandleMultiplayerLobbyStart) {
             g_OriginalHandleMultiplayerLobbyStart(thisPtr, edx, param_1);
@@ -426,7 +433,7 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] param_1 (mode/state): " << std::dec << (int)param_1);
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[HandleMultiplayerLobbyStart] Mode/State: " << (int)param_1 << std::endl;
         }
@@ -445,7 +452,7 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] param_1 (game state ptr): 0x" << std::hex << param_1);
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[BroadcastGameStartToPlayers] RACE LAUNCH!" << std::endl;
         }
@@ -464,7 +471,7 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] param_1: 0x" << std::hex << param_1);
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[SendMoveToLiveLobbyMessage] ONLINE LOBBY" << std::endl;
         }
@@ -482,7 +489,7 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] User selected local/splitscreen multiplayer!");
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[MoveToLocalMultiplayerLobby] LOCAL LOBBY" << std::endl;
         }
@@ -526,7 +533,7 @@ namespace Multiplayer {
             LOG_VERBOSE("[MP-HOOK] Mode: " << modeStr << " " << modeDesc);
             
             // Simple logging only - no complex operations
-            std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+            std::ofstream logFile("mp_session_log.txt", std::ios::app);
             if (logFile.is_open()) {
                 logFile << "[SetMultiplayerMode] " << modeStr << " (" << (int)mode << ")" << std::endl;
                 logFile.close();
@@ -586,7 +593,7 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] thisPtr: 0x" << std::hex << (uintptr_t)thisPtr);
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[SetMultiplayerJoinMode] Mode: " << mode << " = " << modeStr << ", param_2: " << (int)param_2 << std::endl;
             logFile.close();
@@ -609,7 +616,7 @@ namespace Multiplayer {
         }
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[StartRace] RACE LAUNCHING! param_1: 0x" << std::hex << (uintptr_t)param_1 << std::endl;
             logFile.close();
@@ -632,7 +639,7 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] param_1: 0x" << std::hex << param_1);
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[StartGameOrReturnToLobby] MULTIPLAYER RACE LOADING!" << std::endl;
             logFile.close();
@@ -653,7 +660,7 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] ========================================");
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[handle_game_start_by_mode] from_invite: " << (int)param_1 << std::endl;
             logFile.close();
@@ -676,7 +683,7 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] param_5: " << (int)param_5);
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[LoadAndStartRace] RACE STARTING! param_2=" << param_2 << std::endl;
             logFile.close();
@@ -800,7 +807,7 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] ========================================");
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[StartMultiplayerSession] Call #" << callCount;
             if (callCount == 2) {
@@ -873,7 +880,7 @@ namespace Multiplayer {
         g_CurrentSession.sessionId = session_id;
         g_InSession = true;
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[HandleSessionCreateEvent] SESSION ID: 0x" << std::hex << session_id << std::endl;
             logFile.close();
@@ -901,7 +908,7 @@ namespace Multiplayer {
         LOG_VERBOSE("[SESSION-JOIN] ===============================");
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[HandleSessionJoinRequest] JOINING SESSION: 0x" << std::hex << target_session_id << std::endl;
             logFile.close();
@@ -925,7 +932,7 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP-HOOK] param_1: " << (int)param_1);
         LOG_VERBOSE("");
         
-        std::ofstream logFile("F:/mp_session_log.txt", std::ios::app);
+        std::ofstream logFile("mp_session_log.txt", std::ios::app);
         if (logFile.is_open()) {
             logFile << "[HandleMultiplayerLobbyStart2] LOBBY->RACE! param_1: " << (int)param_1 << std::endl;
             logFile.close();
@@ -959,7 +966,8 @@ namespace Multiplayer {
         // Batch 3: BroadcastGameStartToPlayers, SendMoveToLiveLobby, MoveToLocalMultiplayerLobby
         // Batch 4: SetMultiplayerJoinMode, StartRace, StartMultiplayerSession
         // Batch 5: HandleSessionCreateEvent, HandleSessionJoinRequest, SetMultiplayerMode
-        const int STEAM_HOOK_BATCH = 1;  // Change this to test more hooks (0-5)
+        // NOTE: Set to 0 to disable all MP hooks on Steam until addresses are verified
+        const int STEAM_HOOK_BATCH = 0;  // DISABLED - Steam MP hooks crash (addresses not verified)
         
         if (isSteam) {
             LOG_WARNING("[MP] Steam version detected - enabling hook batch " << STEAM_HOOK_BATCH << " of 5");
@@ -1372,8 +1380,8 @@ namespace Multiplayer {
         LOG_VERBOSE("[MP] === Multiplayer monitoring initialized ===");
         LOG_VERBOSE("[MP] Hooks enabled: " << hooksEnabled << "/15");
         if (hooksEnabled > 0) {
-            LOG_INFO("[MP] Session events will be logged to: F:/mp_session_log.txt");
-            LOG_INFO("[MP] Press M to save all captured data");
+            LOG_VERBOSE("[MP] Session events will be logged to: mp_session_log.txt (in game directory)");
+            LOG_VERBOSE("[MP] Press M to save all captured data");
         } else {
             LOG_WARNING("[MP] No hooks enabled - running in passive mode");
             LOG_WARNING("[MP] Uncomment hooks in multiplayer.cpp to enable monitoring");
@@ -1419,7 +1427,7 @@ namespace Multiplayer {
         
         // Save session history
         {
-            std::ofstream sessionFile("F:/mp_sessions.csv");
+            std::ofstream sessionFile("mp_sessions.csv");
             if (sessionFile.is_open()) {
                 sessionFile << "SessionID,Timestamp,IsHost,PlayerCount,MaxPlayers,GameMode\n";
                 
@@ -1439,7 +1447,7 @@ namespace Multiplayer {
         
         // Save packet log
         {
-            std::ofstream packetFile("F:/mp_packets.csv");
+            std::ofstream packetFile("mp_packets.csv");
             if (packetFile.is_open()) {
                 packetFile << "PacketType,Size,SourcePlayer,DestPlayer,Timestamp\n";
                 
@@ -1458,7 +1466,7 @@ namespace Multiplayer {
         
         // Save statistics
         {
-            std::ofstream statsFile("F:/mp_stats.txt");
+            std::ofstream statsFile("mp_stats.txt");
             if (statsFile.is_open()) {
                 std::lock_guard<std::mutex> lock(g_StatsMutex);
                 statsFile << "=== MULTIPLAYER STATISTICS ===\n";

@@ -1,8 +1,9 @@
 // SkipIntro.cpp
 // Hook Windows file APIs to block intro videos at the OS level
 #include <Windows.h>
-#include <iostream>
+#include <sstream>
 #include "SkipIntro.h"
+#include "logging.h"
 #include "MinHook.h"
 
 namespace SkipIntro {
@@ -42,7 +43,7 @@ namespace SkipIntro {
             strstr(lpFileName, "ubisoft.bik") != nullptr ||
             strstr(lpFileName, "redlynx.bik") != nullptr)) {
             
-            std::cout << "[SkipIntro] *** BLOCKED FILE ACCESS: " << lpFileName << " ***" << std::endl;
+            LOG_VERBOSE("[SkipIntro] *** BLOCKED FILE ACCESS: " << lpFileName << " ***");
             
             // IMMEDIATELY set the skip flag when we detect intro video attempt
             TrySetSkipIntroFlag();
@@ -75,7 +76,7 @@ namespace SkipIntro {
             if (strstr(narrowPath, "ubisoft.bik") != nullptr ||
                 strstr(narrowPath, "redlynx.bik") != nullptr) {
                 
-                std::cout << "[SkipIntro] *** BLOCKED FILE ACCESS (W): " << narrowPath << " ***" << std::endl;
+                LOG_VERBOSE("[SkipIntro] *** BLOCKED FILE ACCESS (W): " << narrowPath << " ***");
                 
                 // IMMEDIATELY set the skip flag when we detect intro video attempt
                 TrySetSkipIntroFlag();
@@ -125,22 +126,22 @@ namespace SkipIntro {
         
         if (currentFlags != newFlags) {
             *flagsPtr = newFlags;
-            std::cout << "[SkipIntro] ✓ Skip intro flag SET: 0x" << std::hex << currentFlags << " -> 0x" << newFlags << std::dec << std::endl;
+            LOG_VERBOSE("[SkipIntro] ✓ Skip intro flag SET: 0x" << std::hex << currentFlags << " -> 0x" << newFlags);
         }
     }
     
     bool Initialize() {
         if (g_hooked) {
-            std::cout << "[SkipIntro] Already hooked" << std::endl;
+            LOG_VERBOSE("[SkipIntro] Already hooked");
             return true;
         }
         
-        std::cout << "[SkipIntro] Hooking Windows file APIs..." << std::endl;
+        LOG_VERBOSE("[SkipIntro] Hooking Windows file APIs...");
         
         // Initialize MinHook
         MH_STATUS status = MH_Initialize();
         if (status != MH_OK && status != MH_ERROR_ALREADY_INITIALIZED) {
-            std::cout << "[SkipIntro] ERROR: MinHook init failed: " << status << std::endl;
+            LOG_ERROR("[SkipIntro] ERROR: MinHook init failed: " << status);
             return false;
         }
         
@@ -152,13 +153,13 @@ namespace SkipIntro {
         );
         
         if (status != MH_OK) {
-            std::cout << "[SkipIntro] ERROR: CreateHook(CreateFileA) failed: " << status << std::endl;
+            LOG_ERROR("[SkipIntro] ERROR: CreateHook(CreateFileA) failed: " << status);
             return false;
         }
         
         status = MH_EnableHook(&CreateFileA);
         if (status != MH_OK) {
-            std::cout << "[SkipIntro] ERROR: EnableHook(CreateFileA) failed: " << status << std::endl;
+            LOG_ERROR("[SkipIntro] ERROR: EnableHook(CreateFileA) failed: " << status);
             return false;
         }
         
@@ -170,24 +171,24 @@ namespace SkipIntro {
         );
         
         if (status != MH_OK) {
-            std::cout << "[SkipIntro] ERROR: CreateHook(CreateFileW) failed: " << status << std::endl;
+            LOG_ERROR("[SkipIntro] ERROR: CreateHook(CreateFileW) failed: " << status);
             return false;
         }
         
         status = MH_EnableHook(&CreateFileW);
         if (status != MH_OK) {
-            std::cout << "[SkipIntro] ERROR: EnableHook(CreateFileW) failed: " << status << std::endl;
+            LOG_ERROR("[SkipIntro] ERROR: EnableHook(CreateFileW) failed: " << status);
             return false;
         }
         
         g_hooked = true;
-        std::cout << "[SkipIntro] Successfully hooked CreateFileA/W!" << std::endl;
-        std::cout << "[SkipIntro] Intro videos will be blocked at Windows API level" << std::endl;
+        LOG_VERBOSE("[SkipIntro] Successfully hooked CreateFileA/W!");
+        LOG_VERBOSE("[SkipIntro] Intro videos will be blocked at Windows API level");
         
         // Start a background thread to set the skip intro flag
         // This will keep trying until it succeeds
         CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
-            std::cout << "[SkipIntro] Starting flag setter thread..." << std::endl;
+            LOG_VERBOSE("[SkipIntro] Starting flag setter thread...");
             
             // Try for up to 30 seconds
             for (int i = 0; i < 300; i++) {
@@ -206,7 +207,7 @@ namespace SkipIntro {
                             DWORD* flagsPtr = (DWORD*)((BYTE*)gameStatePtr + OFFSET_SKIP_INTRO_FLAGS);
                             if (!IsBadReadPtr(flagsPtr, sizeof(DWORD))) {
                                 if ((*flagsPtr & SKIP_INTRO_FLAG_BIT) != 0) {
-                                    std::cout << "[SkipIntro] Flag successfully set and verified!" << std::endl;
+                                    LOG_VERBOSE("[SkipIntro] Flag successfully set and verified!");
                                     return 0;
                                 }
                             }
@@ -215,7 +216,7 @@ namespace SkipIntro {
                 }
             }
             
-            std::cout << "[SkipIntro] Flag setter thread timed out (flag may still work)" << std::endl;
+            LOG_VERBOSE("[SkipIntro] Flag setter thread timed out (flag may still work)");
             return 0;
         }, nullptr, 0, nullptr);
         
@@ -233,6 +234,6 @@ namespace SkipIntro {
         MH_RemoveHook(&CreateFileW);
         
         g_hooked = false;
-        std::cout << "[SkipIntro] Hooks removed" << std::endl;
+        LOG_VERBOSE("[SkipIntro] Hooks removed");
     }
 }

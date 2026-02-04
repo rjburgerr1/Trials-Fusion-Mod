@@ -100,7 +100,8 @@
       <AdditionalDependencies>d3d11.lib;dxgi.lib;"F:\VSProjects\minhook\build\VC17\lib\Release\libMinHook.x86.lib";%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)$(Configuration)\dbgcore.dll" "F:\Trials Fusion\datapack"</Command>
+      <Command>copy /Y "$(SolutionDir)$(Configuration)\dbgcore.dll" "F:\Trials Fusion\datapack"
+copy /Y "$(SolutionDir)$(Configuration)\dbgcore.dll" "F:\SteamLibrary\steamapps\common\Trials Fusion\datapack"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -125,7 +126,8 @@
       <AdditionalDependencies>d3d11.lib;dxgi.lib;"F:\VSProjects\minhook\build\VC17\lib\Release\libMinHook.x86.lib";%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)$(Configuration)\dbgcore.dll" "F:\Trials Fusion\datapack"</Command>
+      <Command>copy /Y "$(SolutionDir)$(Configuration)\dbgcore.dll" "F:\Trials Fusion\datapack"
+copy /Y "$(SolutionDir)$(Configuration)\dbgcore.dll" "F:\SteamLibrary\steamapps\common\Trials Fusion\datapack"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -171,7 +173,7 @@
     <ClInclude Include="imgui\imstb_rectpack.h" />
     <ClInclude Include="imgui\imstb_textedit.h" />
     <ClInclude Include="imgui\imstb_truetype.h" />
-    <ClInclude Include="Keybinds.h" />
+    <ClInclude Include="logging.h" />
     <ClInclude Include="Overlay.h" />
     <ClInclude Include="ProxyDbgcore.h" />
     <ClInclude Include="SkipIntro.h" />
@@ -185,7 +187,7 @@
     <ClCompile Include="imgui\imgui_draw.cpp" />
     <ClCompile Include="imgui\imgui_tables.cpp" />
     <ClCompile Include="imgui\imgui_widgets.cpp" />
-    <ClCompile Include="Keybinds.cpp" />
+    <ClCompile Include="logging.cpp" />
     <ClCompile Include="Overlay.cpp" />
     <ClCompile Include="ProxyDbgcore.cpp" />
     <ClCompile Include="SkipIntro.cpp" />

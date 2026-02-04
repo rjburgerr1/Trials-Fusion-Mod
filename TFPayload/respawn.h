@@ -30,7 +30,7 @@ namespace Respawn {
     // Get the current checkpoint index
     int GetCurrentCheckpointIndex();
 
-    // Check for hotkeys (Q = current, E = next, W = previous, G = increment fault)
+    // Process respawn-related hotkey actions via the Keybindings system
     void CheckHotkey();
 
     // Get the current bike/rider pointer
@@ -56,41 +56,6 @@ namespace Respawn {
     void DebugTimeCounter();
 
     // ============================================================================
-    // Limit Modification Functions
-    // ============================================================================
-
-    bool SetFaultLimit(uint32_t newLimit);
-    uint32_t GetFaultLimit();
-    bool SetTimeLimit(uint32_t newLimit);
-    uint32_t GetTimeLimit();
-    bool DisableFaultLimit();
-    bool DisableTimeLimit();
-    void TestLimitPatching();
-
-    // ============================================================================
-    // Limit Bypass Functions
-    // ============================================================================
-
-    bool DisableFaultValidation();
-    bool DisableTimeValidation();
-    bool EnableFaultValidation();
-    bool EnableTimeValidation();
-    bool DisableAllLimitValidation();
-    bool EnableAllLimitValidation();
-    bool DisableRaceUpdateTimerFreeze();
-    bool DisableTimeCompletionCheck2();
-    bool IsFaultValidationDisabled();
-    bool IsTimeValidationDisabled();
-
-    // ============================================================================
-    // Instant Finish Functions
-    // ============================================================================
-
-    bool InstantTimeOut();
-    bool InstantFaultOut();
-    bool InstantFinish();
-
-    // ============================================================================
     // Checkpoint Enable/Disable Functions
     // ============================================================================
 
@@ -105,12 +70,6 @@ namespace Respawn {
     // Finish Line Functions
     // ============================================================================
 
-    bool IsFinishLineEnabled();
-    bool EnableFinishLine();
-    bool DisableFinishLine();
-    bool ToggleFinishLine();
-    bool PatchFinishLineCheck();
-    bool UnpatchFinishLineCheck();
     bool PatchCheckpointEarlyReturn();
     bool UnpatchCheckpointEarlyReturn();
     bool PatchUpdateCheckpointsCall();
