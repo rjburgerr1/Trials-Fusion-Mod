@@ -9,6 +9,7 @@
 #include "devMenuSync.h"
 #include <MinHook.h>
 #include <TlHelp32.h>
+#include <unordered_map>
 
 namespace PreventFinish {
     static bool g_enabled = false;
@@ -29,6 +30,11 @@ namespace PreventFinish {
     static bool g_taintedByFaultReduction = false;
     static bool g_taintedByTimeReduction = false;
     static bool g_taintedByBikeRider = false;
+    
+    // Runtime captured defaults (captured on track load)
+    static bool g_defaultsCaptured = false;
+    static std::unordered_map<int, int> g_capturedIntDefaults;
+    static std::unordered_map<int, float> g_capturedFloatDefaults;
 
     // Structure to hold default values for bike/rider parameters
     struct DefaultValue {
@@ -280,6 +286,58 @@ namespace PreventFinish {
         LOG_VERBOSE("[PreventFinish] Will intercept: Line crossing, Instant finish (via Respawn::InstantFinish), Checkpoint skips");
     }
 
+    void CaptureDefaults() {
+        g_capturedIntDefaults.clear();
+        g_capturedFloatDefaults.clear();
+        
+        LOG_VERBOSE("[PreventFinish] Capturing baseline bike/rider values...");
+        
+        int capturedCount = 0;
+        
+        // Capture all bike values
+        for (int i = 0; i < g_bikeDefaultsCount; i++) {
+            const DefaultValue& def = g_bikeDefaults[i];
+            
+            if (def.type == 1 || def.type == 2) { // Bool or Int
+                int value;
+                if (DevMenuSync::ReadValue<int>(def.id, value)) {
+                    g_capturedIntDefaults[def.id] = value;
+                    capturedCount++;
+                }
+            }
+            else if (def.type == 3) { // Float
+                float value;
+                if (DevMenuSync::ReadValue<float>(def.id, value)) {
+                    g_capturedFloatDefaults[def.id] = value;
+                    capturedCount++;
+                }
+            }
+        }
+        
+        // Capture all rider values
+        for (int i = 0; i < g_riderDefaultsCount; i++) {
+            const DefaultValue& def = g_riderDefaults[i];
+            
+            if (def.type == 1) { // Bool
+                int value;
+                if (DevMenuSync::ReadValue<int>(def.id, value)) {
+                    g_capturedIntDefaults[def.id] = value;
+                    capturedCount++;
+                }
+            }
+            else if (def.type == 3) { // Float
+                float value;
+                if (DevMenuSync::ReadValue<float>(def.id, value)) {
+                    g_capturedFloatDefaults[def.id] = value;
+                    capturedCount++;
+                }
+            }
+        }
+        
+        g_defaultsCaptured = true;
+        LOG_VERBOSE("[PreventFinish] Captured " << capturedCount << " baseline values from game");
+    }
+
     bool IsEnabled() { return g_enabled; }
 
     void Enable() {
@@ -298,14 +356,10 @@ namespace PreventFinish {
         g_taintedByTimeReduction = false;
         g_taintedByBikeRider = false;
         g_lastModifiedState = false;  // Reset to allow first-frame check to log
+        g_defaultsCaptured = false;  // Mark that we need to capture defaults
         
-        // Do NOT check bike/rider values here on Enable(). When the game first
-        // transitions to Play state the bike/rider params may not be initialized
-        // yet, causing a false-positive taint on every track load. The per-frame
-        // isAtReset block in Update() will pick up any real modifications once
-        // the game state is stable.
         g_finishBlocked = false;
-        LOG_VERBOSE("[PreventFinish] *** ENABLED (monitoring mode - deferred value check) ***");
+        LOG_VERBOSE("[PreventFinish] *** ENABLED (will capture baseline values on first reset) ***");
         
         LOG_VERBOSE("[PreventFinish] Initial state: CP=" << g_lastSeenCheckpoint 
             << " Faults=" << g_initialFaultCount 
@@ -564,60 +618,69 @@ namespace PreventFinish {
             return false;
         }
 
+        // If we haven't captured defaults yet, capture them now
+        if (!g_defaultsCaptured) {
+            CaptureDefaults();
+            // After capturing, nothing is "modified" yet
+            return false;
+        }
+
         int modifiedCount = 0;
         
-        // Check bike defaults
+        // Check bike values against captured defaults
         for (int i = 0; i < g_bikeDefaultsCount; i++) {
             const DefaultValue& def = g_bikeDefaults[i];
             
-            if (def.type == 1) { // Bool
+            if (def.type == 1 || def.type == 2) { // Bool or Int
                 int currentValue;
                 if (DevMenuSync::ReadValue<int>(def.id, currentValue)) {
-                    bool currentBool = (currentValue != 0);
-                    if (currentBool != def.boolVal) {
-                        modifiedCount++;
-                    }
-                }
-            }
-            else if (def.type == 2) { // Int
-                int currentValue;
-                if (DevMenuSync::ReadValue<int>(def.id, currentValue)) {
-                    if (currentValue != def.intVal) {
-                        modifiedCount++;
+                    auto it = g_capturedIntDefaults.find(def.id);
+                    if (it != g_capturedIntDefaults.end()) {
+                        if (currentValue != it->second) {
+                            modifiedCount++;
+                        }
                     }
                 }
             }
             else if (def.type == 3) { // Float
                 float currentValue;
                 if (DevMenuSync::ReadValue<float>(def.id, currentValue)) {
-                    // Use epsilon comparison for floats
-                    const float epsilon = 0.0001f;
-                    if (std::abs(currentValue - def.floatVal) > epsilon) {
-                        modifiedCount++;
+                    auto it = g_capturedFloatDefaults.find(def.id);
+                    if (it != g_capturedFloatDefaults.end()) {
+                        // Use epsilon comparison for floats
+                        const float epsilon = 0.0001f;
+                        if (std::abs(currentValue - it->second) > epsilon) {
+                            modifiedCount++;
+                        }
                     }
                 }
             }
         }
         
-        // Check rider defaults
+        // Check rider values against captured defaults
         for (int i = 0; i < g_riderDefaultsCount; i++) {
             const DefaultValue& def = g_riderDefaults[i];
             
             if (def.type == 1) { // Bool
                 int currentValue;
                 if (DevMenuSync::ReadValue<int>(def.id, currentValue)) {
-                    bool currentBool = (currentValue != 0);
-                    if (currentBool != def.boolVal) {
-                        modifiedCount++;
+                    auto it = g_capturedIntDefaults.find(def.id);
+                    if (it != g_capturedIntDefaults.end()) {
+                        if (currentValue != it->second) {
+                            modifiedCount++;
+                        }
                     }
                 }
             }
             else if (def.type == 3) { // Float
                 float currentValue;
                 if (DevMenuSync::ReadValue<float>(def.id, currentValue)) {
-                    const float epsilon = 0.0001f;
-                    if (std::abs(currentValue - def.floatVal) > epsilon) {
-                        modifiedCount++;
+                    auto it = g_capturedFloatDefaults.find(def.id);
+                    if (it != g_capturedFloatDefaults.end()) {
+                        const float epsilon = 0.0001f;
+                        if (std::abs(currentValue - it->second) > epsilon) {
+                            modifiedCount++;
+                        }
                     }
                 }
             }
@@ -629,8 +692,79 @@ namespace PreventFinish {
         if (isModified != g_lastModifiedState) {
             if (isModified) {
                 LOG_VERBOSE("[PreventFinish] Found " << modifiedCount << " modified bike/rider values!");
+                
+                // Log detailed info about each modified value (only on state change)
+                for (int i = 0; i < g_bikeDefaultsCount; i++) {
+                    const DefaultValue& def = g_bikeDefaults[i];
+                    
+                    if (def.type == 1 || def.type == 2) { // Bool or Int
+                        int currentValue;
+                        if (DevMenuSync::ReadValue<int>(def.id, currentValue)) {
+                            auto it = g_capturedIntDefaults.find(def.id);
+                            if (it != g_capturedIntDefaults.end() && currentValue != it->second) {
+                                const char* typeName = (def.type == 1) ? "BOOL" : "INT";
+                                if (def.type == 1) {
+                                    LOG_VERBOSE("[PreventFinish] [MODIFIED] ID=" << def.id 
+                                        << " (" << typeName << ") Current=" << (currentValue ? "true" : "false")
+                                        << " Baseline=" << (it->second ? "true" : "false"));
+                                } else {
+                                    LOG_VERBOSE("[PreventFinish] [MODIFIED] ID=" << def.id 
+                                        << " (" << typeName << ") Current=" << currentValue
+                                        << " Baseline=" << it->second);
+                                }
+                            }
+                        }
+                    }
+                    else if (def.type == 3) { // Float
+                        float currentValue;
+                        if (DevMenuSync::ReadValue<float>(def.id, currentValue)) {
+                            auto it = g_capturedFloatDefaults.find(def.id);
+                            if (it != g_capturedFloatDefaults.end()) {
+                                const float epsilon = 0.0001f;
+                                if (std::abs(currentValue - it->second) > epsilon) {
+                                    LOG_VERBOSE("[PreventFinish] [MODIFIED] ID=" << def.id 
+                                        << " (FLOAT) Current=" << currentValue
+                                        << " Baseline=" << it->second
+                                        << " Diff=" << std::abs(currentValue - it->second));
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Check rider values
+                for (int i = 0; i < g_riderDefaultsCount; i++) {
+                    const DefaultValue& def = g_riderDefaults[i];
+                    
+                    if (def.type == 1) { // Bool
+                        int currentValue;
+                        if (DevMenuSync::ReadValue<int>(def.id, currentValue)) {
+                            auto it = g_capturedIntDefaults.find(def.id);
+                            if (it != g_capturedIntDefaults.end() && currentValue != it->second) {
+                                LOG_VERBOSE("[PreventFinish] [MODIFIED] ID=" << def.id 
+                                    << " (BOOL) Current=" << (currentValue ? "true" : "false")
+                                    << " Baseline=" << (it->second ? "true" : "false"));
+                            }
+                        }
+                    }
+                    else if (def.type == 3) { // Float
+                        float currentValue;
+                        if (DevMenuSync::ReadValue<float>(def.id, currentValue)) {
+                            auto it = g_capturedFloatDefaults.find(def.id);
+                            if (it != g_capturedFloatDefaults.end()) {
+                                const float epsilon = 0.0001f;
+                                if (std::abs(currentValue - it->second) > epsilon) {
+                                    LOG_VERBOSE("[PreventFinish] [MODIFIED] ID=" << def.id 
+                                        << " (FLOAT) Current=" << currentValue
+                                        << " Baseline=" << it->second
+                                        << " Diff=" << std::abs(currentValue - it->second));
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
-                LOG_VERBOSE("[PreventFinish] All bike/rider values are now at defaults");
+                LOG_VERBOSE("[PreventFinish] All bike/rider values match baseline");
             }
             g_lastModifiedState = isModified;
         }
@@ -641,9 +775,14 @@ namespace PreventFinish {
     void ResetToAllowFinish() {
         LOG_VERBOSE("[PreventFinish] ResetToAllowFinish() called");
         
-        // This function ONLY resets bike/rider values to defaults
+        // This function ONLY resets bike/rider values to baseline
         // It CANNOT clear permanent taint (checkpoint skip, fault/time reduction)
         // Permanent taint can ONLY be cleared by resetting to CP1
+        
+        if (!g_defaultsCaptured) {
+            LOG_WARNING("[PreventFinish] No baseline values captured yet - cannot reset");
+            return;
+        }
         
         if (g_permanentTaint) {
             LOG_WARNING("[PreventFinish] Run has PERMANENT TAINT - reset button CANNOT clear this!");
@@ -659,49 +798,56 @@ namespace PreventFinish {
             LOG_WARNING("[PreventFinish] You MUST reset to CP1 to clear permanent taint and start a clean run");
             LOG_VERBOSE("[PreventFinish] Resetting bike/rider values anyway (but finish remains blocked)...");
         } else if (g_finishBlocked) {
-            LOG_VERBOSE("[PreventFinish] Resetting bike/rider values to defaults...");
+            LOG_VERBOSE("[PreventFinish] Resetting bike/rider values to captured baseline...");
         }
         
         int resetCount = 0;
         
-        // Reset all bike values to defaults (both game memory AND DevMenu UI)
+        // Reset all bike values to captured baseline
         for (int i = 0; i < g_bikeDefaultsCount; i++) {
             const DefaultValue& def = g_bikeDefaults[i];
             
-            if (def.type == 1) { // Bool
-                if (DevMenuSync::WriteValue<int>(def.id, def.boolVal ? 1 : 0)) {
-                    resetCount++;
-                }
-            }
-            else if (def.type == 2) { // Int
-                if (DevMenuSync::WriteValue<int>(def.id, def.intVal)) {
-                    resetCount++;
+            if (def.type == 1 || def.type == 2) { // Bool or Int
+                auto it = g_capturedIntDefaults.find(def.id);
+                if (it != g_capturedIntDefaults.end()) {
+                    if (DevMenuSync::WriteValue<int>(def.id, it->second)) {
+                        resetCount++;
+                    }
                 }
             }
             else if (def.type == 3) { // Float
-                if (DevMenuSync::WriteValue<float>(def.id, def.floatVal)) {
-                    resetCount++;
+                auto it = g_capturedFloatDefaults.find(def.id);
+                if (it != g_capturedFloatDefaults.end()) {
+                    if (DevMenuSync::WriteValue<float>(def.id, it->second)) {
+                        resetCount++;
+                    }
                 }
             }
         }
         
-        // Reset all rider values to defaults (both game memory AND DevMenu UI)
+        // Reset all rider values to captured baseline
         for (int i = 0; i < g_riderDefaultsCount; i++) {
             const DefaultValue& def = g_riderDefaults[i];
             
             if (def.type == 1) { // Bool
-                if (DevMenuSync::WriteValue<int>(def.id, def.boolVal ? 1 : 0)) {
-                    resetCount++;
+                auto it = g_capturedIntDefaults.find(def.id);
+                if (it != g_capturedIntDefaults.end()) {
+                    if (DevMenuSync::WriteValue<int>(def.id, it->second)) {
+                        resetCount++;
+                    }
                 }
             }
             else if (def.type == 3) { // Float
-                if (DevMenuSync::WriteValue<float>(def.id, def.floatVal)) {
-                    resetCount++;
+                auto it = g_capturedFloatDefaults.find(def.id);
+                if (it != g_capturedFloatDefaults.end()) {
+                    if (DevMenuSync::WriteValue<float>(def.id, it->second)) {
+                        resetCount++;
+                    }
                 }
             }
         }
         
-        LOG_VERBOSE("[PreventFinish] Reset " << resetCount << " bike/rider values to defaults");
+        LOG_VERBOSE("[PreventFinish] Reset " << resetCount << " bike/rider values to baseline");
         
         // Now sync FROM game memory back to DevMenu UI to update the sliders/checkboxes
         LOG_VERBOSE("[PreventFinish] Syncing reset values to DevMenu UI...");

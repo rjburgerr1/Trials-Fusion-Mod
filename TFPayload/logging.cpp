@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "logging.h"
+#include "imgui/imgui.h"
 #include <ctime>
 #include <iomanip>
 #include <fstream>
@@ -10,6 +11,14 @@ namespace Logging {
     bool g_verboseLoggingEnabled = false;
     std::ofstream g_logFile;
     static std::string s_gameDirectory;
+    
+    // ImGui console state
+    bool g_consoleVisible = false;
+    std::vector<ConsoleEntry> g_consoleBuffer;
+    std::mutex g_consoleMutex;
+    bool g_autoScroll = true;
+    bool g_showVerbose = true;
+    static const size_t MAX_CONSOLE_ENTRIES = 1000;  // Limit buffer size
 
     // Get the directory where the game executable is located
     static std::string GetGameDirectory() {
@@ -199,5 +208,108 @@ namespace Logging {
         
         file.close();
         return true;
+    }
+    
+    // ImGui console functions
+    void AddConsoleEntry(ConsoleEntry::Type type, const std::string& msg) {
+        std::lock_guard<std::mutex> lock(g_consoleMutex);
+        
+        g_consoleBuffer.emplace_back(type, msg);
+        
+        // Limit buffer size
+        if (g_consoleBuffer.size() > MAX_CONSOLE_ENTRIES) {
+            g_consoleBuffer.erase(g_consoleBuffer.begin());
+        }
+    }
+    
+    void RenderConsole() {
+        if (!g_consoleVisible) {
+            return;
+        }
+        
+        // Get ImGui context
+        ImGuiContext* ctx = ImGui::GetCurrentContext();
+        if (!ctx) {
+            return;
+        }
+        
+        ImGui::SetNextWindowSize(ImVec2(800, 400), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(ImVec2(50, 50), ImGuiCond_FirstUseEver);
+        
+        if (ImGui::Begin("TFPayload Console", &g_consoleVisible)) {
+            // Console controls
+            if (ImGui::Button("Clear")) {
+                ClearConsole();
+            }
+            ImGui::SameLine();
+            
+            ImGui::Checkbox("Auto-scroll", &g_autoScroll);
+            ImGui::SameLine();
+            
+            ImGui::Checkbox("Show Verbose", &g_showVerbose);
+            ImGui::SameLine();
+            
+            // Show entry count
+            std::lock_guard<std::mutex> lock(g_consoleMutex);
+            ImGui::Text("Entries: %zu / %zu", g_consoleBuffer.size(), MAX_CONSOLE_ENTRIES);
+            
+            ImGui::Separator();
+            
+            // Console text area
+            ImGui::BeginChild("ConsoleScrolling", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+            
+            // Render each entry with appropriate color
+            for (const auto& entry : g_consoleBuffer) {
+                // Skip verbose entries if not showing them
+                if (entry.type == ConsoleEntry::Type::Verbose && !g_showVerbose) {
+                    continue;
+                }
+                
+                // Set color based on type
+                ImVec4 color;
+                switch (entry.type) {
+                    case ConsoleEntry::Type::Error:
+                        color = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);  // Red
+                        break;
+                    case ConsoleEntry::Type::Warning:
+                        color = ImVec4(1.0f, 1.0f, 0.3f, 1.0f);  // Yellow
+                        break;
+                    case ConsoleEntry::Type::Verbose:
+                        color = ImVec4(0.6f, 0.6f, 0.6f, 1.0f);  // Gray
+                        break;
+                    case ConsoleEntry::Type::Info:
+                    default:
+                        color = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);  // White
+                        break;
+                }
+                
+                ImGui::PushStyleColor(ImGuiCol_Text, color);
+                ImGui::TextUnformatted(entry.message.c_str());
+                ImGui::PopStyleColor();
+            }
+            
+            // Auto-scroll to bottom
+            if (g_autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
+                ImGui::SetScrollHereY(1.0f);
+            }
+            
+            ImGui::EndChild();
+        }
+        ImGui::End();
+    }
+    
+    void ToggleConsole() {
+        g_consoleVisible = !g_consoleVisible;
+        LOG_INFO("ImGui Console " << (g_consoleVisible ? "OPENED" : "CLOSED"));
+    }
+    
+    bool IsConsoleVisible() {
+        return g_consoleVisible;
+    }
+    
+    void ClearConsole() {
+        std::lock_guard<std::mutex> lock(g_consoleMutex);
+        g_consoleBuffer.clear();
+        LOG_INFO("Console cleared");
     }
 }

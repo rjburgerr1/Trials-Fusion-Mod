@@ -10,6 +10,10 @@
 // Debug Console
 void AllocateConsole()
 {
+#ifdef RELEASE_AUTOLOAD_MODE
+    // In RELEASE_AUTOLOAD_MODE, don't allocate console
+    return;
+#endif
     // Check if console already exists
     HWND existingConsole = GetConsoleWindow();
     if (existingConsole) {
@@ -116,6 +120,85 @@ DWORD_PTR GetModuleBaseAddress(DWORD processID, const wchar_t* moduleName) {
 static bool isLoaded = false;
 HMODULE hPayload = nullptr;
 
+#ifdef DEVELOPMENT_MODE
+// Development mode - manual load/unload with F1
+
+void LoadTFPayload()
+{
+    if (hPayload == nullptr)
+    {
+        SetEnvironmentVariableA("TFPAYLOAD_PROXY_LOAD", "1");
+        
+        hPayload = LoadLibraryA("TFPayload.dll");
+        
+        if (hPayload != nullptr)
+        {
+            auto manualInit = (void(*)())GetProcAddress(hPayload, "ManualInitialize");
+            if (manualInit)
+            {
+                manualInit();
+                isLoaded = true;
+                LOG_INFO("TFPayload loaded and initialized manually");
+            }
+        }
+        else
+        {
+            LOG_ERROR("Failed to load TFPayload.dll: " << GetLastError());
+        }
+        
+        SetEnvironmentVariableA("TFPAYLOAD_PROXY_LOAD", nullptr);
+    }
+}
+
+void UnloadTFPayload()
+{
+    if (hPayload != nullptr)
+    {
+        auto manualShutdown = (void(*)())GetProcAddress(hPayload, "ManualShutdown");
+        if (manualShutdown)
+        {
+            manualShutdown();
+        }
+        
+        FreeLibrary(hPayload);
+        hPayload = nullptr;
+        isLoaded = false;
+        LOG_INFO("TFPayload unloaded");
+    }
+}
+
+#elif defined(RELEASE_AUTOLOAD_MODE)
+// Release mode - automatic load on startup, cannot unload
+
+void AutoLoadTFPayload()
+{
+    if (hPayload == nullptr)
+    {
+        SetEnvironmentVariableA("TFPAYLOAD_PROXY_LOAD", "1");
+        
+        hPayload = LoadLibraryA("TFPayload.dll");
+        
+        if (hPayload != nullptr)
+        {
+            auto manualInit = (void(*)())GetProcAddress(hPayload, "ManualInitialize");
+            if (manualInit)
+            {
+                manualInit();
+                isLoaded = true;
+                LOG_INFO("TFPayload auto-loaded in release mode (cannot unload)");
+            }
+        }
+        else
+        {
+            LOG_ERROR("Failed to auto-load TFPayload.dll: " << GetLastError());
+        }
+        
+        SetEnvironmentVariableA("TFPAYLOAD_PROXY_LOAD", nullptr);
+    }
+}
+
+#endif
+
 DWORD WINAPI PayloadManagerThread()
 {
     LOG_VERBOSE("=== THREAD START ===");
@@ -149,29 +232,37 @@ DWORD WINAPI PayloadManagerThread()
         LOG_ERROR("D3D11 hook FAIL");
     }
 
+#ifdef RELEASE_AUTOLOAD_MODE
+    LOG_INFO("Release mode: Auto-loading TFPayload after short delay...");
+    Sleep(500);
+    AutoLoadTFPayload();
+    LOG_INFO("Release mode: TFPayload loaded automatically. F1 hotkey disabled.");
+#else
+    LOG_INFO("Development mode: Press F1 to load/unload TFPayload");
+#endif
+    
     LOG_VERBOSE("Entering loop...");
     
     while (true) {
-        // F1 to toggle TFPayload.dll
+#ifdef DEVELOPMENT_MODE
+        // F1 to toggle TFPayload.dll (development mode only)
         if (GetAsyncKeyState(VK_F1) & 0x1) {
             if (isLoaded) {
-                isLoaded = false;
-                FreeLibrary(hPayload);
-                hPayload = nullptr;
+                UnloadTFPayload();
                 std::cout << std::endl;
                 std::cout << "Payload DOWN" << std::endl;
                 std::cout << std::endl;
             }
             else {
-                isLoaded = true;
-                hPayload = LoadLibraryA("TFPayload.dll");
+                LoadTFPayload();
                 std::cout << std::endl;
                 std::cout << "Payload UP" << std::endl;
                 std::cout << std::endl;
             }
         }
-
+#endif
         // Note: Verbose logging toggle (=) is now handled by TFPayload's keybindings system
+        // In RELEASE_AUTOLOAD_MODE, F1 does nothing
         
         Sleep(10);
     }
@@ -196,6 +287,14 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
 
     case DLL_PROCESS_DETACH:
         LOG_VERBOSE("=== DLL_PROCESS_DETACH ===");
+#ifdef DEVELOPMENT_MODE
+        // Only allow cleanup in development mode
+        if (hPayload != nullptr)
+        {
+            UnloadTFPayload();
+        }
+#endif
+        // In release mode, we intentionally don't unload to prevent cheating
         Logging::Shutdown();
         break;
     }

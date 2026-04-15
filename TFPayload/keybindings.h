@@ -55,6 +55,7 @@ public:
         SwapNextBike,
         SwapPrevBike,
         DebugBikeInfo,
+        ToggleConsole,
     };
 
     static void Initialize();

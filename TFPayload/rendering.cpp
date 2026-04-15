@@ -142,6 +142,21 @@ void TFPayloadRenderCallback()
                 g_DevMenu->Hide();
             }
         }
+        
+        // =========================================================================
+        // IMGUI CONSOLE RENDERING
+        // =========================================================================
+        
+        // Render the ImGui console if visible
+        try {
+            Logging::RenderConsole();
+        }
+        catch (const std::exception& e) {
+            LOG_ERROR("[Render] Console exception: " << e.what());
+        }
+        catch (...) {
+            LOG_ERROR("[Render] Console unknown exception!");
+        }
     }
     catch (const std::exception& e) {
         LOG_ERROR("[Render] Callback exception: " << e.what());

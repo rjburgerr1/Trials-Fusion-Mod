@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <vector>
 #include <fstream>
+#include <atomic>
 #ifdef min
 #undef min
 #endif
@@ -39,13 +40,14 @@
 DWORD WINAPI KeyMonitorThread(LPVOID lpParam);
 
 // GLOBAL STATE
+std::atomic<bool> g_isInitialized(false);
+std::atomic<HMODULE> g_moduleHandle(nullptr);
 bool isRunning = false;
 bool isShuttingDown = false; // Prevent re-entry during shutdown
 HANDLE g_hKeyMonitorThread = NULL;
 int g_monitorCount = 0;
 HMONITOR g_monitors[3] = { NULL };
 bool g_consolePositioned = false;
-HMODULE g_hModule = NULL; // Store our own module handle for self-unloading
 
 // MACROS
 #define KeyPress(...) (GetAsyncKeyState(__VA_ARGS__) & 0x1)
@@ -122,7 +124,7 @@ void OnTrackUpdate(const Tracks::TrackInfo& trackInfo)
 }
 
 // SHUTDOWN
-extern "C" __declspec(dllexport) void ShutdownPayload()
+void ShutdownTFPayload()
 {
     // Prevent re-entry
     if (isShuttingDown) {
@@ -130,7 +132,7 @@ extern "C" __declspec(dllexport) void ShutdownPayload()
     }
     isShuttingDown = true;
 
-    LOG_VERBOSE("\n[TFPayload] Shutting down for rebuild (Automated Trigger)...");
+    LOG_VERBOSE("\n[TFPayload] Shutting down...");
 
     isRunning = false;
 
@@ -165,6 +167,14 @@ extern "C" __declspec(dllexport) void ShutdownPayload()
     Keybindings::Shutdown();
 
     LOG_VERBOSE("[Main] All resources cleaned up.");
+    
+    g_isInitialized.store(false);
+}
+
+// Exported for compatibility with old ProxyDLL
+extern "C" __declspec(dllexport) void ShutdownPayload()
+{
+    ShutdownTFPayload();
 }
 
 // C-style function for safe DevMenuSync call (no C++ objects with destructors)
@@ -395,6 +405,10 @@ static bool Init_DevMenuSync(void* userData) {
 // Helper to attach to existing console
 void AttachToExistingConsole()
 {
+#ifdef RELEASE_AUTOLOAD_MODE
+    // In RELEASE_AUTOLOAD_MODE, don't attach to console
+    return;
+#endif
     // Re-attach stdout/stderr to the existing console
     FILE* fDummy;
     freopen_s(&fDummy, "CONOUT$", "w", stdout);
@@ -407,16 +421,16 @@ void AttachToExistingConsole()
     std::cin.clear();
 }
 
-// PAYLOAD INITIALIZATION (called when hot-loaded)
-extern "C" __declspec(dllexport) void PayloadInit()
+// PAYLOAD INITIALIZATION
+void InitializeTFPayload()
 {
     // FIRST: Attach to the existing console created by ProxyDLL
     AttachToExistingConsole();
     
     // Write crash trace IMMEDIATELY - this works even before Logging::Initialize()
-    Logging::WriteImmediate("[STARTUP] PayloadInit() entered");
+    Logging::WriteImmediate("[STARTUP] InitializeTFPayload() entered");
     
-    LOG_INFO("\n[TFPayload] PayloadInit called - Starting payload operations...");
+    LOG_INFO("\n[TFPayload] Starting payload initialization...");
 
     if (isRunning) {
         LOG_VERBOSE("[TFPayload] Already running, skipping init");
@@ -424,6 +438,7 @@ extern "C" __declspec(dllexport) void PayloadInit()
     }
 
     isRunning = true;
+    isShuttingDown = false;
 
     // Initialize MinHook
     MH_STATUS mhStatus = MH_Initialize();
@@ -514,6 +529,34 @@ extern "C" __declspec(dllexport) void PayloadInit()
     LOG_INFO("[TFPayload] === INITIALIZATION COMPLETE ===");
 }
 
+// Export for ProxyDLL (backward compatibility)
+extern "C" __declspec(dllexport) void PayloadInit()
+{
+    InitializeTFPayload();
+}
+
+// Exports for proxy DLL to call
+extern "C" __declspec(dllexport) void ManualInitialize()
+{
+    if (!g_isInitialized.exchange(true))
+    {
+        InitializeTFPayload();
+    }
+}
+
+extern "C" __declspec(dllexport) void ManualShutdown()
+{
+    if (g_isInitialized.exchange(false))
+    {
+        ShutdownTFPayload();
+    }
+}
+
+extern "C" __declspec(dllexport) bool IsInitialized()
+{
+    return g_isInitialized.load();
+}
+
 // HOTKEY STATE TRACKING
 struct HotkeyState {
     bool f5 = false;
@@ -568,6 +611,7 @@ void PrintHelpText()
     std::string Add10MinuteKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::Add10Minute));
     std::string ResetTimeKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ResetTime));
     std::string ToggleLimitValidationKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleLimitValidation));
+    std::string ToggleConsoleKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleConsole));
     // Leaderboard Scanner
     std::string ScanLeaderboardByIDKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ScanLeaderboardByID));
     std::string ScanCurrentLeaderboardKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ScanCurrentLeaderboard));
@@ -600,10 +644,11 @@ void PrintHelpText()
     LOG_INFO("\t" << ClearConsoleKey << "\t\t\t- Clear debug console");
     LOG_INFO("\t" << ShowHelpTextKey << "\t\t\t- Show this help text");
     LOG_INFO("\t" << ToggleVerboseLoggingKey << "\t\t\t- Toggle verbose logging (ON/OFF)");
-    LOG_INFO("\tEND\t\t\t- Shutdown and unload TFPayload.dll(automatic)");
-    LOG_INFO("\tF1\t\t\t- Reload TFPayload.dll (load/unload toggle)");
+    LOG_INFO("\tEND\t\t\t- Shutdown and unload TFPayload.dll");
+    LOG_INFO("\tF1\t\t\t- Reload TFPayload.dll (load/unload toggle - dev mode only)");
     LOG_INFO("\t" << ToggleDevMenuKey << "\t\t\t- Open DevMenu");
     LOG_INFO("\tK\t\t\t- Open Keybindings Menu");
+    LOG_INFO("\t" << ToggleConsoleKey << "\t\t\t- Toggle ImGui Console");
     LOG_INFO("");
     LOG_INFO("\tTrack Functions");
     LOG_INFO("\t" << InstantFinishKey << "\t\t\t- Instant Pass Track");
@@ -823,9 +868,13 @@ void HandleShowHelp()
 void HandleClearConsole()
 {
     if (Keybindings::IsActionPressed(Keybindings::Action::ClearConsole)) {
+#ifndef RELEASE_AUTOLOAD_MODE
         system("cls");
+#endif
         std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ClearConsole));
         LOG_VERBOSE("[" << keyName << "] Debug console cleared");
+        // Also clear the ImGui console
+        Logging::ClearConsole();
     }
 }
 
@@ -895,6 +944,14 @@ void HandleToggleLimitValidation()
         }
     }
 }
+
+void HandleToggleConsole()
+{
+    if (Keybindings::IsActionPressed(Keybindings::Action::ToggleConsole)) {
+        Logging::ToggleConsole();
+    }
+}
+
 // Helper function to check if game window has focus
 static bool IsGameWindowFocused()
 {
@@ -937,32 +994,8 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         }
         
         if (KeyPress(VK_END)) {
-            LOG_INFO("[END] Shutting down and unloading...");
-            
-            // First, trigger shutdown which will clean up everything
-            ShutdownPayload();
-            
-            // Now that shutdown is complete, schedule the DLL unload
-            // We need to do this on a separate thread because we can't unload ourselves
-            if (g_hModule != NULL) {
-                LOG_VERBOSE("[TFPayload] Scheduling DLL unload...");
-                
-                // Create a thread that will unload the DLL
-                HANDLE hUnloadThread = CreateThread(NULL, 0, [](LPVOID param) -> DWORD {
-                    HMODULE hMod = (HMODULE)param;
-
-                    LOG_INFO("[TFPayload] Unloaded DLL");
-                    // Unload the DLL and exit this thread
-                    FreeLibraryAndExitThread(hMod, 0);
-                    return 0;
-                }, g_hModule, 0, NULL);
-                
-                if (hUnloadThread) {
-                    CloseHandle(hUnloadThread);
-                }
-            }
-            
-            // Exit the key monitor thread
+            LOG_INFO("[END] Shutting down TFPayload...");
+            ShutdownTFPayload();
             return 0;
         }
 
@@ -983,6 +1016,7 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         HandleKeybindingsMenu();
         HandleDebugGameState();
         HandleToggleLimitValidation();
+        HandleToggleConsole();
         
         LeaderboardScanner::CheckHotkey();
         LeaderboardDirect::CheckHotkey();
@@ -1005,8 +1039,25 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 {
     switch (ul_reason_for_call) {
     case DLL_PROCESS_ATTACH:
-        g_hModule = hModule; // Store our module handle
-        PayloadInit();
+        DisableThreadLibraryCalls(hModule);
+        g_moduleHandle.store(hModule);
+        
+        // Check if we're being loaded standalone (not by proxy DLL)
+        // The proxy DLL sets an environment variable before calling LoadLibrary
+        if (GetEnvironmentVariableA("TFPAYLOAD_PROXY_LOAD", nullptr, 0) == 0)
+        {
+            // Standalone load - initialize automatically
+            CreateThread(nullptr, 0, [](LPVOID param) -> DWORD {
+                Sleep(100); // Small delay to let game initialize
+                if (!g_isInitialized.load())
+                {
+                    g_isInitialized.store(true);
+                    InitializeTFPayload();
+                }
+                return 0;
+            }, nullptr, 0, nullptr);
+        }
+        // else: proxy DLL will call ManualInitialize() export
         break;
 
     case DLL_THREAD_ATTACH:
@@ -1015,8 +1066,8 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 
     case DLL_PROCESS_DETACH:
         // Only shutdown if we haven't already (prevents double shutdown)
-        if (!isShuttingDown) {
-            ShutdownPayload();
+        if (g_isInitialized.load()) {
+            ShutdownTFPayload();
         }
         MH_Uninitialize();
         break;
