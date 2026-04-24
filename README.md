@@ -13,9 +13,9 @@ Download the latest release from the official GitHub page:
 Find the main game folder for your installation:
 
 * **Default Ubisoft Path:**
-    `C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher\games\Trials Fusion\datapack`
+    `~Program Files (x86)\Ubisoft\Ubisoft Game Launcher\games\Trials Fusion\datapack`
 * **Default Steam Path:**
-    `C:\Program Files (x86)\Steam\steamapps\common\Trials Fusion\datapack`
+    `~SteamLibrary\steamapps\common\Trials Fusion\datapack`
 
 ---
 
