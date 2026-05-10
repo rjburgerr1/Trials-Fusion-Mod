@@ -119,9 +119,7 @@ DWORD_PTR GetModuleBaseAddress(DWORD processID, const wchar_t* moduleName) {
 
 static bool isLoaded = false;
 HMODULE hPayload = nullptr;
-
-#ifdef DEVELOPMENT_MODE
-// Development mode - manual load/unload with F1
+static constexpr DWORD AUTOLOAD_DELAY_MS = 14000;
 
 void LoadTFPayload()
 {
@@ -150,6 +148,9 @@ void LoadTFPayload()
     }
 }
 
+#ifdef DEVELOPMENT_MODE
+// Development mode - manual unload with F1
+
 void UnloadTFPayload()
 {
     if (hPayload != nullptr)
@@ -164,36 +165,6 @@ void UnloadTFPayload()
         hPayload = nullptr;
         isLoaded = false;
         LOG_INFO("TFPayload unloaded");
-    }
-}
-
-#elif defined(RELEASE_AUTOLOAD_MODE)
-// Release mode - automatic load on startup, cannot unload
-
-void AutoLoadTFPayload()
-{
-    if (hPayload == nullptr)
-    {
-        SetEnvironmentVariableA("TFPAYLOAD_PROXY_LOAD", "1");
-        
-        hPayload = LoadLibraryA("TFPayload.dll");
-        
-        if (hPayload != nullptr)
-        {
-            auto manualInit = (void(*)())GetProcAddress(hPayload, "ManualInitialize");
-            if (manualInit)
-            {
-                manualInit();
-                isLoaded = true;
-                LOG_INFO("TFPayload auto-loaded in release mode (cannot unload)");
-            }
-        }
-        else
-        {
-            LOG_ERROR("Failed to auto-load TFPayload.dll: " << GetLastError());
-        }
-        
-        SetEnvironmentVariableA("TFPAYLOAD_PROXY_LOAD", nullptr);
     }
 }
 
@@ -232,16 +203,15 @@ DWORD WINAPI PayloadManagerThread()
         LOG_ERROR("D3D11 hook FAIL");
     }
 
-#ifdef RELEASE_AUTOLOAD_MODE
-    LOG_INFO("Release mode: Auto-loading TFPayload after short delay...");
-    Sleep(500);
-    AutoLoadTFPayload();
-    LOG_INFO("Release mode: TFPayload loaded automatically. F1 hotkey disabled.");
-#else
+#ifdef DEVELOPMENT_MODE
     LOG_INFO("Development mode: Press F1 to load/unload TFPayload");
+#elif defined(RELEASE_AUTOLOAD_MODE)
+    LOG_INFO("Release mode: Will auto-trigger normal payload load from manager loop.");
 #endif
     
     LOG_VERBOSE("Entering loop...");
+    DWORD loopStartTick = GetTickCount();
+    bool autoLoadTriggered = false;
     
     while (true) {
 #ifdef DEVELOPMENT_MODE
@@ -259,6 +229,13 @@ DWORD WINAPI PayloadManagerThread()
                 std::cout << "Payload UP" << std::endl;
                 std::cout << std::endl;
             }
+        }
+#elif defined(RELEASE_AUTOLOAD_MODE)
+        if (!autoLoadTriggered && !isLoaded && GetTickCount() - loopStartTick >= AUTOLOAD_DELAY_MS) {
+            autoLoadTriggered = true;
+            LOG_INFO("Release mode: Auto-triggering normal payload load.");
+            LoadTFPayload();
+            LOG_INFO(isLoaded ? "Release mode: TFPayload loaded automatically." : "Release mode: TFPayload auto-load failed.");
         }
 #endif
         // Note: Verbose logging toggle (=) is now handled by TFPayload's keybindings system

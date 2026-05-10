@@ -33,7 +33,7 @@ namespace Logging {
     
     // Write to log file AND console
     void WriteToFile(const std::string& msg);
-    
+
     // Helper to write to console only
     void WriteToConsole(const char* msg);
 

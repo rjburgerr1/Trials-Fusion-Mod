@@ -5,6 +5,7 @@
 #include <vector>
 #include <Psapi.h>
 #include <sstream>
+#include <mutex>
 #include <dxgi1_2.h>  // For IDXGISwapChain1, IDXGIFactory2, etc.
 
 // ImGui
@@ -47,6 +48,7 @@ WndProcFn oWndProc = nullptr;
 // Callback registry for external renderers (like TFPayload)
 typedef void (*RenderCallback)();
 static std::vector<RenderCallback> g_RenderCallbacks;
+static std::mutex g_RenderCallbacksMutex;
 
 // Hook chaining detection
 static bool g_PresentWasAlreadyHooked = false;
@@ -219,7 +221,13 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 
         RenderOverlay();
 
-        for (auto callback : g_RenderCallbacks) {
+        std::vector<RenderCallback> callbacks;
+        {
+            std::lock_guard<std::mutex> lock(g_RenderCallbacksMutex);
+            callbacks = g_RenderCallbacks;
+        }
+
+        for (auto callback : callbacks) {
             if (callback) {
                 try {
                     callback();
@@ -278,7 +286,13 @@ HRESULT __stdcall hkPresent1(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UIN
 
         RenderOverlay();
 
-        for (auto callback : g_RenderCallbacks) {
+        std::vector<RenderCallback> callbacks;
+        {
+            std::lock_guard<std::mutex> lock(g_RenderCallbacksMutex);
+            callbacks = g_RenderCallbacks;
+        }
+
+        for (auto callback : callbacks) {
             if (callback) {
                 try {
                     callback();
@@ -857,12 +871,14 @@ extern "C" __declspec(dllexport) void RegisterRenderCallback(RenderCallback call
     }
 
     LOG_VERBOSE("[Overlay] RegisterRenderCallback: 0x" << std::hex << (uintptr_t)callback);
+    std::lock_guard<std::mutex> lock(g_RenderCallbacksMutex);
     g_RenderCallbacks.push_back(callback);
 }
 
 extern "C" __declspec(dllexport) void UnregisterRenderCallback(RenderCallback callback)
 {
     LOG_VERBOSE("[Overlay] UnregisterRenderCallback: 0x" << std::hex << (uintptr_t)callback);
+    std::lock_guard<std::mutex> lock(g_RenderCallbacksMutex);
     auto it = std::find(g_RenderCallbacks.begin(), g_RenderCallbacks.end(), callback);
     if (it != g_RenderCallbacks.end()) {
         g_RenderCallbacks.erase(it);
