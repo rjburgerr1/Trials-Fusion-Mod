@@ -5,6 +5,14 @@
       <Configuration>Debug</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
+    <ProjectConfiguration Include="DEVELOPMENT_MODE|Win32">
+      <Configuration>DEVELOPMENT_MODE</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RELEASE_AUTOLOAD|Win32">
+      <Configuration>RELEASE_AUTOLOAD</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="Release|Win32">
       <Configuration>Release</Configuration>
       <Platform>Win32</Platform>
@@ -39,6 +47,20 @@
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DEVELOPMENT_MODE|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RELEASE_AUTOLOAD|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
@@ -61,6 +83,12 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='DEVELOPMENT_MODE|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='RELEASE_AUTOLOAD|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -88,7 +116,8 @@
       <AdditionalDependencies>d3d11.lib;dxgi.lib;"F:\VSProjects\minhook\build\VC17\lib\Release\libMinHook.x86.lib";%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)$(Configuration)\$(ProjectName).dll" "F:\Trials Fusion\datapack"</Command>
+      <Command>copy /Y "$(TargetPath)" "F:\Trials Fusion\datapack"
+copy /Y "$(TargetPath)" "F:\SteamLibrary\steamapps\common\Trials Fusion\datapack"</Command>
     </PostBuildEvent>
     <PreBuildEvent>
       <Command>REM 1. Define the path to the project directory.
@@ -125,7 +154,8 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;"F:\VSProjects\minhook\build\VC17\lib\Release\libMinHook.x86.lib";%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)$(Configuration)\$(ProjectName).dll" "F:\Trials Fusion\datapack"</Command>
+      <Command>copy /Y "$(TargetPath)" "F:\Trials Fusion\datapack"
+copy /Y "$(TargetPath)" "F:\SteamLibrary\steamapps\common\Trials Fusion\datapack"</Command>
     </PostBuildEvent>
     <PreBuildEvent>
       <Command>REM 1. Define the path to the project directory.
@@ -141,6 +171,68 @@ type NUL &gt; "%PARENT_DIR%\DEINIT_TRIGGER.txt"
 REM Optional: Wait a moment for the proxy DLL to pick it up before starting the new build
 ping -n 2 127.0.0.1 &gt;nul</Command>
     </PreBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DEVELOPMENT_MODE|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;TFPAYLOAD_EXPORTS;_WINDOWS;_USRDLL;DEVELOPMENT_MODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>F:\VSProjects\minhook\include;$(ProjectDir)imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;"F:\VSProjects\minhook\build\VC17\lib\Release\libMinHook.x86.lib";%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(TargetPath)" "F:\Trials Fusion\datapack"
+copy /Y "$(TargetPath)" "F:\SteamLibrary\steamapps\common\Trials Fusion\datapack"</Command>
+    </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>REM 1. Define the path to the project directory.
+set PROJECT_DIR=$(ProjectDir)
+
+REM 2. Use a trick to safely navigate up one level from the project directory.
+REM The "%%i\.." removes the final folder name and gives the parent directory.
+for %%i in (%PROJECT_DIR%) do set PARENT_DIR=%%i\..
+
+REM 3. Create the file in the parent directory.
+type NUL &gt; "%PARENT_DIR%\DEINIT_TRIGGER.txt"
+
+REM Optional: Wait a moment for the proxy DLL to pick it up before starting the new build
+ping -n 2 127.0.0.1 &gt;nul</Command>
+    </PreBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RELEASE_AUTOLOAD|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;TFPAYLOAD_EXPORTS;_WINDOWS;_USRDLL;RELEASE_AUTOLOAD_MODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>F:\VSProjects\minhook\include;$(ProjectDir)imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;"F:\VSProjects\minhook\build\VC17\lib\Release\libMinHook.x86.lib";%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(TargetPath)" "F:\Trials Fusion\datapack"
+copy /Y "$(TargetPath)" "F:\SteamLibrary\steamapps\common\Trials Fusion\datapack"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
