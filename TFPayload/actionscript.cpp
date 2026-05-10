@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "actionscript.h"
+#include "base-address.h"
 #include "logging.h"
 #include <string>
 #include <iostream>
@@ -7,7 +8,9 @@
 #include <algorithm>
 
 namespace ActionScript {
-    static HMODULE gameModule = nullptr;
+    static uintptr_t g_BaseAddress = 0;
+    static bool g_IsSteamVersion = false;
+    static uintptr_t g_GameManagerPtr = 0;  // Version-specific game manager pointer RVA
     static AllocateMemory_t AllocateMemory = nullptr;
     static CreateMessageObject_t CreateMessageObject = nullptr;
     static CreateMessage2Params_t CreateMessage2Params = nullptr;
@@ -21,41 +24,69 @@ namespace ActionScript {
     static HandleRaceFinish_t HandleRaceFinish = nullptr;
     static GetFirstEntity_t GetFirstEntity = nullptr;
 
-    bool Initialize() {
-        gameModule = GetModuleHandleA(nullptr);
-        if (!gameModule) {
-            LOG_ERROR("[ActionScript] Initialize - Failed to get game module");
+    bool Initialize(uintptr_t baseAddress) {
+        if (baseAddress == 0) {
+            LOG_ERROR("[ActionScript] Initialize - Invalid base address");
             return false;
         }
+        
+        g_BaseAddress = baseAddress;
+        g_IsSteamVersion = BaseAddress::IsSteamVersion();
+        
+        LOG_VERBOSE("[ActionScript] Detected game version: " << (g_IsSteamVersion ? "STEAM" : "UPLAY"));
 
-        uintptr_t base = reinterpret_cast<uintptr_t>(gameModule);
-
-        // Get function pointers
-        AllocateMemory = reinterpret_cast<AllocateMemory_t>(base + ALLOCATE_MEMORY_ADDR);
-        CreateMessageObject = reinterpret_cast<CreateMessageObject_t>(base + CREATE_MESSAGE_ADDR);
-        CreateMessage2Params = reinterpret_cast<CreateMessage2Params_t>(base + CREATE_MESSAGE_2PARAMS_ADDR);
-        CreateMessageWithParameters = reinterpret_cast<CreateMessageWithParameters_t>(base + CREATE_MESSAGE_PARAMS_ADDR);
-        SendMessage = reinterpret_cast<SendMessage_t>(base + SEND_MESSAGE_ADDR);
-        SetBoolValue = reinterpret_cast<SetBoolValue_t>(base + SET_BOOL_VALUE_ADDR);
-        SetFloatValue = reinterpret_cast<SetFloatValue_t>(base + SET_FLOAT_VALUE_ADDR);
-        InitStringEmpty = reinterpret_cast<InitStringEmpty_t>(base + INIT_STRING_EMPTY_ADDR);
-        SetStringFromCStr = reinterpret_cast<SetStringFromCStr_t>(base + SET_STRING_FROM_CSTR_ADDR);
-        SetGameState = reinterpret_cast<SetGameState_t>(base + SET_GAME_STATE_ADDR);
-        HandleRaceFinish = reinterpret_cast<HandleRaceFinish_t>(base + HANDLE_RACE_FINISH_ADDR);
-        GetFirstEntity = reinterpret_cast<GetFirstEntity_t>(base + GET_FIRST_ENTITY_ADDR);
+        if (g_IsSteamVersion) {
+            // Use Steam RVAs - all functions now mapped!
+            g_GameManagerPtr = Steam::GAME_MANAGER_PTR;
+            
+            AllocateMemory = reinterpret_cast<AllocateMemory_t>(baseAddress + Steam::ALLOCATE_MEMORY_ADDR);
+            CreateMessageObject = reinterpret_cast<CreateMessageObject_t>(baseAddress + Steam::CREATE_MESSAGE_ADDR);
+            CreateMessage2Params = reinterpret_cast<CreateMessage2Params_t>(baseAddress + Steam::CREATE_MESSAGE_2PARAMS_ADDR);
+            CreateMessageWithParameters = reinterpret_cast<CreateMessageWithParameters_t>(baseAddress + Steam::CREATE_MESSAGE_PARAMS_ADDR);
+            SendMessage = reinterpret_cast<SendMessage_t>(baseAddress + Steam::SEND_MESSAGE_ADDR);
+            SetBoolValue = reinterpret_cast<SetBoolValue_t>(baseAddress + Steam::SET_BOOL_VALUE_ADDR);
+            SetFloatValue = reinterpret_cast<SetFloatValue_t>(baseAddress + Steam::SET_FLOAT_VALUE_ADDR);
+            InitStringEmpty = reinterpret_cast<InitStringEmpty_t>(baseAddress + Steam::INIT_STRING_EMPTY_ADDR);
+            SetStringFromCStr = reinterpret_cast<SetStringFromCStr_t>(baseAddress + Steam::SET_STRING_FROM_CSTR_ADDR);
+            SetGameState = reinterpret_cast<SetGameState_t>(baseAddress + Steam::SET_GAME_STATE_ADDR);
+            HandleRaceFinish = reinterpret_cast<HandleRaceFinish_t>(baseAddress + Steam::HANDLE_RACE_FINISH_ADDR);
+            GetFirstEntity = reinterpret_cast<GetFirstEntity_t>(baseAddress + Steam::GET_FIRST_ENTITY_ADDR);
+            
+            LOG_VERBOSE("[ActionScript] Steam version - all functions mapped");
+            LOG_VERBOSE("[ActionScript] HandleRaceFinish: 0x" << std::hex << (baseAddress + Steam::HANDLE_RACE_FINISH_ADDR) << std::dec);
+            LOG_VERBOSE("[ActionScript] GameManagerPtr: 0x" << std::hex << (baseAddress + Steam::GAME_MANAGER_PTR) << std::dec);
+        } else {
+            // Use Uplay RVAs
+            g_GameManagerPtr = Uplay::GAME_MANAGER_PTR;
+            
+            AllocateMemory = reinterpret_cast<AllocateMemory_t>(baseAddress + Uplay::ALLOCATE_MEMORY_ADDR);
+            CreateMessageObject = reinterpret_cast<CreateMessageObject_t>(baseAddress + Uplay::CREATE_MESSAGE_ADDR);
+            CreateMessage2Params = reinterpret_cast<CreateMessage2Params_t>(baseAddress + Uplay::CREATE_MESSAGE_2PARAMS_ADDR);
+            CreateMessageWithParameters = reinterpret_cast<CreateMessageWithParameters_t>(baseAddress + Uplay::CREATE_MESSAGE_PARAMS_ADDR);
+            SendMessage = reinterpret_cast<SendMessage_t>(baseAddress + Uplay::SEND_MESSAGE_ADDR);
+            SetBoolValue = reinterpret_cast<SetBoolValue_t>(baseAddress + Uplay::SET_BOOL_VALUE_ADDR);
+            SetFloatValue = reinterpret_cast<SetFloatValue_t>(baseAddress + Uplay::SET_FLOAT_VALUE_ADDR);
+            InitStringEmpty = reinterpret_cast<InitStringEmpty_t>(baseAddress + Uplay::INIT_STRING_EMPTY_ADDR);
+            SetStringFromCStr = reinterpret_cast<SetStringFromCStr_t>(baseAddress + Uplay::SET_STRING_FROM_CSTR_ADDR);
+            SetGameState = reinterpret_cast<SetGameState_t>(baseAddress + Uplay::SET_GAME_STATE_ADDR);
+            HandleRaceFinish = reinterpret_cast<HandleRaceFinish_t>(baseAddress + Uplay::HANDLE_RACE_FINISH_ADDR);
+            GetFirstEntity = reinterpret_cast<GetFirstEntity_t>(baseAddress + Uplay::GET_FIRST_ENTITY_ADDR);
+            
+            LOG_VERBOSE("[ActionScript] HandleRaceFinish (Uplay): 0x" << std::hex << (baseAddress + Uplay::HANDLE_RACE_FINISH_ADDR) << std::dec);
+        }
 
         LOG_VERBOSE("[ActionScript] Initialize - Successfully initialized");
-        LOG_VERBOSE("  Base: 0x" << std::hex << base << std::dec);
+        LOG_VERBOSE("  Base: 0x" << std::hex << baseAddress << std::dec);
 
         return true;
     }
 
     void* GetMessageHandler() {
-        if (!gameModule) return nullptr;
+        if (g_BaseAddress == 0) return nullptr;
 
-        uintptr_t base = reinterpret_cast<uintptr_t>(gameModule);
-
-        uintptr_t* ptrToHandler = reinterpret_cast<uintptr_t*>(base + MESSAGE_HANDLER_PTR);
+        // Use version-specific MESSAGE_HANDLER_PTR
+        uintptr_t messageHandlerRVA = g_IsSteamVersion ? Steam::MESSAGE_HANDLER_PTR : Uplay::MESSAGE_HANDLER_PTR;
+        uintptr_t* ptrToHandler = reinterpret_cast<uintptr_t*>(g_BaseAddress + messageHandlerRVA);
         if (!ptrToHandler) return nullptr;
 
         uintptr_t firstDeref = *ptrToHandler;
@@ -182,17 +213,16 @@ namespace ActionScript {
     bool ShowStartCountdownDirect(int countdownValue) {
         LOG_VERBOSE("[ActionScript] ShowStartCountdownDirect (value=" << countdownValue << ")");
 
-        if (!gameModule) {
+        if (g_BaseAddress == 0) {
             LOG_ERROR("[ActionScript] Not initialized");
             return false;
         }
 
         // Call the game's native ShowStartCountdown function directly at 0x00b44330
-        uintptr_t base = reinterpret_cast<uintptr_t>(gameModule);
         typedef void(__cdecl* ShowStartCountdown_t)(void* param1, int param2);
-        ShowStartCountdown_t nativeFunc = reinterpret_cast<ShowStartCountdown_t>(base + (0x00b44330 - GAME_BASE));
+        ShowStartCountdown_t nativeFunc = reinterpret_cast<ShowStartCountdown_t>(g_BaseAddress + (0x00b44330 - GAME_BASE));
 
-        LOG_VERBOSE("[ActionScript] Calling native function at 0x" << std::hex << (base + (0x00b44330 - GAME_BASE)) << std::dec);
+        LOG_VERBOSE("[ActionScript] Calling native function at 0x" << std::hex << (g_BaseAddress + (0x00b44330 - GAME_BASE)) << std::dec);
 
         // Call with countdown value as first param, 0 as second
         nativeFunc(reinterpret_cast<void*>(countdownValue), 0);
@@ -240,15 +270,13 @@ namespace ActionScript {
     bool FinishRaceDirect() {
         LOG_VERBOSE("[ActionScript] FinishRaceDirect - Setting race state to 9 (RACE_FINISHED)");
 
-        if (!gameModule || !SetGameState) {
+        if (g_BaseAddress == 0 || !SetGameState) {
             LOG_ERROR("[ActionScript] Not initialized");
             return false;
         }
 
-        uintptr_t base = reinterpret_cast<uintptr_t>(gameModule);
-
-        // Get the game state manager object at DAT_0174b308 + 0xfc
-        uintptr_t* pGameStatePtr = reinterpret_cast<uintptr_t*>(base + (0x0174b308 - GAME_BASE));
+        // Get the game state manager object using version-specific RVA + 0xfc
+        uintptr_t* pGameStatePtr = reinterpret_cast<uintptr_t*>(g_BaseAddress + g_GameManagerPtr);
         if (!pGameStatePtr) {
             LOG_ERROR("[ActionScript] Failed to get game state pointer");
             return false;
@@ -277,69 +305,151 @@ namespace ActionScript {
         return true;
     }
 
-    bool CallHandleRaceFinish() {
-        LOG_VERBOSE("[ActionScript] CallHandleRaceFinish - Attempting to finish race via HandleRaceFinish");
+    // SEH-safe helper to read pointer
+    static bool SafeReadPointer(void** ptr, void** outValue) {
+        __try {
+            *outValue = *ptr;
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+    
+    // SEH-safe helper to read uintptr_t
+    static bool SafeReadUintPtr(uintptr_t* ptr, uintptr_t* outValue) {
+        __try {
+            *outValue = *ptr;
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+    
+    // SEH-safe helper to read int
+    static bool SafeReadInt(int* ptr, int* outValue) {
+        __try {
+            *outValue = *ptr;
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
 
-        if (!gameModule || !HandleRaceFinish || !SetGameState) {
+    // SEH-safe wrapper for HandleRaceFinish call
+    static bool CallHandleRaceFinishInternal(void* gameManager, void** ppStateManager, int currentState) {
+        __try {
+            // Get current state pointer
+            int* pState = reinterpret_cast<int*>((uintptr_t)gameManager + 8);
+            
+            // Strategy 1: If state < 6, set it to 6 first
+            if (currentState < 6 && SetGameState && ppStateManager && *ppStateManager) {
+                SetGameState(*ppStateManager, 6);
+                Sleep(100);
+            }
+
+            // Strategy 2: Call HandleRaceFinish
+            if (HandleRaceFinish && gameManager) {
+                HandleRaceFinish(gameManager, 1, nullptr, nullptr);
+                return true;
+            }
+            return false;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    bool CallHandleRaceFinish() {
+        if (g_BaseAddress == 0 || !HandleRaceFinish || !SetGameState) {
             LOG_ERROR("[ActionScript] Not initialized");
             return false;
         }
 
-        uintptr_t base = reinterpret_cast<uintptr_t>(gameModule);
-
-        // Get the game manager pointer at DAT_0174b308 + 0xdc
-        uintptr_t* pGamePtr = reinterpret_cast<uintptr_t*>(base + (0x0174b308 - GAME_BASE));
-        if (!pGamePtr || *pGamePtr == 0) {
+        // Get the game manager pointer using version-specific RVA
+        uintptr_t* pGamePtr = reinterpret_cast<uintptr_t*>(g_BaseAddress + g_GameManagerPtr);
+        if (!pGamePtr) {
+            LOG_ERROR("[ActionScript] pGamePtr is null");
+            return false;
+        }
+        
+        LOG_VERBOSE("[ActionScript] Using " << (g_IsSteamVersion ? "Steam" : "Uplay") << " game manager ptr at 0x" << std::hex << (g_BaseAddress + g_GameManagerPtr) << std::dec);
+        
+        uintptr_t gameBase = 0;
+        if (!SafeReadUintPtr(pGamePtr, &gameBase)) {
+            LOG_ERROR("[ActionScript] Crash reading game pointer");
+            return false;
+        }
+        
+        if (gameBase == 0) {
             LOG_ERROR("[ActionScript] Game pointer is null");
             return false;
         }
+        
+        LOG_VERBOSE("[ActionScript] Game base: 0x" << std::hex << gameBase << std::dec);
 
-        uintptr_t gameBase = *pGamePtr;
         void** ppGameManager = reinterpret_cast<void**>(gameBase + 0xdc);
-
-        if (!ppGameManager || !*ppGameManager) {
-            LOG_ERROR("[ActionScript] Game manager is null");
+        if (!ppGameManager) {
+            LOG_ERROR("[ActionScript] ppGameManager is null");
             return false;
         }
 
-        void* gameManager = *ppGameManager;
+        void* gameManager = nullptr;
+        if (!SafeReadPointer(ppGameManager, &gameManager)) {
+            LOG_ERROR("[ActionScript] Crash reading game manager");
+            return false;
+        }
+        
+        if (!gameManager) {
+            LOG_ERROR("[ActionScript] Game manager is null");
+            return false;
+        }
+        
+        LOG_VERBOSE("[ActionScript] Game manager: 0x" << std::hex << (uintptr_t)gameManager << std::dec);
 
         // Get current state
+        int currentState = 0;
         int* pState = reinterpret_cast<int*>((uintptr_t)gameManager + 8);
-        int currentState = *pState;
+        if (!SafeReadInt(pState, &currentState)) {
+            LOG_ERROR("[ActionScript] Crash reading game state");
+            return false;
+        }
 
         LOG_VERBOSE("[ActionScript] Current game state: " << currentState);
 
         // Get state manager for setting state
         void** ppStateManager = reinterpret_cast<void**>(gameBase + 0xfc);
-        if (!ppStateManager || !*ppStateManager) {
+        if (!ppStateManager) {
+            LOG_ERROR("[ActionScript] ppStateManager is null");
+            return false;
+        }
+        
+        void* stateManager = nullptr;
+        if (!SafeReadPointer(ppStateManager, &stateManager)) {
+            LOG_ERROR("[ActionScript] Crash reading state manager");
+            return false;
+        }
+        
+        if (!stateManager) {
             LOG_ERROR("[ActionScript] State manager is null");
             return false;
         }
 
-        // Strategy 1: If state < 6, set it to 6 first
-        if (currentState < 6) {
-            LOG_VERBOSE("[ActionScript] State is < 6, setting to 6 first...");
-            SetGameState(*ppStateManager, 6);
-            Sleep(100); // Give it a moment
-            currentState = *pState;
-            LOG_VERBOSE("[ActionScript] New state: " << currentState);
+        LOG_VERBOSE("[ActionScript] Calling HandleRaceFinish...");
+        
+        bool success = CallHandleRaceFinishInternal(gameManager, ppStateManager, currentState);
+        
+        if (success) {
+            LOG_VERBOSE("[ActionScript] HandleRaceFinish called successfully!");
+        } else {
+            LOG_ERROR("[ActionScript] HandleRaceFinish crashed or failed!");
+            LOG_ERROR("[ActionScript] Base address was: 0x" << std::hex << g_BaseAddress << std::dec);
+            LOG_ERROR("[ActionScript] HandleRaceFinish address: 0x" << std::hex << (uintptr_t)HandleRaceFinish << std::dec);
         }
 
-        // Strategy 2: Call HandleRaceFinish with param_1 = 1 (normal finish)
-        LOG_VERBOSE("[ActionScript] Calling HandleRaceFinish(manager=0x" << std::hex
-            << reinterpret_cast<uintptr_t>(gameManager) << std::dec
-            << ", param_1=1, param_2=NULL, param_3=NULL)");
-
-        HandleRaceFinish(gameManager, 1, nullptr, nullptr);
-
-        LOG_VERBOSE("[ActionScript] HandleRaceFinish called successfully!");
-
-        // Check final state
-        currentState = *pState;
-        LOG_VERBOSE("[ActionScript] Final state: " << currentState);
-
-        return true;
+        return success;
     }
 
 }

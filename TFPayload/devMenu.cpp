@@ -4,9 +4,15 @@
 #include "imgui/imgui.h"
 #include "logging.h"
 #include "respawn.h"
+#include "limits.h"
 #include "actionscript.h"
 #include "keybindings.h"
 #include "multiplayer.h"
+#include "acorns.h"
+#include "money.h"
+#include "host-join.h"
+#include "base-address.h"
+#include "prevent-finish.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -14,6 +20,29 @@
 
 // Global instance
 DevMenu* g_DevMenu = nullptr;
+
+// Global checkpoint slider for dynamic range updates
+static std::shared_ptr<TweakableInt> g_checkpointIndexSlider = nullptr;
+static int g_lastCheckpointCount = -1;
+static std::shared_ptr<TweakableButton> g_preventFinishLabel = nullptr;
+
+// Global toggle buttons for limit controls (need to update labels when limits change)
+static std::shared_ptr<TweakableButton> g_toggleFaultLimitButton = nullptr;
+static std::shared_ptr<TweakableButton> g_toggleTimeLimitButton = nullptr;
+
+// Helper to check if an ID belongs to Bike folder
+static bool IsBikeId(int id) {
+    // Bike folder ID: 169
+    // Bike sub-items: 170-213 (includes Engine, Transmission, Properties, Suspension subfolders)
+    return id >= 169 && id <= 213;
+}
+
+// Helper to check if an ID belongs to Rider folder
+static bool IsRiderId(int id) {
+    // Rider folder ID: 214
+    // Rider sub-items: 215-217 (includes Properties subfolder)
+    return id >= 214 && id <= 217;
+}
 
 std::shared_ptr<TweakableFloat> CreateSyncedFloat(int id, const std::string& name,
     float defaultVal, float minVal, float maxVal) {
@@ -24,9 +53,18 @@ std::shared_ptr<TweakableFloat> CreateSyncedFloat(int id, const std::string& nam
         LOG_VERBOSE("Float changed: " << name << " (ID=" << id << ") = " << newValue);
         if (!DevMenuSync::WriteValue<float>(id, newValue)) {
             LOG_WARNING("Failed to write Float ID=" << id << " to game memory!");
+            DevMenuSync::DebugPrintTweakable(id);
         }
         else {
             LOG_VERBOSE("Successfully wrote Float ID=" << id << " to game memory");
+            
+            // Notify prevent-finish if this is a Bike or Rider value
+            if (IsBikeId(id)) {
+                PreventFinish::NotifyBikeModification();
+            }
+            else if (IsRiderId(id)) {
+                PreventFinish::NotifyRiderModification();
+            }
         }
         });
 
@@ -41,9 +79,18 @@ std::shared_ptr<TweakableInt> CreateSyncedInt(int id, const std::string& name,
         LOG_VERBOSE("Int changed: " << name << " (ID=" << id << ") = " << newValue);
         if (!DevMenuSync::WriteValue<int>(id, newValue)) {
             LOG_WARNING("Failed to write Int ID=" << id << " to game memory!");
+            DevMenuSync::DebugPrintTweakable(id);
         }
         else {
             LOG_VERBOSE("Successfully wrote Int ID=" << id << " to game memory");
+            
+            // Notify prevent-finish if this is a Bike or Rider value
+            if (IsBikeId(id)) {
+                PreventFinish::NotifyBikeModification();
+            }
+            else if (IsRiderId(id)) {
+                PreventFinish::NotifyRiderModification();
+            }
         }
         });
 
@@ -58,9 +105,18 @@ std::shared_ptr<TweakableBool> CreateSyncedBool(int id, const std::string& name,
         // Game uses int for bool (0 or 1)
         if (!DevMenuSync::WriteValue<int>(id, newValue ? 1 : 0)) {
             LOG_WARNING("Failed to write Bool ID=" << id << " to game memory!");
+            DevMenuSync::DebugPrintTweakable(id);
         }
         else {
             LOG_VERBOSE("Successfully wrote Bool ID=" << id << " to game memory");
+            
+            // Notify prevent-finish if this is a Bike or Rider value
+            if (IsBikeId(id)) {
+                PreventFinish::NotifyBikeModification();
+            }
+            else if (IsRiderId(id)) {
+                PreventFinish::NotifyRiderModification();
+            }
         }
         });
 
@@ -124,7 +180,17 @@ void TweakableInt::Render() {
 
     std::string label = "##" + m_name + std::to_string(m_id);
 
-    ImGui::PushItemWidth(200.0f);
+    // If this slider should render inline, use SameLine before rendering
+    if (m_renderInline) {
+        ImGui::SameLine();
+    }
+
+    // Set custom width if specified
+    if (m_customWidth > 0.0f) {
+        ImGui::PushItemWidth(m_customWidth);
+    } else {
+        ImGui::PushItemWidth(200.0f);
+    }
 
     // Use slider for int values
     if (ImGui::SliderInt(label.c_str(), &m_value, m_minValue, m_maxValue)) {
@@ -135,8 +201,11 @@ void TweakableInt::Render() {
 
     ImGui::PopItemWidth();
 
-    ImGui::SameLine();
-    ImGui::Text("%s", m_name.c_str());
+    // Show the name after the slider (unless hidden)
+    if (!m_hideLabel) {
+        ImGui::SameLine();
+        ImGui::Text("%s", m_name.c_str());
+    }
 
     // Add reset button
     if (m_value != m_defaultValue) {
@@ -196,10 +265,33 @@ void TweakableBool::Render() {
 void TweakableButton::Render() {
     std::string label = m_name + "##" + std::to_string(m_id);
     
-    if (ImGui::Button(label.c_str())) {
+    // If this button should render inline, use SameLine before rendering
+    if (m_renderInline) {
+        ImGui::SameLine();
+    }
+    
+    // Apply custom colors if set
+    if (m_useCustomColors) {
+        ImGui::PushStyleColor(ImGuiCol_Button, m_buttonColor);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, m_buttonHoveredColor);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, m_buttonActiveColor);
+    }
+    
+    // Determine button size
+    ImVec2 buttonSize(0, 0);
+    if (m_fixedWidth > 0.0f) {
+        buttonSize.x = m_fixedWidth;
+    }
+    
+    if (ImGui::Button(label.c_str(), buttonSize)) {
         if (m_onClick) {
             m_onClick();
         }
+    }
+    
+    // Pop custom colors if they were set
+    if (m_useCustomColors) {
+        ImGui::PopStyleColor(3);
     }
 }
 
@@ -293,6 +385,45 @@ void DevMenu::Initialize() {
 }
 
 void DevMenu::Render() {
+    // Update checkpoint slider range if track changed
+    if (g_checkpointIndexSlider) {
+        int checkpointCount = Respawn::GetCheckpointCount();
+        if (checkpointCount != g_lastCheckpointCount && checkpointCount > 0) {
+            g_checkpointIndexSlider->SetRange(0, checkpointCount - 1);
+            std::string label = "Select Checkpoint (0-" + std::to_string(checkpointCount - 1) + ")";
+            g_checkpointIndexSlider->SetName(label);
+            g_lastCheckpointCount = checkpointCount;
+            
+            // Clamp current value if needed
+            if (g_checkpointIndexSlider->GetValue() >= checkpointCount) {
+                g_checkpointIndexSlider->SetValue(checkpointCount - 1);
+            }
+        }
+    }
+
+    // Update prevent finish status label
+    if (g_preventFinishLabel) {
+        g_preventFinishLabel->SetName(PreventFinish::GetStatusString());
+    }
+
+    // Update fault limit toggle button label
+    if (g_toggleFaultLimitButton) {
+        bool isDisabled = Limits::IsFaultValidationDisabled();
+        std::string newLabel = isDisabled
+            ? "Fault Limit: DISABLED (Infinite faults)"
+            : "Fault Limit: ENABLED (500 faults)";
+        g_toggleFaultLimitButton->SetName(newLabel);
+    }
+
+    // Update time limit toggle button label
+    if (g_toggleTimeLimitButton) {
+        bool isDisabled = Limits::IsTimeValidationDisabled();
+        std::string newLabel = isDisabled
+            ? "Time Limit: DISABLED (Infinite time)"
+            : "Time Limit: ENABLED (30 minutes)";
+        g_toggleTimeLimitButton->SetName(newLabel);
+    }
+
     // Render Keybindings window independently (even if main menu is hidden)
     if (m_showKeybindingsWindow) {
         ImGui::SetNextWindowSize(ImVec2(600, 400), ImGuiCond_FirstUseEver);
@@ -332,7 +463,7 @@ void DevMenu::Render() {
             // Add padding for the button
             float buttonPadding = ImGui::GetStyle().FramePadding.x * 2.0f;
             float colonWidth = ImGui::CalcTextSize(": ").x;
-            float totalButtonWidth = maxActionWidth + colonWidth + maxKeyWidth + buttonPadding + 10.0f; // 10 extra padding
+            float keybindingButtonWidth = maxActionWidth + colonWidth + maxKeyWidth + buttonPadding + 10.0f; // 10 extra padding
             
             // Render keybindings with aligned columns
             for (size_t i = 0; i < m_keybindingItems.size(); i++) {
@@ -398,7 +529,7 @@ void DevMenu::Render() {
                     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.7f, 0.1f, 0.1f, 1.0f));
                 }
                 
-                if (ImGui::Button(buttonLabel.c_str(), ImVec2(totalButtonWidth, 0))) {
+                if (ImGui::Button(buttonLabel.c_str(), ImVec2(keybindingButtonWidth, 0))) {
                     // Trigger the keybinding capture callback
                     if (auto btn = std::dynamic_pointer_cast<TweakableButton>(item)) {
                         btn->TriggerClick();
@@ -3165,9 +3296,48 @@ void DevMenu::InitializeDebugLocalization() {
 typedef void* (__fastcall* InitializeDevMenuDataFunc)(int param_1);
 typedef void(__cdecl* BuildTweakablesListFunc)(void* this_ptr, void* outputArray, int categoryId);
 
-const uintptr_t INIT_DEV_MENU_DATA_ADDR = 0x00cef440;
-const uintptr_t BUILD_TWEAKABLES_LIST_ADDR = 0x00d623e0;
-const uintptr_t GLOBAL_DEV_MENU_DATA = 0x01755230;
+// ============================================================================
+// Game Memory Addresses - UPLAY VERSION (RVA offsets - Ghidra base 0x700000)
+// ============================================================================
+
+// InitializeDevMenuData: Ghidra 0x00d648c0, RVA = 0x00d648c0 - 0x700000 = 0x6648c0
+static constexpr uintptr_t INIT_DEV_MENU_DATA_RVA_UPLAY = 0x6648c0;
+
+// BuildTweakablesList: Ghidra 0x00d623e0, RVA = 0x00d623e0 - 0x700000 = 0x6623e0
+static constexpr uintptr_t BUILD_TWEAKABLES_LIST_RVA_UPLAY = 0x6623e0;
+
+// DAT_01755230 (g_pDevMenuData): Ghidra 0x01755230, RVA = 0x01755230 - 0x700000 = 0x1055230
+static constexpr uintptr_t GLOBAL_DEV_MENU_DATA_RVA_UPLAY = 0x1055230;
+
+// ============================================================================
+// Game Memory Addresses - STEAM VERSION (RVA offsets - Ghidra base 0x140000)
+// ============================================================================
+
+// InitializeDevMenuData: Ghidra 0x007a3360, RVA = 0x007a3360 - 0x140000 = 0x663360
+static constexpr uintptr_t INIT_DEV_MENU_DATA_RVA_STEAM = 0x663360;
+
+// BuildTweakablesList: Ghidra 0x007a0e80 (estimated), RVA = 0x007a0e80 - 0x140000 = 0x660e80
+// TODO: This address is estimated based on relative offset - verify in Steam Ghidra
+static constexpr uintptr_t BUILD_TWEAKABLES_LIST_RVA_STEAM = 0x660e80;
+
+// DAT_01197230 (g_pDevMenuData): Ghidra 0x01197230, RVA = 0x01197230 - 0x140000 = 0x1057230
+static constexpr uintptr_t GLOBAL_DEV_MENU_DATA_RVA_STEAM = 0x1057230;
+
+// ============================================================================
+// Helper functions to get correct RVA based on detected version
+// ============================================================================
+
+static uintptr_t GetInitDevMenuDataRVA() {
+    return BaseAddress::IsSteamVersion() ? INIT_DEV_MENU_DATA_RVA_STEAM : INIT_DEV_MENU_DATA_RVA_UPLAY;
+}
+
+static uintptr_t GetBuildTweakablesListRVA() {
+    return BaseAddress::IsSteamVersion() ? BUILD_TWEAKABLES_LIST_RVA_STEAM : BUILD_TWEAKABLES_LIST_RVA_UPLAY;
+}
+
+static uintptr_t GetGlobalDevMenuDataRVA() {
+    return BaseAddress::IsSteamVersion() ? GLOBAL_DEV_MENU_DATA_RVA_STEAM : GLOBAL_DEV_MENU_DATA_RVA_UPLAY;
+}
 
 // Helper functions to safely read values (SEH-enabled, no C++ objects)
 static bool SafeReadName(char* namePtr, char* buffer, int bufferSize) {
@@ -3326,10 +3496,15 @@ static void DumpCategoryRecursive(void* devMenuData, uintptr_t buildTweakablesLi
 void DevMenu::DumpTweakablesData() {
     LOG_INFO("===== DUMPING ALL TWEAKABLES (RECURSIVE) =====");
 
+    // Check if Steam version and warn about unverified address
+    if (BaseAddress::IsSteamVersion()) {
+        LOG_WARNING("[DevMenu] Steam version detected - BuildTweakablesList address is estimated and may not work");
+    }
+
     uintptr_t baseAddress = (uintptr_t)GetModuleHandle(NULL);
 
-    // Get pointer to global dev menu data
-    void** globalDevMenuDataPtr = (void**)(baseAddress + GLOBAL_DEV_MENU_DATA - 0x700000);
+    // Get pointer to global dev menu data using version-aware RVA
+    void** globalDevMenuDataPtr = (void**)(baseAddress + GetGlobalDevMenuDataRVA());
     void* devMenuData = *globalDevMenuDataPtr;
 
     LOG_VERBOSE("Base address: 0x" << std::hex << baseAddress);
@@ -3337,7 +3512,7 @@ void DevMenu::DumpTweakablesData() {
 
     if (devMenuData == nullptr) {
         LOG_INFO("Initializing dev menu data...");
-        InitializeDevMenuDataFunc initDevMenuData = (InitializeDevMenuDataFunc)(baseAddress + INIT_DEV_MENU_DATA_ADDR - 0x700000);
+        InitializeDevMenuDataFunc initDevMenuData = (InitializeDevMenuDataFunc)(baseAddress + GetInitDevMenuDataRVA());
         devMenuData = initDevMenuData(0);
         *globalDevMenuDataPtr = devMenuData;
     }
@@ -3349,7 +3524,7 @@ void DevMenu::DumpTweakablesData() {
 
     LOG_INFO("Dev menu data @ 0x" << std::hex << (uintptr_t)devMenuData);
 
-    uintptr_t buildTweakablesListAddr = baseAddress + BUILD_TWEAKABLES_LIST_ADDR - 0x700000;
+    uintptr_t buildTweakablesListAddr = baseAddress + GetBuildTweakablesListRVA();
     LOG_VERBOSE("BuildTweakablesList @ 0x" << std::hex << buildTweakablesListAddr);
     LOG_INFO("");
 
@@ -3367,256 +3542,257 @@ void DevMenu::DumpTweakablesData() {
 void DevMenu::InitializeMod() {
     auto mod = std::make_shared<TweakableFolder>(10000, "Mod");
 
+    // Fixed width for consistent button sizing
+    const float totalButtonsWidth = 316.0f;
+
     // ============================================================================
-    // Respawn Controls
+    // Checkpoint Subcategory
     // ============================================================================
+    auto checkpointFolder = std::make_shared<TweakableFolder>(10040, "Checkpoint");
     
-    // Respawn at Current Checkpoint
-    auto respawnCurrent = std::make_shared<TweakableButton>(
-        10002,
-        "Respawn at Current Checkpoint"
-    );
-    respawnCurrent->SetOnClickCallback([]() {
-        Respawn::RespawnAtCheckpoint();
-    });
-    RegisterTweakable(respawnCurrent);
-    mod->AddChild(respawnCurrent);
-
-    // Respawn at Next Checkpoint
-    auto respawnNext = std::make_shared<TweakableButton>(
-        10003,
-        "Respawn at Next Checkpoint"
-    );
-    respawnNext->SetOnClickCallback([]() {
-        Respawn::RespawnAtNextCheckpoint();
-    });
-    RegisterTweakable(respawnNext);
-    mod->AddChild(respawnNext);
-
-    // Respawn at Previous Checkpoint
+    // Respawn buttons (aligned in a single row with fixed width)
+    const float buttonWidth = 100.0f;  // Fixed width for all three buttons
+    
+    // Previous Checkpoint
     auto respawnPrev = std::make_shared<TweakableButton>(
         10004,
-        "Respawn at Previous Checkpoint"
+        "Previous"
     );
     respawnPrev->SetOnClickCallback([]() {
         Respawn::RespawnAtPreviousCheckpoint();
     });
+    respawnPrev->SetRenderInline(false);  // First button, no inline
+    respawnPrev->SetFixedWidth(buttonWidth);
     RegisterTweakable(respawnPrev);
-    mod->AddChild(respawnPrev);
+    checkpointFolder->AddChild(respawnPrev);
+
+    // Current Checkpoint
+    auto respawnCurrent = std::make_shared<TweakableButton>(
+        10002,
+        "Current"
+    );
+    respawnCurrent->SetOnClickCallback([]() {
+        Respawn::RespawnAtCheckpoint();
+    });
+    respawnCurrent->SetRenderInline(true);  // Second button, inline
+    respawnCurrent->SetFixedWidth(buttonWidth);
+    RegisterTweakable(respawnCurrent);
+    checkpointFolder->AddChild(respawnCurrent);
+
+    // Next Checkpoint
+    auto respawnNext = std::make_shared<TweakableButton>(
+        10003,
+        "Next"
+    );
+    respawnNext->SetOnClickCallback([]() {
+        Respawn::RespawnAtNextCheckpoint();
+    });
+    respawnNext->SetRenderInline(true);  // Third button, inline
+    respawnNext->SetFixedWidth(buttonWidth);
+    RegisterTweakable(respawnNext);
+    checkpointFolder->AddChild(respawnNext);
 
     // Respawn at Checkpoint Index - Slider (no auto-respawn)
-    auto checkpointIndexSlider = std::make_shared<TweakableInt>(
+    // Total width of three buttons = 100px * 3 = 300px, plus spacing (approx 8px per gap)
+    // Using totalButtonsWidth already defined above (316.0f)
+    const float sliderWidth = totalButtonsWidth - buttonWidth - 8.0f;  // 208px (316 - 100 - 8)
+    
+    g_checkpointIndexSlider = std::make_shared<TweakableInt>(
         10005,
         "Select Checkpoint Index",
         0,      // Default: 0
         0,      // Min: 0
         100     // Max: 100 (will be updated dynamically)
     );
-    // Update the max value based on current track's checkpoint count
-    int currentCheckpointCount = Respawn::GetCheckpointCount();
-    if (currentCheckpointCount > 0) {
-        checkpointIndexSlider->SetRange(0, currentCheckpointCount - 1);
-        std::string label = "Select Checkpoint (0-" + std::to_string(currentCheckpointCount - 1) + ")";
-        checkpointIndexSlider->SetName(label);
-    }
-    // No callback - we'll use a button to apply the respawn
-    RegisterTweakable(checkpointIndexSlider);
-    mod->AddChild(checkpointIndexSlider);
-
-    // Go to Selected Checkpoint Button
+    // Set custom width to account for inline button and hide label
+    g_checkpointIndexSlider->SetCustomWidth(sliderWidth);
+    g_checkpointIndexSlider->SetHideLabel(true);
+    // Go to Selected Checkpoint Button (positioned before slider for inline layout)
     auto goToCheckpointButton = std::make_shared<TweakableButton>(
         10014,
-        "Go to Selected Checkpoint"
+        "GO"
     );
-    goToCheckpointButton->SetOnClickCallback([checkpointIndexSlider]() {
-        int selectedIndex = checkpointIndexSlider->GetValue();
+    goToCheckpointButton->SetFixedWidth(buttonWidth);
+    goToCheckpointButton->SetRenderInline(false);  // First element on line
+    goToCheckpointButton->SetOnClickCallback([]() {
+        int selectedIndex = g_checkpointIndexSlider->GetValue();
         int checkpointCount = Respawn::GetCheckpointCount();
         
         // Update slider range in case track changed
         if (checkpointCount > 0) {
-            checkpointIndexSlider->SetRange(0, checkpointCount - 1);
+            g_checkpointIndexSlider->SetRange(0, checkpointCount - 1);
             std::string label = "Select Checkpoint (0-" + std::to_string(checkpointCount - 1) + ")";
-            checkpointIndexSlider->SetName(label);
+            g_checkpointIndexSlider->SetName(label);
             
             // Clamp selected index to valid range
             if (selectedIndex >= checkpointCount) {
                 selectedIndex = checkpointCount - 1;
-                checkpointIndexSlider->SetValue(selectedIndex);
+                g_checkpointIndexSlider->SetValue(selectedIndex);
             }
         }
         
         // Check if user selected the last checkpoint (finish line)
         if (selectedIndex == checkpointCount - 1 && checkpointCount > 0) {
-            LOG_INFO("[DevMenu] Last checkpoint selected - triggering race finish instead of respawn");
+            LOG_INFO("[DevMenu] Last checkpoint selected - using SafeInstantFinish");
             LOG_INFO("[DevMenu] (Respawning at finish line causes softlock)");
-            
-            // Trigger proper race finish using ActionScript
-            if (ActionScript::CallHandleRaceFinish()) {
-                LOG_VERBOSE("[DevMenu] Successfully called HandleRaceFinish!");
-            } else {
-                LOG_ERROR("[DevMenu] Failed to call HandleRaceFinish!");
-            }
+            // Route through SafeInstantFinish so prevent-finish fresh checks apply
+            PreventFinish::SafeInstantFinish();
         } else {
             LOG_INFO("[DevMenu] Going to checkpoint " << selectedIndex << " (Total checkpoints: " << checkpointCount << ")");
+            int currentCp = Respawn::GetCurrentCheckpointIndex();
+            if (selectedIndex != currentCp) {
+                PreventFinish::NotifyCheckpointSkip();
+            }
             Respawn::RespawnAtCheckpointIndex(selectedIndex);
         }
     });
     RegisterTweakable(goToCheckpointButton);
-    mod->AddChild(goToCheckpointButton);
+    checkpointFolder->AddChild(goToCheckpointButton);
 
-    // Toggle Selected Checkpoint Enabled/Disabled Button
-    auto toggleCheckpointButton = std::make_shared<TweakableButton>(
-        10015,
-        "Toggle Selected Checkpoint (Disable/Enable)"
-    );
-    toggleCheckpointButton->SetOnClickCallback([checkpointIndexSlider, toggleCheckpointButton]() {
-        int selectedIndex = checkpointIndexSlider->GetValue();
-        int checkpointCount = Respawn::GetCheckpointCount();
-        
-        // Update slider range in case track changed
-        if (checkpointCount > 0) {
-            checkpointIndexSlider->SetRange(0, checkpointCount - 1);
-            std::string label = "Select Checkpoint (0-" + std::to_string(checkpointCount - 1) + ")";
-            checkpointIndexSlider->SetName(label);
-            
-            // Clamp selected index to valid range
-            if (selectedIndex >= checkpointCount) {
-                selectedIndex = checkpointCount - 1;
-                checkpointIndexSlider->SetValue(selectedIndex);
-            }
-        }
-        
-        if (checkpointCount <= 0) {
-            LOG_ERROR("[DevMenu] No checkpoints available on this track");
-            return;
-        }
-        
-        // Toggle the checkpoint's enabled state
-        bool wasEnabled = Respawn::IsCheckpointEnabled(selectedIndex);
-        if (Respawn::ToggleCheckpoint(selectedIndex)) {
-            bool isNowEnabled = Respawn::IsCheckpointEnabled(selectedIndex);
-            if (isNowEnabled) {
-                LOG_INFO("[DevMenu] Checkpoint " << selectedIndex << " ENABLED - will trigger when crossed");
-            } else {
-                LOG_INFO("[DevMenu] Checkpoint " << selectedIndex << " DISABLED - won't trigger when crossed");
-            }
-            
-            // Update button label to show current state of selected checkpoint
-            std::string stateStr = isNowEnabled ? "ENABLED" : "DISABLED";
-            toggleCheckpointButton->SetName("Toggle Checkpoint " + std::to_string(selectedIndex) + " (" + stateStr + ")");
-        } else {
-            LOG_ERROR("[DevMenu] Failed to toggle checkpoint " << selectedIndex);
-        }
-    });
-    RegisterTweakable(toggleCheckpointButton);
-    mod->AddChild(toggleCheckpointButton);
+    // Update the max value based on current track's checkpoint count
+    int currentCheckpointCount = Respawn::GetCheckpointCount();
+    if (currentCheckpointCount > 0) {
+        g_checkpointIndexSlider->SetRange(0, currentCheckpointCount - 1);
+        std::string label = "Select Checkpoint (0-" + std::to_string(currentCheckpointCount - 1) + ")";
+        g_checkpointIndexSlider->SetName(label);
+        g_lastCheckpointCount = currentCheckpointCount;
+    }
+    // No callback - we'll use a button to apply the respawn
+    g_checkpointIndexSlider->SetRenderInline(true);  // Render inline with GO button
+    RegisterTweakable(g_checkpointIndexSlider);
+    checkpointFolder->AddChild(g_checkpointIndexSlider);
+    
+    // Register and add checkpoint folder to mod
+    RegisterTweakable(checkpointFolder);
+    mod->AddChild(checkpointFolder);
 
-    // Debug Checkpoint Structure Button
-    auto debugCheckpointButton = std::make_shared<TweakableButton>(
-        10016,
-        "Debug Selected Checkpoint Structure"
-    );
-    debugCheckpointButton->SetOnClickCallback([checkpointIndexSlider]() {
-        int selectedIndex = checkpointIndexSlider->GetValue();
-        Respawn::DebugCheckpointStructure(selectedIndex);
-    });
-    RegisterTweakable(debugCheckpointButton);
-    mod->AddChild(debugCheckpointButton);
+
+
+
 
     // ============================================================================
-    // Limit Controls
+    // Fault/Time Subcategory
     // ============================================================================
-
+    auto faultTimeFolder = std::make_shared<TweakableFolder>(10050, "Fault/Time");
+    
     // Toggle Fault Limit
-    auto toggleFaultLimit = std::make_shared<TweakableButton>(
+    g_toggleFaultLimitButton = std::make_shared<TweakableButton>(
         10006,
         "Toggle Fault Limit [Click to check status]"
     );
-    toggleFaultLimit->SetOnClickCallback([toggleFaultLimit]() {
-        bool isDisabled = Respawn::IsFaultValidationDisabled();
+    g_toggleFaultLimitButton->SetFixedWidth(totalButtonsWidth);
+    g_toggleFaultLimitButton->SetOnClickCallback([]() {
+        bool isDisabled = Limits::IsFaultValidationDisabled();
         if (isDisabled) {
             LOG_INFO("[DevMenu] Fault limit is currently DISABLED. Re-enabling now...");
-            Respawn::EnableFaultValidation();
+            Limits::EnableFaultValidation();
+            Limits::EnableFinishFaultCheck();
             int currentFaults = Respawn::GetFaultCount();
-            uint32_t faultLimit = Respawn::GetFaultLimit();
+            uint32_t faultLimit = Limits::GetFaultLimit();
             LOG_INFO("[DevMenu] Fault limit ENABLED! (" << faultLimit << " faults, currently at " << currentFaults << ")");
-        } else {
+        }
+        else {
             LOG_INFO("[DevMenu] Fault limit is currently ENABLED. Disabling now...");
-            Respawn::DisableFaultLimit();
-            Respawn::DisableFaultValidation();
+            Limits::DisableFaultLimit();
+            Limits::DisableFaultValidation();
+            Limits::DisableFinishFaultCheck();
             LOG_INFO("[DevMenu] Fault limit DISABLED!");
         }
-        
-        // Update button label to show current state
-        isDisabled = Respawn::IsFaultValidationDisabled();
-        std::string newLabel = isDisabled 
-            ? "Fault Limit: DISABLED (Infinite faults)"
-            : "Fault Limit: ENABLED (500 faults)";
-        toggleFaultLimit->SetName(newLabel);
-    });
-    RegisterTweakable(toggleFaultLimit);
-    mod->AddChild(toggleFaultLimit);
+
+        // Note: Button label will be updated automatically in Render() function
+        });
+    RegisterTweakable(g_toggleFaultLimitButton);
+    faultTimeFolder->AddChild(g_toggleFaultLimitButton);
 
     // Toggle Time Limit
-    auto toggleTimeLimit = std::make_shared<TweakableButton>(
+    g_toggleTimeLimitButton = std::make_shared<TweakableButton>(
         10007,
         "Toggle Time Limit [Click to check status]"
     );
-    toggleTimeLimit->SetOnClickCallback([toggleTimeLimit]() {
-        bool isDisabled = Respawn::IsTimeValidationDisabled();
+    g_toggleTimeLimitButton->SetFixedWidth(totalButtonsWidth);
+    g_toggleTimeLimitButton->SetOnClickCallback([]() {
+        bool isDisabled = Limits::IsTimeValidationDisabled();
         if (isDisabled) {
             LOG_INFO("[DevMenu] Time limit is currently DISABLED. Re-enabling now...");
-            Respawn::EnableTimeValidation();
+            Limits::EnableTimeValidation();
             int currentTimeMs = Respawn::GetRaceTimeMs();
-            uint32_t timeLimit = Respawn::GetTimeLimit();
+            uint32_t timeLimit = Limits::GetTimeLimit();
             int timeLimitMs = (int)(timeLimit * 1000 / 60);  // Convert ticks to ms
             LOG_INFO("[DevMenu] Time limit ENABLED! (" << timeLimitMs / 60 << " minutes, currently at " << currentTimeMs / 1000 << "s)");
         } else {
             LOG_INFO("[DevMenu] Time limit is currently ENABLED. Disabling now...");
-            Respawn::DisableTimeLimit();
-            Respawn::DisableTimeValidation();
-            Respawn::DisableRaceUpdateTimerFreeze();  // Also disable timer freeze
-            Respawn::DisableTimeCompletionCheck2();   // And the second time check
+            Limits::DisableTimeLimit();
+            Limits::DisableTimeValidation();
+            Limits::DisableRaceUpdateTimerFreeze();  // Also disable timer freeze
+            Limits::DisableTimeCompletionCheck2();   // And the second time check
             LOG_INFO("[DevMenu] Time limit DISABLED!");
         }
         
-        // Update button label to show current state
-        isDisabled = Respawn::IsTimeValidationDisabled();
-        std::string newLabel = isDisabled 
-            ? "Time Limit: DISABLED (Infinite time)"
-            : "Time Limit: ENABLED (30 minutes)";
-        toggleTimeLimit->SetName(newLabel);
+        // Note: Button label will be updated automatically in Render() function
     });
-    RegisterTweakable(toggleTimeLimit);
-    mod->AddChild(toggleTimeLimit);
+    RegisterTweakable(g_toggleTimeLimitButton);
+    faultTimeFolder->AddChild(g_toggleTimeLimitButton);
 
     // ============================================================================
     // Fault Controls
     // ============================================================================
 
     // Fault Once
-    auto faultOnce = std::make_shared<TweakableBool>(
+    auto faultOnce = std::make_shared<TweakableButton>(
         10008,
-        "Fault Once",
-        false
+        "Fault Once"
     );
-    faultOnce->SetOnChangeCallback([faultOnce](bool value) {
-        if (value) {
-            Respawn::IncrementFaultCounter();
-            faultOnce->SetValue(false);
-        }
+    faultOnce->SetFixedWidth(totalButtonsWidth);
+    faultOnce->SetOnClickCallback([]() {
+        Respawn::IncrementFaultCounter();
     });
     RegisterTweakable(faultOnce);
-    mod->AddChild(faultOnce);
+    faultTimeFolder->AddChild(faultOnce);
 
-    // Add/Remove Faults
-    auto faultAdjust = std::make_shared<TweakableInt>(
+    // Calculate widths for inline sliders
+    const float inlineSliderWidth = (totalButtonsWidth - 8.0f) / 2.0f;  // Split width with gap
+
+    // Add/Remove Faults label (header text)
+    auto faultLabel = std::make_shared<TweakableButton>(
         10009,
-        "Add/Remove Faults",
+        "Add/Remove Faults"
+    );
+    faultLabel->SetFixedWidth(inlineSliderWidth);
+    faultLabel->SetRenderInline(false);  // Start new line
+    faultLabel->SetCustomColors(
+        ImVec4(0.0f, 0.0f, 0.0f, 0.0f),  // Transparent background
+        ImVec4(0.0f, 0.0f, 0.0f, 0.0f),
+        ImVec4(0.0f, 0.0f, 0.0f, 0.0f)
+    );
+    RegisterTweakable(faultLabel);
+    faultTimeFolder->AddChild(faultLabel);
+
+    // Add/Remove Time label (header text)
+    auto timeLabel = std::make_shared<TweakableButton>(
+        10022,
+        "Add/Remove Time"
+    );
+    timeLabel->SetFixedWidth(inlineSliderWidth);
+    timeLabel->SetRenderInline(true);  // Inline with fault label
+    timeLabel->SetCustomColors(
+        ImVec4(0.0f, 0.0f, 0.0f, 0.0f),  // Transparent background
+        ImVec4(0.0f, 0.0f, 0.0f, 0.0f),
+        ImVec4(0.0f, 0.0f, 0.0f, 0.0f)
+    );
+    RegisterTweakable(timeLabel);
+    faultTimeFolder->AddChild(timeLabel);
+
+    // Add/Remove Faults slider
+    auto faultAdjust = std::make_shared<TweakableInt>(
+        10010,
+        "",  // No label - using header above
         0,      // Default: 0
         -500,   // Min: -500
         500     // Max: +500
     );
+    faultAdjust->SetCustomWidth(inlineSliderWidth);
+    faultAdjust->SetHideLabel(true);  // Hide the inline label
+    faultAdjust->SetRenderInline(false);  // First on line
     faultAdjust->SetOnChangeCallback([faultAdjust](int value) {
         if (value != 0) {
             Respawn::IncrementFaultCounterBy(value);
@@ -3624,31 +3800,19 @@ void DevMenu::InitializeMod() {
         }
     });
     RegisterTweakable(faultAdjust);
-    mod->AddChild(faultAdjust);
+    faultTimeFolder->AddChild(faultAdjust);
 
-    // Instant Fault Out (500 faults) - Trigger instant fault out finish
-    auto instantFaultOut = std::make_shared<TweakableButton>(
-        10010,
-        "Instant Fault Out (500 faults)"
-    );
-    instantFaultOut->SetOnClickCallback([]() {
-        Respawn::InstantFaultOut();
-    });
-    RegisterTweakable(instantFaultOut);
-    mod->AddChild(instantFaultOut);
-
-    // ============================================================================
-    // Time Controls
-    // ============================================================================
-
-    // Add/Remove Time (seconds)
+    // Add/Remove Time slider
     auto timeAdjust = std::make_shared<TweakableInt>(
         10011,
-        "Add/Remove Time (seconds)",
+        "",  // No label - using header above
         0,      // Default: 0
         -1800,  // Min: -30 minutes
         1800    // Max: +30 minutes
     );
+    timeAdjust->SetCustomWidth(inlineSliderWidth);
+    timeAdjust->SetHideLabel(true);  // Hide the inline label
+    timeAdjust->SetRenderInline(true);  // Render inline with fault slider
     timeAdjust->SetOnChangeCallback([timeAdjust](int value) {
         if (value != 0) {
             Respawn::AdjustRaceTimeMs(value * 1000); // Convert to milliseconds
@@ -3656,66 +3820,319 @@ void DevMenu::InitializeMod() {
         }
     });
     RegisterTweakable(timeAdjust);
-    mod->AddChild(timeAdjust);
+    faultTimeFolder->AddChild(timeAdjust);
 
+    // Instant Actions Label and Buttons
+    
+    // Calculate width for inline buttons (3 buttons fitting in totalButtonsWidth)
+    const float instantButtonWidth = (totalButtonsWidth - 16.0f) / 3.0f;  // Account for spacing
+    
     // Instant Time Out (30 minutes) - Trigger instant timeout finish
     auto instantTimeOut = std::make_shared<TweakableButton>(
-        10012,
-        "Instant Time Out (30 minutes)"
+        10013,
+        "Timeout"
     );
+    instantTimeOut->SetFixedWidth(instantButtonWidth);
+    instantTimeOut->SetRenderInline(false);  // First button on new line
     instantTimeOut->SetOnClickCallback([]() {
-        Respawn::InstantTimeOut();
+        Limits::InstantTimeOut();
     });
     RegisterTweakable(instantTimeOut);
-    mod->AddChild(instantTimeOut);
-
-    // Instant Finish (normal) - Trigger normal instant finish using HandleRaceFinish
-    auto instantFinish = std::make_shared<TweakableButton>(
-        10013,
-        "Instant Finish (normal)"
+    faultTimeFolder->AddChild(instantTimeOut);
+    
+    // Instant Fault Out (500 faults) - Trigger instant fault out finish
+    auto instantFaultOut = std::make_shared<TweakableButton>(
+        10012,
+        "Fault-out"
     );
+
+    instantFaultOut->SetFixedWidth(instantButtonWidth);
+    instantFaultOut->SetRenderInline(true);  // Second button, inline
+    instantFaultOut->SetOnClickCallback([]() {
+        Limits::InstantFaultOut();
+    });
+    RegisterTweakable(instantFaultOut);
+    faultTimeFolder->AddChild(instantFaultOut);
+
+    // Instant Finish (normal) - Trigger normal instant finish using SafeInstantFinish
+    auto instantFinish = std::make_shared<TweakableButton>(
+        10014,
+        "Finish"
+    );
+    instantFinish->SetFixedWidth(instantButtonWidth);
+    instantFinish->SetRenderInline(true);  // Third button, inline
     instantFinish->SetOnClickCallback([]() {
-        LOG_VERBOSE("[DevMenu] Instant Finish button pressed - calling HandleRaceFinish...");
-        if (ActionScript::CallHandleRaceFinish()) {
-            LOG_VERBOSE("[DevMenu] Successfully called HandleRaceFinish!");
-        } else {
-            LOG_ERROR("[DevMenu] Failed to call HandleRaceFinish!");
-        }
+        LOG_VERBOSE("[DevMenu] Instant Finish button pressed - calling SafeInstantFinish...");
+        PreventFinish::SafeInstantFinish();
+        LOG_VERBOSE("[DevMenu] SafeInstantFinish called!");
     });
     RegisterTweakable(instantFinish);
-    mod->AddChild(instantFinish);
+    faultTimeFolder->AddChild(instantFinish);
 
-    // ============================================================================
-    // Prevent Finish Controls
-    // ============================================================================
-
-    // Toggle Prevent Finish (Disable/Enable Finish Line)
-    // When enabled, crossing the finish line won't end the race
-    auto togglePreventFinish = std::make_shared<TweakableButton>(
-        10017,
-        "Prevent Finish: OFF (Click to toggle)"
+    // Prevent Finish Status Label (auto-updates based on gamemode)
+    auto preventFinishLabel = std::make_shared<TweakableButton>(
+        10015,
+        PreventFinish::GetStatusString()
     );
-    togglePreventFinish->SetOnClickCallback([togglePreventFinish]() {
-        bool wasEnabled = Respawn::IsFinishLineEnabled();
-        
-        if (Respawn::ToggleFinishLine()) {
-            bool isNowEnabled = Respawn::IsFinishLineEnabled();
-            
-            if (isNowEnabled) {
-                // Finish line is enabled = race CAN end = prevent finish is OFF
-                LOG_INFO("[DevMenu] Prevent Finish: OFF - Race will end when crossing finish line");
-                togglePreventFinish->SetName("Prevent Finish: OFF (Race will end normally)");
-            } else {
-                // Finish line is disabled = race CAN'T end = prevent finish is ON
-                LOG_INFO("[DevMenu] Prevent Finish: ON - Race will NOT end when crossing finish line");
-                togglePreventFinish->SetName("Prevent Finish: ON (Finish line disabled)");
-            }
+
+    // Set colors: Normal (Red), Hovered (Bright Red), Active (Dark Red)
+    preventFinishLabel->SetCustomColors(
+        ImVec4(0.8f, 0.1f, 0.1f, 1.0f), // Normal
+        ImVec4(1.0f, 0.2f, 0.2f, 1.0f), // Hovered
+        ImVec4(0.6f, 0.0f, 0.0f, 1.0f)  // Active
+    );
+
+    preventFinishLabel->SetFixedWidth(totalButtonsWidth);
+    // No click callback - this is a status display only
+    RegisterTweakable(preventFinishLabel);
+    faultTimeFolder->AddChild(preventFinishLabel);
+    g_preventFinishLabel = preventFinishLabel;
+    
+    // Register and add fault/time folder to mod
+    RegisterTweakable(faultTimeFolder);
+    mod->AddChild(faultTimeFolder);
+
+
+    // ============================================================================
+    // Host-Join Controls
+    // ============================================================================
+
+    // Create a subfolder for Host-Join controls
+    auto hostJoinFolder = std::make_shared<TweakableFolder>(10030, "Host-Join (Private Match)");
+    
+    // Scan for Session ID button
+    auto scanSessionIdBtn = std::make_shared<TweakableButton>(
+        10036,
+        "Scan for Session ID"
+    );
+    scanSessionIdBtn->SetOnClickCallback([]() {
+        LOG_INFO("[DevMenu] Scanning for session ID...");
+        HostJoin::RefreshSessionId();
+        uint32_t sessionId = HostJoin::GetCurrentSessionId();
+        if (sessionId != 0) {
+            LOG_INFO("[DevMenu] Found Session ID: 0x" << std::hex << std::uppercase << sessionId);
+            LOG_INFO("[DevMenu] Session ID has been saved to F:/session_id.txt");
         } else {
-            LOG_ERROR("[DevMenu] Failed to toggle finish line state");
+            LOG_INFO("[DevMenu] Scan complete - check log for candidates");
         }
     });
-    RegisterTweakable(togglePreventFinish);
-    mod->AddChild(togglePreventFinish);
+    RegisterTweakable(scanSessionIdBtn);
+    hostJoinFolder->AddChild(scanSessionIdBtn);
+    
+    // Show Current Session ID button
+    auto showSessionIdBtn = std::make_shared<TweakableButton>(
+        10031,
+        "Show Current Session ID"
+    );
+    showSessionIdBtn->SetOnClickCallback([]() {
+        uint32_t sessionId = HostJoin::GetCurrentSessionId();
+        if (sessionId != 0) {
+            LOG_INFO("[DevMenu] Current Session ID: 0x" << std::hex << std::uppercase << sessionId);
+            LOG_INFO("[DevMenu] Share this ID with other players to let them join!");
+        } else {
+            LOG_INFO("[DevMenu] Not hosting a session. Enter a private match lobby to capture session ID.");
+        }
+    });
+    RegisterTweakable(showSessionIdBtn);
+    hostJoinFolder->AddChild(showSessionIdBtn);
+    
+    // Copy Session ID to Clipboard button
+    auto copySessionIdBtn = std::make_shared<TweakableButton>(
+        10032,
+        "Copy Session ID to Clipboard"
+    );
+    copySessionIdBtn->SetOnClickCallback([]() {
+        if (HostJoin::CopySessionIdToClipboard()) {
+            LOG_INFO("[DevMenu] Session ID copied to clipboard!");
+        } else {
+            LOG_ERROR("[DevMenu] No session ID to copy - enter a private match lobby first");
+        }
+    });
+    RegisterTweakable(copySessionIdBtn);
+    hostJoinFolder->AddChild(copySessionIdBtn);
+    
+    // Paste Session ID from Clipboard button
+    auto pasteSessionIdBtn = std::make_shared<TweakableButton>(
+        10033,
+        "Paste Session ID from Clipboard"
+    );
+    pasteSessionIdBtn->SetOnClickCallback([]() {
+        if (HostJoin::PasteSessionIdFromClipboard()) {
+            uint32_t targetId = HostJoin::GetTargetSessionId();
+            LOG_INFO("[DevMenu] Session ID pasted: 0x" << std::hex << std::uppercase << targetId);
+        } else {
+            LOG_ERROR("[DevMenu] Failed to paste session ID from clipboard");
+        }
+    });
+    RegisterTweakable(pasteSessionIdBtn);
+    hostJoinFolder->AddChild(pasteSessionIdBtn);
+    
+    // Join Session button
+    auto joinSessionBtn = std::make_shared<TweakableButton>(
+        10034,
+        "Join Session (use target ID)"
+    );
+    joinSessionBtn->SetOnClickCallback([]() {
+        uint32_t targetId = HostJoin::GetTargetSessionId();
+        if (targetId == 0) {
+            LOG_ERROR("[DevMenu] No target session ID set! Paste a session ID first.");
+            return;
+        }
+        LOG_INFO("[DevMenu] Attempting to join session: 0x" << std::hex << std::uppercase << targetId);
+        if (HostJoin::JoinSession()) {
+            LOG_INFO("[DevMenu] Join request sent!");
+        } else {
+            LOG_ERROR("[DevMenu] Join request may have failed - check logs");
+        }
+    });
+    RegisterTweakable(joinSessionBtn);
+    hostJoinFolder->AddChild(joinSessionBtn);
+    
+    // Show Host-Join Status button
+    auto showStatusBtn = std::make_shared<TweakableButton>(
+        10035,
+        "Show Host-Join Status"
+    );
+    showStatusBtn->SetOnClickCallback([]() {
+        LOG_INFO("[DevMenu] === Host-Join Status ===");
+        LOG_INFO("[DevMenu] Is Hosting: " << (HostJoin::IsHostingSession() ? "Yes" : "No"));
+        LOG_INFO("[DevMenu] Current Session ID: 0x" << std::hex << std::uppercase << HostJoin::GetCurrentSessionId());
+        LOG_INFO("[DevMenu] Target Session ID: 0x" << std::hex << std::uppercase << HostJoin::GetTargetSessionId());
+        LOG_INFO("[DevMenu] Status: " << HostJoin::GetStatusMessage());
+    });
+    RegisterTweakable(showStatusBtn);
+    hostJoinFolder->AddChild(showStatusBtn);
+    
+    RegisterTweakable(hostJoinFolder);
+    mod->AddChild(hostJoinFolder);
+
+    // ============================================================================
+    // Currency Subcategory (Money on left, Acorns on right)
+    // ============================================================================
+    auto currencyFolder = std::make_shared<TweakableFolder>(10060, "Currency");
+    
+    // Calculate column widths (two columns with spacing)
+    const float columnWidth = (totalButtonsWidth - 8.0f) / 2.0f;
+    
+    // ============================================================================
+    // ROW 1: Get Balance Buttons
+    // ============================================================================
+    
+    // Get Money Balance Button (LEFT)
+    auto getMoneyBalanceButton = std::make_shared<TweakableButton>(
+        10021,
+        "Get Money"
+    );
+    getMoneyBalanceButton->SetFixedWidth(columnWidth);
+    getMoneyBalanceButton->SetRenderInline(false);  // First on line
+    getMoneyBalanceButton->SetOnClickCallback([]() {
+        int balance = Money::GetBalance();
+        if (balance >= 0) {
+            LOG_INFO("[DevMenu] Current money balance: " << balance);
+        } else {
+            LOG_WARNING("[DevMenu] Could not retrieve money balance - are you in-game?");
+        }
+    });
+    RegisterTweakable(getMoneyBalanceButton);
+    currencyFolder->AddChild(getMoneyBalanceButton);
+    
+    // Get Acorns Balance Button (RIGHT)
+    auto getAcornsBalanceButton = std::make_shared<TweakableButton>(
+        10020,
+        "Get Acorns"
+    );
+    getAcornsBalanceButton->SetFixedWidth(columnWidth);
+    getAcornsBalanceButton->SetRenderInline(true);  // Inline with money button
+    getAcornsBalanceButton->SetOnClickCallback([]() {
+        int balance = Acorns::GetBalance();
+        if (balance >= 0) {
+            LOG_INFO("[DevMenu] Current acorn balance: " << balance);
+        } else {
+            LOG_WARNING("[DevMenu] Could not retrieve acorn balance - are you in-game?");
+        }
+    });
+    RegisterTweakable(getAcornsBalanceButton);
+    currencyFolder->AddChild(getAcornsBalanceButton);
+
+    // ============================================================================
+    // ROW 2: Amount Sliders
+    // ============================================================================
+    
+    // Money Amount Slider (LEFT)
+    auto moneyAmount = std::make_shared<TweakableInt>(
+        10022,
+        "Money",
+        1000,     // Default: 1000
+        1,        // Min: 1 (AwardMoneyToPlayer only supports positive)
+        100000    // Max: +100000
+    );
+    moneyAmount->SetCustomWidth(columnWidth);
+    moneyAmount->SetHideLabel(true);
+    moneyAmount->SetRenderInline(false);  // First on line
+    RegisterTweakable(moneyAmount);
+    currencyFolder->AddChild(moneyAmount);
+    
+    // Acorns Amount Slider (RIGHT)
+    auto acornsAmount = std::make_shared<TweakableInt>(
+        10018,
+        "Acorns",
+        100,      // Default: 100
+        -10000,   // Min: -10000 (to remove acorns)
+        10000     // Max: +10000
+    );
+    acornsAmount->SetCustomWidth(columnWidth);
+    acornsAmount->SetHideLabel(true);
+    acornsAmount->SetRenderInline(true);  // Inline with money slider
+    RegisterTweakable(acornsAmount);
+    currencyFolder->AddChild(acornsAmount);
+
+    // ============================================================================
+    // ROW 3: Add Buttons
+    // ============================================================================
+    
+    // Add Money Button (LEFT)
+    auto addMoneyButton = std::make_shared<TweakableButton>(
+        10023,
+        "Add Money"
+    );
+    addMoneyButton->SetFixedWidth(columnWidth);
+    addMoneyButton->SetRenderInline(false);  // First on line
+    addMoneyButton->SetOnClickCallback([moneyAmount]() {
+        int amount = moneyAmount->GetValue();
+        LOG_INFO("[DevMenu] Adding " << amount << " money to player balance");
+        
+        if (Money::AddToBalance(amount)) {
+            LOG_INFO("[DevMenu] Successfully added " << amount << " money!");
+        } else {
+            LOG_ERROR("[DevMenu] Failed to add money - check if player profile is loaded");
+        }
+    });
+    RegisterTweakable(addMoneyButton);
+    currencyFolder->AddChild(addMoneyButton);
+    
+    // Add Acorns Button (RIGHT)
+    auto addAcornsButton = std::make_shared<TweakableButton>(
+        10019,
+        "Add Acorns"
+    );
+    addAcornsButton->SetFixedWidth(columnWidth);
+    addAcornsButton->SetRenderInline(true);  // Inline with money button
+    addAcornsButton->SetOnClickCallback([acornsAmount]() {
+        int amount = acornsAmount->GetValue();
+        LOG_INFO("[DevMenu] Adding " << amount << " acorns to player balance");
+        
+        if (Acorns::AddToBalance(amount)) {
+            LOG_INFO("[DevMenu] Successfully added " << amount << " acorns!");
+        } else {
+            LOG_ERROR("[DevMenu] Failed to add acorns - check if player profile is loaded");
+        }
+    });
+    RegisterTweakable(addAcornsButton);
+    currencyFolder->AddChild(addAcornsButton);
+    
+    // Register and add currency folder to mod
+    RegisterTweakable(currencyFolder);
+    mod->AddChild(currencyFolder);
 
     RegisterTweakable(mod);
     m_rootFolders.push_back(mod);

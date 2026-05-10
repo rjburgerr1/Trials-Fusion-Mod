@@ -2,6 +2,7 @@
 #include "leaderboard_direct.h"
 #include "logging.h"
 #include "Keybindings.h"
+#include "base-address.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
@@ -191,6 +192,12 @@ namespace LeaderboardDirect {
     // INITIALIZATION
     // ============================================================
     bool Initialize(DWORD_PTR baseAddress) {
+        // Check if Steam version - skip initialization until addresses are mapped
+        if (BaseAddress::IsSteamVersion()) {
+            LOG_WARNING("[LB - Direct] Steam version detected - leaderboard direct disabled (addresses not yet mapped)");
+            return false;
+        }
+
         s_baseAddress = baseAddress;
         
         LOG_VERBOSE("[LB - Direct] Initializing LeaderboardDirect Hook...");

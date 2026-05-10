@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <vector>
 #include <fstream>
+#include <atomic>
 #ifdef min
 #undef min
 #endif
@@ -22,23 +23,32 @@
 #include "actionscript.h"
 #include "logging.h"
 #include "respawn.h"
+#include "limits.h"
 #include "camera.h"
 #include "multiplayer.h"
 #include "keybindings.h"
+#include "acorns.h"
+#include "money.h"
+#include "host-join.h"
+#include "base-address.h"
+#include "prevent-finish.h"
+#include "gamemode.h"
 #include "bike-swap.h"
 #include <MinHook.h>
 
 // FORWARD DECLARATIONS
 DWORD WINAPI KeyMonitorThread(LPVOID lpParam);
+static bool StartKeyMonitorThread(DWORD_PTR baseAddress);
 
 // GLOBAL STATE
+std::atomic<bool> g_isInitialized(false);
+std::atomic<HMODULE> g_moduleHandle(nullptr);
 bool isRunning = false;
 bool isShuttingDown = false; // Prevent re-entry during shutdown
 HANDLE g_hKeyMonitorThread = NULL;
 int g_monitorCount = 0;
 HMONITOR g_monitors[3] = { NULL };
 bool g_consolePositioned = false;
-HMODULE g_hModule = NULL; // Store our own module handle for self-unloading
 
 // MACROS
 #define KeyPress(...) (GetAsyncKeyState(__VA_ARGS__) & 0x1)
@@ -115,7 +125,7 @@ void OnTrackUpdate(const Tracks::TrackInfo& trackInfo)
 }
 
 // SHUTDOWN
-extern "C" __declspec(dllexport) void ShutdownPayload()
+void ShutdownTFPayload()
 {
     // Prevent re-entry
     if (isShuttingDown) {
@@ -123,7 +133,7 @@ extern "C" __declspec(dllexport) void ShutdownPayload()
     }
     isShuttingDown = true;
 
-    LOG_VERBOSE("\n[TFPayload] Shutting down for rebuild (Automated Trigger)...");
+    LOG_VERBOSE("\n[TFPayload] Shutting down...");
 
     isRunning = false;
 
@@ -153,16 +163,292 @@ extern "C" __declspec(dllexport) void ShutdownPayload()
     Respawn::Shutdown();
     Camera::Shutdown();
     Multiplayer::Shutdown();
-    Keybindings::Shutdown();
+    HostJoin::Shutdown();
     BikeSwap::Shutdown();
+    Keybindings::Shutdown();
 
     LOG_VERBOSE("[Main] All resources cleaned up.");
+    
+    g_isInitialized.store(false);
 }
 
-// PAYLOAD INITIALIZATION (called when hot-loaded)
-extern "C" __declspec(dllexport) void PayloadInit()
+// Exported for compatibility with old ProxyDLL
+extern "C" __declspec(dllexport) void ShutdownPayload()
 {
-    LOG_INFO("\n[TFPayload] PayloadInit called - Starting payload operations...");
+    ShutdownTFPayload();
+}
+
+// C-style function for safe DevMenuSync call (no C++ objects with destructors)
+static bool TrySyncFromGame() {
+    __try {
+        DevMenuSync::SyncFromGame();
+        return true;  // Success
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER) {
+        return false;  // Failed
+    }
+}
+
+// Global crash tracking
+static volatile bool g_inCriticalSection = false;
+static volatile const char* g_lastModule = nullptr;
+
+// SEH wrapper for initialization calls - Pure C version to avoid C2712
+typedef bool (*InitFunc)(void* userData);
+
+// Pure C logging functions (no C++ objects)
+static void LogCrash(const char* moduleName, DWORD exceptionCode) {
+    char buffer[256];
+    sprintf_s(buffer, sizeof(buffer), "[CRASH] %s crashed with exception 0x%08X\n", moduleName, exceptionCode);
+    OutputDebugStringA(buffer);
+}
+
+static void LogInitFailed(const char* moduleName) {
+    char buffer[256];
+    sprintf_s(buffer, sizeof(buffer), "[INIT FAILED] %s returned false\n", moduleName);
+    OutputDebugStringA(buffer);
+}
+
+// Log init start immediately to crash trace file
+static void LogInitStart(const char* moduleName) {
+    char buffer[256];
+    sprintf_s(buffer, sizeof(buffer), "[INIT START] %s", moduleName);
+    Logging::WriteImmediate(buffer);
+}
+
+static void LogInitEnd(const char* moduleName, bool success) {
+    char buffer[256];
+    sprintf_s(buffer, sizeof(buffer), "[INIT END] %s - %s", moduleName, success ? "OK" : "FAILED");
+    Logging::WriteImmediate(buffer);
+}
+
+static bool SafeInitCall(const char* moduleName, InitFunc func, void* userData) {
+    // Log BEFORE attempting init - this will be the last line if we crash
+    LogInitStart(moduleName);
+    
+    g_lastModule = moduleName;
+    g_inCriticalSection = true;
+    
+    bool result = false;
+    bool crashed = false;
+    DWORD exceptionCode = 0;
+    
+    __try {
+        result = func(userData);
+        g_inCriticalSection = false;
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER) {
+        exceptionCode = GetExceptionCode();
+        crashed = true;
+        g_inCriticalSection = false;
+    }
+    
+    // Log AFTER __try block using pure C functions
+    if (crashed) {
+        LogCrash(moduleName, exceptionCode);
+        return false;
+    } else if (!result) {
+        LogInitFailed(moduleName);
+    }
+    
+    // Log successful completion
+    LogInitEnd(moduleName, result);
+    
+    return result;
+}
+
+// Helper struct to pass baseAddress to init functions
+struct InitContext {
+    DWORD_PTR baseAddress;
+};
+
+// C-style init functions for SafeInitCall (to avoid C2712 error with lambdas)
+static bool Init_Tracks(void* userData) {
+    Tracks::SetLoggingEnabled(true);
+    Tracks::SetUpdateCallback(OnTrackUpdate);
+    if (Tracks::Initialize()) {
+        LOG_VERBOSE("[TFPayload] Track metadata hook initialized successfully!");
+        if (!Tracks::LoadSearchTerms("F:/search_terms.txt")) {
+            LOG_VERBOSE("[TFPayload] Could not load F:/search_terms.txt, using default search terms");
+        }
+        return true;
+    }
+    return false;
+}
+
+static bool Init_LeaderboardScanner(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    LeaderboardScanner::Initialize(ctx->baseAddress);
+    LOG_VERBOSE("[TFPayload] Leaderboard scanner initialized");
+    return true;
+}
+
+static bool Init_LeaderboardDirect(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    LeaderboardDirect::Initialize(ctx->baseAddress);
+    LOG_VERBOSE("[TFPayload] Leaderboard direct initialized");
+    return true;
+}
+
+static bool Init_Pause(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    Pause::Initialize(ctx->baseAddress);
+    LOG_VERBOSE("[TFPayload] Pause system initialized");
+    return true;
+}
+
+static bool Init_ActionScript(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    if (ActionScript::Initialize(ctx->baseAddress)) {
+        LOG_VERBOSE("[TFPayload] ActionScript messaging system initialized");
+        return true;
+    }
+    return false;
+}
+
+static bool Init_Respawn(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return Respawn::Initialize(ctx->baseAddress);
+}
+
+static bool Init_Camera(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return Camera::Initialize(ctx->baseAddress);
+}
+
+static bool Init_Multiplayer(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return Multiplayer::Initialize(ctx->baseAddress);
+}
+
+static bool Init_HostJoin(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return HostJoin::Initialize(ctx->baseAddress);
+}
+
+static bool Init_Acorns(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return Acorns::Initialize(ctx->baseAddress);
+}
+
+static bool Init_Money(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return Money::Initialize(ctx->baseAddress);
+}
+
+static bool Init_PreventFinish(void* userData) {
+    PreventFinish::Initialize();
+    LOG_VERBOSE("[TFPayload] Prevent-finish system initialized");
+    return true;
+}
+
+static bool Init_GameMode(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return GameMode::Initialize(ctx->baseAddress);
+}
+
+static bool Init_BikeSwap(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return BikeSwap::Initialize(ctx->baseAddress);
+}
+
+static bool Init_Logging(void* userData) {
+    Logging::Initialize();
+    return true;
+}
+
+static bool Init_Keybindings(void* userData) {
+    Keybindings::Initialize();
+    return true;
+}
+
+static bool Init_Rendering(void* userData) {
+    if (!Rendering::Initialize()) {
+        LOG_ERROR("[TFPayload] Failed to initialize rendering system!");
+        LOG_WARNING("[TFPayload] Dev menu will not be available");
+        return false;
+    }
+    LOG_VERBOSE("[TFPayload] Rendering system connected to ProxyDLL");
+    return true;
+}
+
+static bool Init_DevMenu(void* userData) {
+    g_DevMenu = new DevMenu();
+    g_DevMenu->Initialize();
+    LOG_VERBOSE("[TFPayload] ImGui Dev Menu initialized");
+    return true;
+}
+
+static bool Init_DevMenuSync(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    if (!DevMenuSync::Initialize(ctx->baseAddress)) {
+        LOG_ERROR("[TFPayload] Failed to initialize DevMenu sync!");
+        LOG_WARNING("[TFPayload] Changes in menu will not affect game!");
+        return false;
+    }
+    
+    LOG_VERBOSE("[TFPayload] DevMenuSync initialized");
+    
+    // SAFETY: Call sync in separate C-style function with exception handling
+    if (TrySyncFromGame()) {
+        LOG_VERBOSE("[TFPayload] Initial sync complete");
+    } else {
+        LOG_WARNING("[TFPayload] Initial DevMenu sync failed (game not ready yet)");
+        LOG_WARNING("[TFPayload] Sync will retry when menu opens");
+    }
+    
+    LOG_VERBOSE("[TFPayload] Dev Menu ready! (Press HOME to toggle)");
+    return true;
+}
+
+static bool StartKeyMonitorThread(DWORD_PTR baseAddress)
+{
+    if (g_hKeyMonitorThread != NULL) {
+        LOG_VERBOSE("[TFPayload] Key monitor thread already running");
+        return true;
+    }
+
+    DWORD threadId;
+    g_hKeyMonitorThread = CreateThread(0, 0, (LPTHREAD_START_ROUTINE)KeyMonitorThread, (LPVOID)baseAddress, 0, &threadId);
+
+    if (g_hKeyMonitorThread == NULL) {
+        LOG_ERROR("[TFPayload] Failed to create key monitor thread!");
+        return false;
+    }
+
+    LOG_VERBOSE("[TFPayload] Key monitor thread created successfully!");
+    return true;
+}
+
+// Helper to attach to existing console
+void AttachToExistingConsole()
+{
+#ifdef RELEASE_AUTOLOAD_MODE
+    // In RELEASE_AUTOLOAD_MODE, don't attach to console
+    return;
+#endif
+    // Re-attach stdout/stderr to the existing console
+    FILE* fDummy;
+    freopen_s(&fDummy, "CONOUT$", "w", stdout);
+    freopen_s(&fDummy, "CONOUT$", "w", stderr);
+    freopen_s(&fDummy, "CONIN$", "r", stdin);
+    
+    // Clear error state and sync with C++ streams
+    std::cout.clear();
+    std::cerr.clear();
+    std::cin.clear();
+}
+
+// PAYLOAD INITIALIZATION
+void InitializeTFPayload()
+{
+    // FIRST: Attach to the existing console created by ProxyDLL
+    AttachToExistingConsole();
+    
+    // Write crash trace IMMEDIATELY - this works even before Logging::Initialize()
+    Logging::WriteImmediate("[STARTUP] InitializeTFPayload() entered");
+    
+    LOG_INFO("\n[TFPayload] Starting payload initialization...");
 
     if (isRunning) {
         LOG_VERBOSE("[TFPayload] Already running, skipping init");
@@ -170,6 +456,7 @@ extern "C" __declspec(dllexport) void PayloadInit()
     }
 
     isRunning = true;
+    isShuttingDown = false;
 
     // Initialize MinHook
     MH_STATUS mhStatus = MH_Initialize();
@@ -178,125 +465,110 @@ extern "C" __declspec(dllexport) void PayloadInit()
         return;
     }
     LOG_VERBOSE("[TFPayload] MinHook initialized successfully");
+    
+    // Log all MinHook hooks for debugging conflicts
+    FILE* hookLog = nullptr;
+    fopen_s(&hookLog, "tfpayload_hooks.log", "w");
+    if (hookLog) {
+        fprintf(hookLog, "TFPayload Hook Addresses (MinHook)\n");
+        fprintf(hookLog, "=====================================\n\n");
+        fprintf(hookLog, "NOTE: These hooks will be installed as modules initialize below.\n");
+        fprintf(hookLog, "Check this file again after initialization completes.\n\n");
+        fclose(hookLog);
+    }
 
     const wchar_t* processName = L"trials_fusion.exe";
     const wchar_t* moduleName = L"trials_fusion.exe";
     
-    DWORD_PTR baseAddress = GetModuleBaseAddress(GetProcessID(processName), moduleName);
-    if (baseAddress == 0) {
+    DWORD_PTR rawBaseAddress = GetModuleBaseAddress(GetProcessID(processName), moduleName);
+    if (rawBaseAddress == 0) {
         LOG_ERROR("[TFPayload] Could not retrieve base address!");
         return;
     }
 
-    LOG_VERBOSE("[TFPayload] Game Base Address: " << baseAddress);
-
-    // Initialize Hooks
-    Tracks::SetLoggingEnabled(true);
-    Tracks::SetUpdateCallback(OnTrackUpdate);
-    if (Tracks::Initialize()) {
-        LOG_VERBOSE("[TFPayload] Track metadata hook initialized successfully!");
-        if (!Tracks::LoadSearchTerms("F:/search_terms.txt")) {
-            LOG_VERBOSE("[TFPayload] Could not load F:/search_terms.txt, using default search terms");
-        }
-    } else {
-        LOG_ERROR("[TFPayload] Failed to initialize track hooks!");
-    }
-
-    // Initialize leaderboard scanner
-    LeaderboardScanner::Initialize(baseAddress);
-    LOG_VERBOSE("[TFPayload] Leaderboard scanner initialized");
-
-    // Initialize leaderboard direct (patch-based, UI-independent)
-    LeaderboardDirect::Initialize(baseAddress);
-    LOG_VERBOSE("[TFPayload] Leaderboard direct initialized");
-
-    // Initialize pause system
-    Pause::Initialize(baseAddress);
-    LOG_VERBOSE("[TFPayload] Pause system initialized");
-
-    // Initialize ActionScript messaging system
-    if (ActionScript::Initialize()) {
-        LOG_VERBOSE("[TFPayload] ActionScript messaging system initialized");
-    } else {
-        LOG_ERROR("[TFPayload] Failed to initialize ActionScript messaging!");
-    }
-
-    // Initialize respawn system
-    if (Respawn::Initialize(baseAddress)) {
-        LOG_VERBOSE("[TFPayload] Respawn system initialized");
-    } else {
-        LOG_ERROR("[TFPayload] Failed to initialize respawn system!");
-    }
-
-    // Initialize camera system
-    if (Camera::Initialize(baseAddress)) {
-        LOG_VERBOSE("[TFPayload] Camera system initialized");
-    } else {
-        LOG_ERROR("[TFPayload] Failed to initialize camera system!");
-    }
+    // NOTE: Don't use GetCorrectedBaseAddress - it incorrectly adds 0x8192 offset
+    // The RVA constants already handle version differences
+    DWORD_PTR baseAddress = rawBaseAddress;
     
-    // Initialize multiplayer monitoring (Phase 1)
-    if (Multiplayer::Initialize(baseAddress)) {
-        LOG_VERBOSE("[TFPayload] Multiplayer monitoring initialized (Phase 1)");
-    } else {
-        LOG_ERROR("[TFPayload] Failed to initialize multiplayer monitoring!");
-    }
+    // Detect and log game version
+    bool isSteam = BaseAddress::IsSteamVersion();
+    Logging::WriteImmediate(isSteam ? "[VERSION] Steam version detected" : "[VERSION] Uplay version detected");
+    LOG_VERBOSE("[TFPayload] Game Base Address: 0x" << std::hex << baseAddress << std::dec);
+    LOG_VERBOSE("[TFPayload] Version: " << (isSteam ? "Steam" : "Uplay"));
+
+    // Initialize logging FIRST so crash tracing works
+    SafeInitCall("Logging", Init_Logging, nullptr);
     
-    // Initialize bike swap system
-    if (BikeSwap::Initialize(baseAddress)) {
-        LOG_VERBOSE("[TFPayload] Bike swap system initialized");
-    } else {
-        LOG_ERROR("[TFPayload] Failed to initialize bike swap system!");
-    }
+    LOG_VERBOSE("[TFPayload] Beginning module initialization with crash protection...");
     
-    // Initialize logging system
-    Logging::Initialize();
+    // Create context for passing baseAddress to init functions
+    InitContext ctx;
+    ctx.baseAddress = baseAddress;
     
-    // Initialize keybindings system BEFORE dev menu
-    Keybindings::Initialize();
+    SafeInitCall("Tracks", Init_Tracks, nullptr);
+    SafeInitCall("LeaderboardScanner", Init_LeaderboardScanner, &ctx);
+    SafeInitCall("LeaderboardDirect", Init_LeaderboardDirect, &ctx);
+    SafeInitCall("Pause", Init_Pause, &ctx);
+    SafeInitCall("ActionScript", Init_ActionScript, &ctx);
+    SafeInitCall("Respawn", Init_Respawn, &ctx);
+    SafeInitCall("Camera", Init_Camera, &ctx);
+    SafeInitCall("Multiplayer", Init_Multiplayer, &ctx);
+    SafeInitCall("HostJoin", Init_HostJoin, &ctx);
+    SafeInitCall("Acorns", Init_Acorns, &ctx);
+    SafeInitCall("Money", Init_Money, &ctx);
+    SafeInitCall("PreventFinish", Init_PreventFinish, nullptr);
+    SafeInitCall("GameMode", Init_GameMode, &ctx);
+    SafeInitCall("BikeSwap", Init_BikeSwap, &ctx);
+    SafeInitCall("Keybindings", Init_Keybindings, nullptr);
 
     // Wait a moment to ensure ProxyDLL has hooked D3D11
     LOG_VERBOSE("[TFPayload] Waiting for ProxyDLL to initialize D3D11...");
     Sleep(400);
 
     // Initialize rendering system (connects to ProxyDLL's hook)
-    if (!Rendering::Initialize()) {
-        LOG_ERROR("[TFPayload] Failed to initialize rendering system!");
-        LOG_WARNING("[TFPayload] Dev menu will not be available");
-    } else {
-        LOG_VERBOSE("[TFPayload] Rendering system connected to ProxyDLL");
-        
-        // NOW initialize ImGui dev menu AFTER rendering is ready
-        g_DevMenu = new DevMenu();
-        g_DevMenu->Initialize();
-        LOG_VERBOSE("[TFPayload] ImGui Dev Menu initialized");
-        
-        // Initialize DevMenuSync (connects ImGui to game memory)
-        if (!DevMenuSync::Initialize()) {
-            LOG_ERROR("[TFPayload] Failed to initialize DevMenu sync!");
-            LOG_WARNING("[TFPayload] Changes in menu will not affect game!");
-        } else {
-            LOG_VERBOSE("[TFPayload] DevMenuSync initialized");
-            
-            // Do initial sync from game to UI
-            DevMenuSync::SyncFromGame();
-            LOG_VERBOSE("[TFPayload] Initial sync complete");
-        }
-        
-        LOG_VERBOSE("[TFPayload] Dev Menu ready! (Press HOME to toggle)");
-    }
+    SafeInitCall("Rendering", Init_Rendering, nullptr);
+    
+    // Initialize DevMenu with crash protection
+    SafeInitCall("DevMenu", Init_DevMenu, nullptr);
+    
+    // Initialize DevMenuSync with crash protection
+    SafeInitCall("DevMenuSync", Init_DevMenuSync, &ctx);
 
-    DWORD threadId;
-    g_hKeyMonitorThread = CreateThread(0, 0, (LPTHREAD_START_ROUTINE)KeyMonitorThread, (LPVOID)baseAddress, 0, &threadId);
-
-    if (g_hKeyMonitorThread == NULL) {
-        LOG_ERROR("[TFPayload] Failed to create key monitor thread!");
+    if (!StartKeyMonitorThread(baseAddress)) {
         return;
     }
-
-    LOG_VERBOSE("[TFPayload] Key monitor thread created successfully!");
     
     LOG_INFO("[TFPayload] === INITIALIZATION COMPLETE ===");
+}
+
+extern "C" __declspec(dllexport) void ManualInitialize();
+
+// Export for ProxyDLL (backward compatibility)
+extern "C" __declspec(dllexport) void PayloadInit()
+{
+    ManualInitialize();
+}
+
+// Exports for proxy DLL to call
+extern "C" __declspec(dllexport) void ManualInitialize()
+{
+    if (!g_isInitialized.exchange(true))
+    {
+        InitializeTFPayload();
+    }
+}
+
+extern "C" __declspec(dllexport) void ManualShutdown()
+{
+    if (g_isInitialized.exchange(false))
+    {
+        ShutdownTFPayload();
+    }
+}
+
+extern "C" __declspec(dllexport) bool IsInitialized()
+{
+    return g_isInitialized.load();
 }
 
 // HOTKEY STATE TRACKING
@@ -353,6 +625,7 @@ void PrintHelpText()
     std::string Add10MinuteKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::Add10Minute));
     std::string ResetTimeKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ResetTime));
     std::string ToggleLimitValidationKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleLimitValidation));
+    std::string ToggleConsoleKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleConsole));
     // Leaderboard Scanner
     std::string ScanLeaderboardByIDKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ScanLeaderboardByID));
     std::string ScanCurrentLeaderboardKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ScanCurrentLeaderboard));
@@ -381,67 +654,66 @@ void PrintHelpText()
     
     LOG_INFO("  TRIALS FUSION MOD - HOTKEY CONTROLS");
     LOG_INFO("========================================");
-    LOG_INFO("Help Commands:");
-    LOG_INFO("\t" << ClearConsoleKey << "\t\t\t\t- Clear debug console");
-    LOG_INFO("\t" << ShowHelpTextKey << "\t\t\t\t- Show this help text");
-    LOG_INFO("\t" << ToggleVerboseLoggingKey << "\t\t\t\t- Toggle verbose logging (ON/OFF)");
-    LOG_INFO("\tEND\t\t\t\t- Shutdown and unload TFPayload.dll(automatic)");
-    LOG_INFO("\tF1\t\t\t\t- Reload TFPayload.dll (load/unload toggle)");
-    LOG_INFO("\t" << ToggleDevMenuKey << "\t\t\t\t- Open DevMenu");
-    LOG_INFO("\tK\t\t\t\t- Open Keybindings Menu");
+    LOG_INFO("\tHelp Commands");
+    LOG_INFO("\t" << ClearConsoleKey << "\t\t\t- Clear debug console");
+    LOG_INFO("\t" << ShowHelpTextKey << "\t\t\t- Show this help text");
+    LOG_INFO("\t" << ToggleVerboseLoggingKey << "\t\t\t- Toggle verbose logging (ON/OFF)");
+    LOG_INFO("\tEND\t\t\t- Shutdown and unload TFPayload.dll");
+    LOG_INFO("\tF1\t\t\t- Reload TFPayload.dll (load/unload toggle - dev mode only)");
+    LOG_INFO("\t" << ToggleDevMenuKey << "\t\t\t- Open DevMenu");
+    LOG_INFO("\tK\t\t\t- Open Keybindings Menu");
+    LOG_INFO("\t" << ToggleConsoleKey << "\t\t\t- Toggle ImGui Console");
     LOG_INFO("");
-    LOG_INFO("Track Functions:");
-    LOG_INFO("\t" << InstantFinishKey << "\t\t\t\t- Instant Pass Track");
-    LOG_INFO("\t" << CycleHUDKey << "\t\t\t\t- Cycle HUD Visibility in Track/Replay");
-    LOG_INFO("\t" << TogglePauseKey << "\t\t\t\t- Toggle time/physics ON/OFF");
-    LOG_INFO("\t" << Add60SecondsKey << "\t\t\t\t- Add 1 Minute to Timer");
-    LOG_INFO("\t" << Subtract60SecondsKey << "\t\t\t\t- Subtract 1 Minute from Timer");
-    LOG_INFO("\t" << Add10MinuteKey << "\t\t\t\t- Add 10 minutes to Timer");
-    LOG_INFO("\t" << Add100FaultsKey << "\t\t\t\t- Add 100 faults to fault-counter");
-    LOG_INFO("\t" << Subtract100FaultsKey << "\t\t\t\t- Subtract 100 faults from fault-counter");
-    LOG_INFO("\t" << ResetFaultsKey << "\t\t\t\t- Reset Faults to 0");
-    LOG_INFO("\t" << IncrementFaultKey << "\t\t\t\t- Add 1 fault to fault-counter");
-    LOG_INFO("\t" << ToggleLimitValidationKey << "\t\t\t\t- Toggle Fault/Time Limits");
+    LOG_INFO("\tTrack Functions");
+    LOG_INFO("\t" << InstantFinishKey << "\t\t\t- Instant Pass Track");
+    LOG_INFO("\t" << CycleHUDKey << "\t\t\t- Cycle HUD Visibility in Track/Replay");
+    LOG_INFO("\t" << TogglePauseKey << "\t\t\t- Toggle time/physics ON/OFF");
+    LOG_INFO("\t" << Add60SecondsKey << "\t\t\t- Add 1 Minute to Timer");
+    LOG_INFO("\t" << Subtract60SecondsKey << "\t\t\t- Subtract 1 Minute from Timer");
+    LOG_INFO("\t" << Add10MinuteKey << "\t\t\t- Add 10 minutes to Timer");
+    LOG_INFO("\t" << Add100FaultsKey << "\t\t\t- Add 100 faults to fault-counter");
+    LOG_INFO("\t" << Subtract100FaultsKey << "\t\t\t- Subtract 100 faults from fault-counter");
+    LOG_INFO("\t" << ResetFaultsKey << "\t\t\t- Reset Faults to 0");
+    LOG_INFO("\t" << IncrementFaultKey << "\t\t\t- Add 1 fault to fault-counter");
+    LOG_INFO("\t" << ToggleLimitValidationKey << "\t\t\t- Toggle Fault/Time Limits");
     LOG_INFO("");
-    LOG_INFO("Leaderboard:");
-    LOG_INFO("\t" << ScanLeaderboardByIDKey << "\t\t\t\t- Scan current leaderboard (friends/overall/myscore) for single track by ID (default: 221120)");
-    LOG_INFO("\t" << ScanCurrentLeaderboardKey << "\t\t\t\t- Scan current open leaderboard");
-    LOG_INFO("\t" << TestFetchTrackIDKey << "\t\t\t\t- Test fetch track ID 221120");
+    LOG_INFO("\tLeaderboard");
+    LOG_INFO("\t" << ScanLeaderboardByIDKey << "\t\t\t- Scan current leaderboard (friends/overall/myscore) for single track by ID (default: 221120)");
+    LOG_INFO("\t" << ScanCurrentLeaderboardKey << "\t\t\t- Scan current open leaderboard");
+    LOG_INFO("\t" << TestFetchTrackIDKey << "\t\t\t- Test fetch track ID 221120");
     LOG_INFO("");
-    LOG_INFO("Track Central:");
-    LOG_INFO("\t" << StartAutoScrollKey << "\t\t\t\t- Start auto-scroll search-pages");
-    LOG_INFO("\t" << KillswitchKey << "\t\t\t\t- KILLSWITCH (Emergency stop ALL operations)");
-    LOG_INFO("\t" << CycleSearchKey << "\t\t\t\t- Cycle through searches: Ninja -> Mountain -> Speed");
-    LOG_INFO("\t" << DecreaseScrollDelayKey << "\t\t\t\t- Decrease scroll delay (-200ms)");
-    LOG_INFO("\t" << IncreaseScrollDelayKey << "\t\t\t\t- Increase scroll delay (+200ms)");
-    LOG_VERBOSE("  NOTE: All tracks auto-saved to F:/tracks_data.csv");
+    LOG_INFO("\tTrack Central");
+    LOG_INFO("\t" << StartAutoScrollKey << "\t\t\t- Start auto-scroll search-pages");
+    LOG_INFO("\t" << KillswitchKey << "\t\t\t- KILLSWITCH (Emergency stop ALL operations)");
+    LOG_INFO("\t" << CycleSearchKey << "\t\t\t- Cycle through searches: Ninja -> Mountain -> Speed");
+    LOG_INFO("\t" << DecreaseScrollDelayKey << "\t\t\t- Decrease scroll delay (-200ms)");
+    LOG_INFO("\t" << IncreaseScrollDelayKey << "\t\t\t- Increase scroll delay (+200ms)");
+    LOG_VERBOSE("  NOTE: All tracks auto-saved to datapack/tracks_data.csv");
     LOG_INFO("");
-    LOG_INFO("Checkpoints:");
-    LOG_INFO("\t" << RespawnAtCheckpointKey << "\t\t\t\t- Respawn at current checkpoint");
-    LOG_INFO("\t" << RespawnNextCheckpointKey << "\t\t\t\t- Respawn at next checkpoint");
-    LOG_INFO("\t" << RespawnPrevCheckpointKey << "\t\t\t\t- Respawn at previous checkpoint");
-    LOG_INFO("\t" << RespawnForward5Key << "\t\t\t\t- Respawn 5 checkpoints ahead");
+    LOG_INFO("\tCheckpoints");
+    LOG_INFO("\t" << RespawnAtCheckpointKey << "\t\t\t- Respawn at current checkpoint");
+    LOG_INFO("\t" << RespawnNextCheckpointKey << "\t\t\t- Respawn at next checkpoint");
+    LOG_INFO("\t" << RespawnPrevCheckpointKey << "\t\t\t- Respawn at previous checkpoint");
+    LOG_INFO("\t" << RespawnForward5Key << "\t\t\t- Respawn 5 checkpoints ahead");
     LOG_INFO("");
-    LOG_INFO("Multiplayer(Phase 1):");
-    LOG_INFO("\t" << SaveMultiplayerLogsKey << "\t\t\t\t- Save all multiplayer logs (sessions, packets, stats)");
-    LOG_INFO("\t" << CaptureSessionStateKey << "\t\t\t\t- Capture current session state");
-    LOG_VERBOSE("Logs: F:/mp_session_log.txt, F:/mp_sessions.csv, F:/mp_packets.csv");
+    LOG_INFO("\tMultiplayer(Phase 1)");
+    LOG_INFO("\t" << SaveMultiplayerLogsKey << "\t\t\t- Save all multiplayer logs (sessions, packets, stats)");
+    LOG_INFO("\t" << CaptureSessionStateKey << "\t\t\t- Capture current session state");
+    LOG_VERBOSE("Logs: datapack/mp_session_log.txt, datapack/mp_sessions.csv, datapack/mp_packets.csv");
     LOG_INFO("");
-    LOG_INFO("Dev Menu:");
-    LOG_INFO("\t" << DumpTweakablesKey << "\t\t\t\t- Dump tweakables data (see what's available)");
+    LOG_INFO("\tDev Menu");
+    LOG_INFO("\t" << DumpTweakablesKey << "\t\t\t- Dump tweakables data (see what's available)");
     LOG_INFO("");
-    LOG_INFO("ACTIONSCRIPT COMMANDS:");
-    LOG_INFO("\t" << FullCountdownSequenceKey << "\t\t\t\t- Full countdown sequence (3, 2, 1, GO, Ready!) with auto-timing");
+    LOG_INFO("\tActionscript Commands");
+    LOG_INFO("\t" << FullCountdownSequenceKey << "\t\t\t- Full countdown sequence (3, 2, 1, GO, Ready!) with auto-timing");
+    LOG_INFO("\t" << ToggleLoadScreen << "\t\t\t- Toggle loading screen");
     LOG_INFO("");
-    LOG_INFO("ACTIONSCRIPT/FLASH COMMAND MESSAGING:");
-    LOG_INFO("\t" << ToggleLoadScreen << "\t\t\t\t- Toggle loading screen");
+    LOG_INFO("\tBIKE SWAP (Runtime Bike Changing)");
+    LOG_INFO("\t" << Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::SwapPrevBike)) << "\t\t\t- Cycle to previous bike");
+    LOG_INFO("\t" << Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::SwapNextBike)) << "\t\t\t- Cycle to next bike");
+    LOG_INFO("\t" << Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::DebugBikeInfo)) << "\t\t\t- Debug dump bike state");
     LOG_INFO("");
-    LOG_INFO("BIKE SWAP (Runtime Bike Changing):");
-    LOG_INFO("\t[\t\t\t\t- Cycle to previous bike");
-    LOG_INFO("\t]\t\t\t\t- Cycle to next bike");
-    LOG_INFO("\t\\\t\t\t\t- Debug dump bike state");
-    LOG_INFO("");
-    LOG_VERBOSE("Results: F:/tracks_data.csv, F:/leaderboard_scans.txt & feed_data.csv");
+    LOG_VERBOSE("Results: datapack/tracks_data.csv, datapack/leaderboard_scans.txt & feed_data.csv");
 }
 
 // HOTKEY HANDLERS
@@ -586,12 +858,8 @@ void HandleInstantFinish()
     if (Keybindings::IsActionPressed(Keybindings::Action::InstantFinish)) {
         std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::InstantFinish));
         LOG_VERBOSE("");
-        LOG_VERBOSE("[" << keyName << "] Calling HandleRaceFinish (proper race finish flow)...");
-        if (ActionScript::CallHandleRaceFinish()) {
-            LOG_VERBOSE("[" << keyName << "] HandleRaceFinish called successfully!");
-        } else {
-            LOG_ERROR("[" << keyName << "] HandleRaceFinish failed");
-        }
+        LOG_VERBOSE("[" << keyName << "] Instant Finish button pressed - calling SafeInstantFinish...");
+        PreventFinish::SafeInstantFinish();
         LOG_VERBOSE("");
     }
 }
@@ -614,20 +882,26 @@ void HandleShowHelp()
 void HandleClearConsole()
 {
     if (Keybindings::IsActionPressed(Keybindings::Action::ClearConsole)) {
+#ifndef RELEASE_AUTOLOAD_MODE
         system("cls");
+#endif
         std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ClearConsole));
         LOG_VERBOSE("[" << keyName << "] Debug console cleared");
+        // Also clear the ImGui console
+        Logging::ClearConsole();
     }
 }
 
 void HandleHomeImGuiMenu()
 {
     if (Keybindings::IsActionPressed(Keybindings::Action::ToggleDevMenu)) {
+        std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleDevMenu));
+        LOG_VERBOSE("[" << keyName << "] Toggle DevMenu key pressed!");
         if (g_DevMenu) {
             g_DevMenu->Toggle();
-            LOG_VERBOSE("[HOME] Custom ImGui Dev Menu " << (g_DevMenu->IsVisible() ? "OPENED" : "CLOSED"));
+            LOG_VERBOSE("[" << keyName << "] Custom ImGui Dev Menu " << (g_DevMenu->IsVisible() ? "OPENED" : "CLOSED"));
         } else {
-            LOG_ERROR("[HOME] Custom ImGui Dev Menu not initialized!");
+            LOG_ERROR("[" << keyName << "] Custom ImGui Dev Menu not initialized!");
         }
     }
 }
@@ -644,6 +918,54 @@ void HandleKeybindingsMenu()
         }
     }
 }
+
+void HandleDebugGameState()
+{
+    if (Keybindings::IsActionPressed(Keybindings::Action::DebugGameState)) {
+        GameMode::DebugPrintState();
+    }
+}
+
+void HandleToggleLimitValidation()
+{
+    if (Keybindings::IsActionPressed(Keybindings::Action::ToggleLimitValidation)) {
+        std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleLimitValidation));
+        
+        // Check current state (both should be in sync)
+        bool faultDisabled = Limits::IsFaultValidationDisabled();
+        bool timeDisabled = Limits::IsTimeValidationDisabled();
+        
+        if (faultDisabled && timeDisabled) {
+            // Re-enable both limits
+            LOG_INFO("");
+            LOG_INFO("[" << keyName << "] === ENABLING FAULT/TIME LIMITS ===");
+            if (Limits::EnableAllLimitValidation()) {
+                LOG_INFO("[" << keyName << "] Fault/Time limits are now ACTIVE");
+            } else {
+                LOG_ERROR("[" << keyName << "] Failed to enable limit validation");
+            }
+            LOG_INFO("");
+        } else {
+            // Disable both limits
+            LOG_INFO("");
+            LOG_INFO("[" << keyName << "] === DISABLING FAULT/TIME LIMITS ===");
+            if (Limits::DisableAllLimitValidation()) {
+                LOG_INFO("[" << keyName << "] Fault/Time limits are now BYPASSED");
+            } else {
+                LOG_ERROR("[" << keyName << "] Failed to disable limit validation");
+            }
+            LOG_INFO("");
+        }
+    }
+}
+
+void HandleToggleConsole()
+{
+    if (Keybindings::IsActionPressed(Keybindings::Action::ToggleConsole)) {
+        Logging::ToggleConsole();
+    }
+}
+
 // Helper function to check if game window has focus
 static bool IsGameWindowFocused()
 {
@@ -686,32 +1008,8 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         }
         
         if (KeyPress(VK_END)) {
-            LOG_INFO("[END] Shutting down and unloading...");
-            
-            // First, trigger shutdown which will clean up everything
-            ShutdownPayload();
-            
-            // Now that shutdown is complete, schedule the DLL unload
-            // We need to do this on a separate thread because we can't unload ourselves
-            if (g_hModule != NULL) {
-                LOG_VERBOSE("[TFPayload] Scheduling DLL unload...");
-                
-                // Create a thread that will unload the DLL
-                HANDLE hUnloadThread = CreateThread(NULL, 0, [](LPVOID param) -> DWORD {
-                    HMODULE hMod = (HMODULE)param;
-
-                    LOG_INFO("[TFPayload] Unloaded DLL");
-                    // Unload the DLL and exit this thread
-                    FreeLibraryAndExitThread(hMod, 0);
-                    return 0;
-                }, g_hModule, 0, NULL);
-                
-                if (hUnloadThread) {
-                    CloseHandle(hUnloadThread);
-                }
-            }
-            
-            // Exit the key monitor thread
+            LOG_INFO("[END] Shutting down TFPayload...");
+            ShutdownTFPayload();
             return 0;
         }
 
@@ -730,6 +1028,9 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         HandleClearConsole();
         HandleHomeImGuiMenu();
         HandleKeybindingsMenu();
+        HandleDebugGameState();
+        HandleToggleLimitValidation();
+        HandleToggleConsole();
         
         LeaderboardScanner::CheckHotkey();
         LeaderboardDirect::CheckHotkey();
@@ -738,6 +1039,7 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         Camera::CheckHotkey();
         Multiplayer::CheckHotkey();
         BikeSwap::CheckHotkey();
+        PreventFinish::Update();
         
         Sleep(80);
     }
@@ -751,8 +1053,25 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 {
     switch (ul_reason_for_call) {
     case DLL_PROCESS_ATTACH:
-        g_hModule = hModule; // Store our module handle
-        PayloadInit();
+        DisableThreadLibraryCalls(hModule);
+        g_moduleHandle.store(hModule);
+        
+        // Check if we're being loaded standalone (not by proxy DLL)
+        // The proxy DLL sets an environment variable before calling LoadLibrary
+        if (GetEnvironmentVariableA("TFPAYLOAD_PROXY_LOAD", nullptr, 0) == 0)
+        {
+            // Standalone load - initialize automatically
+            CreateThread(nullptr, 0, [](LPVOID param) -> DWORD {
+                Sleep(100); // Small delay to let game initialize
+                if (!g_isInitialized.load())
+                {
+                    g_isInitialized.store(true);
+                    InitializeTFPayload();
+                }
+                return 0;
+            }, nullptr, 0, nullptr);
+        }
+        // else: proxy DLL will call ManualInitialize() export
         break;
 
     case DLL_THREAD_ATTACH:
@@ -761,8 +1080,8 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 
     case DLL_PROCESS_DETACH:
         // Only shutdown if we haven't already (prevents double shutdown)
-        if (!isShuttingDown) {
-            ShutdownPayload();
+        if (g_isInitialized.load()) {
+            ShutdownTFPayload();
         }
         MH_Uninitialize();
         break;

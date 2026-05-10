@@ -2,15 +2,54 @@
 #include "camera.h"
 #include "logging.h"
 #include "keybindings.h"
+#include "base-address.h"
 #include <iostream>
 #include <Windows.h>
 
 namespace Camera {
-    // RVA offsets from Ghidra analysis (base address 0x700000)
-    static constexpr uintptr_t GLOBAL_STRUCT_RVA = 0x104b308;  // DAT_0174b308
-    static constexpr uintptr_t SET_CAMERA_MODE_RVA = 0x44e890;  // SetCameraMode (0x00b4e890 - 0x00700000)
-    static constexpr uintptr_t CYCLE_CAMERA_MODE_RVA = 0x44e8e0;  // CycleHUD (0x00b4e8e0 - 0x00700000)
-    static constexpr uintptr_t CAMERA_ACTIVE_FLAG_RVA = 0xfd4f1c;  // DAT_016d4f1c - 0x00700000
+    // g_pGameManager: Ghidra 0x0174b308, RVA = 0x0174b308 - 0x700000 = 0x104b308
+    static constexpr uintptr_t GLOBAL_STRUCT_RVA_UPLAY = 0x104b308;
+    
+    // SetCameraMode: Ghidra 0x00b4e890, RVA = 0x00b4e890 - 0x700000 = 0x44e890
+    static constexpr uintptr_t SET_CAMERA_MODE_RVA_UPLAY = 0x44e890;
+    
+    // CycleCameraMode: Ghidra 0x00b4e8e0, RVA = 0x00b4e8e0 - 0x700000 = 0x44e8e0
+    static constexpr uintptr_t CYCLE_CAMERA_MODE_RVA_UPLAY = 0x44e8e0;
+    
+    // DAT_016d4f1c (camera active flag): Ghidra 0x016d4f1c, RVA = 0x016d4f1c - 0x700000 = 0xfd4f1c
+    static constexpr uintptr_t CAMERA_ACTIVE_FLAG_RVA_UPLAY = 0xfd4f1c;
+    
+    // g_pGameManager: Ghidra 0x0118d308, RVA = 0x0118d308 - 0x140000 = 0x104d308
+    static constexpr uintptr_t GLOBAL_STRUCT_RVA_STEAM = 0x104d308;
+    
+    // SetCameraMode: Ghidra 0x0058e090, RVA = 0x0058e090 - 0x140000 = 0x44e090
+    static constexpr uintptr_t SET_CAMERA_MODE_RVA_STEAM = 0x44e090;
+    
+    // CycleCameraMode: Ghidra 0x0058e0e0, RVA = 0x0058e0e0 - 0x140000 = 0x44e0e0
+    static constexpr uintptr_t CYCLE_CAMERA_MODE_RVA_STEAM = 0x44e0e0;
+    
+    // DAT_01116f1c (camera active flag): Ghidra 0x01116f1c, RVA = 0x01116f1c - 0x140000 = 0xfd6f1c
+    static constexpr uintptr_t CAMERA_ACTIVE_FLAG_RVA_STEAM = 0xfd6f1c;
+
+    // ============================================================================
+    // Helper functions to get correct RVA based on detected version
+    // ============================================================================
+    
+    static uintptr_t GetGlobalStructRVA() {
+        return BaseAddress::IsSteamVersion() ? GLOBAL_STRUCT_RVA_STEAM : GLOBAL_STRUCT_RVA_UPLAY;
+    }
+    
+    static uintptr_t GetSetCameraModeRVA() {
+        return BaseAddress::IsSteamVersion() ? SET_CAMERA_MODE_RVA_STEAM : SET_CAMERA_MODE_RVA_UPLAY;
+    }
+    
+    static uintptr_t GetCycleCameraModeRVA() {
+        return BaseAddress::IsSteamVersion() ? CYCLE_CAMERA_MODE_RVA_STEAM : CYCLE_CAMERA_MODE_RVA_UPLAY;
+    }
+    
+    static uintptr_t GetCameraActiveFlagRVA() {
+        return BaseAddress::IsSteamVersion() ? CAMERA_ACTIVE_FLAG_RVA_STEAM : CAMERA_ACTIVE_FLAG_RVA_UPLAY;
+    }
     
     // Camera object offsets
     // There are TWO mode systems:
@@ -162,10 +201,7 @@ namespace Camera {
         return *reinterpret_cast<void**>(addr);
     }
 
-    // ============================================================================
     // Public API
-    // ============================================================================
-
     bool Initialize(uintptr_t baseAddress) {
         if (g_initialized) {
             LOG_WARNING("[Camera] Already initialized");
@@ -173,26 +209,41 @@ namespace Camera {
         }
 
         g_baseAddress = baseAddress;
+        
+        // Log version detection
+        if (BaseAddress::IsSteamVersion()) {
+            LOG_VERBOSE("[Camera] Steam version detected - using Steam addresses");
+            LOG_VERBOSE("[Camera]   GlobalStruct RVA: 0x" << std::hex << GLOBAL_STRUCT_RVA_STEAM);
+            LOG_VERBOSE("[Camera]   SetCameraMode RVA: 0x" << std::hex << SET_CAMERA_MODE_RVA_STEAM);
+            LOG_VERBOSE("[Camera]   CycleCameraMode RVA: 0x" << std::hex << CYCLE_CAMERA_MODE_RVA_STEAM);
+            LOG_VERBOSE("[Camera]   CameraActiveFlag RVA: 0x" << std::hex << CAMERA_ACTIVE_FLAG_RVA_STEAM);
+        } else {
+            LOG_VERBOSE("[Camera] Uplay version detected - using Uplay addresses");
+            LOG_VERBOSE("[Camera]   GlobalStruct RVA: 0x" << std::hex << GLOBAL_STRUCT_RVA_UPLAY);
+            LOG_VERBOSE("[Camera]   SetCameraMode RVA: 0x" << std::hex << SET_CAMERA_MODE_RVA_UPLAY);
+            LOG_VERBOSE("[Camera]   CycleCameraMode RVA: 0x" << std::hex << CYCLE_CAMERA_MODE_RVA_UPLAY);
+            LOG_VERBOSE("[Camera]   CameraActiveFlag RVA: 0x" << std::hex << CAMERA_ACTIVE_FLAG_RVA_UPLAY);
+        }
 
-        g_cameraActiveFlag = reinterpret_cast<char*>(baseAddress + CAMERA_ACTIVE_FLAG_RVA);
+        g_cameraActiveFlag = reinterpret_cast<char*>(baseAddress + GetCameraActiveFlagRVA());
         if (IsBadReadPtr(g_cameraActiveFlag, sizeof(char))) {
             LOG_ERROR("[Camera] Invalid camera active flag pointer");
             return false;
         }
 
-        g_globalStructPtr = reinterpret_cast<void**>(baseAddress + GLOBAL_STRUCT_RVA);
+        g_globalStructPtr = reinterpret_cast<void**>(baseAddress + GetGlobalStructRVA());
         if (IsBadReadPtr(g_globalStructPtr, sizeof(void*))) {
             LOG_ERROR("[Camera] Invalid global structure pointer");
             return false;
         }
 
-        g_setCameraModeFunc = reinterpret_cast<SetCameraModeFunc>(baseAddress + SET_CAMERA_MODE_RVA);
+        g_setCameraModeFunc = reinterpret_cast<SetCameraModeFunc>(baseAddress + GetSetCameraModeRVA());
         if (IsBadReadPtr(g_setCameraModeFunc, 1)) {
             LOG_ERROR("[Camera] Invalid SetCameraMode function pointer");
             return false;
         }
 
-        g_CycleHUDFunc = reinterpret_cast<CycleHUDFunc>(baseAddress + CYCLE_CAMERA_MODE_RVA);
+        g_CycleHUDFunc = reinterpret_cast<CycleHUDFunc>(baseAddress + GetCycleCameraModeRVA());
         if (IsBadReadPtr(g_CycleHUDFunc, 1)) {
             LOG_ERROR("[Camera] Invalid CycleHUD function pointer");
             return false;

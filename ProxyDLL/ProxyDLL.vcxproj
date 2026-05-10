@@ -107,10 +107,10 @@
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
-  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='DEVELOPMENT_MODE|Win32'">
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='DEVELOPMENT_MODE|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
-  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='RELEASE_AUTOLOAD|Win32'">
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='RELEASE_AUTOLOAD|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -119,10 +119,10 @@
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
-  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='DEVELOPMENT_MODE|x64'">
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='DEVELOPMENT_MODE|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
-  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='RELEASE_AUTOLOAD|x64'">
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='RELEASE_AUTOLOAD|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
@@ -331,7 +331,7 @@ copy /Y "$(SolutionDir)$(Configuration)\dbgcore.dll" "F:\SteamLibrary\steamapps\
     <ClInclude Include="imgui\imstb_rectpack.h" />
     <ClInclude Include="imgui\imstb_textedit.h" />
     <ClInclude Include="imgui\imstb_truetype.h" />
-    <ClInclude Include="Keybinds.h" />
+    <ClInclude Include="logging.h" />
     <ClInclude Include="Overlay.h" />
     <ClInclude Include="ProxyDbgcore.h" />
     <ClInclude Include="SkipIntro.h" />
@@ -345,7 +345,7 @@ copy /Y "$(SolutionDir)$(Configuration)\dbgcore.dll" "F:\SteamLibrary\steamapps\
     <ClCompile Include="imgui\imgui_draw.cpp" />
     <ClCompile Include="imgui\imgui_tables.cpp" />
     <ClCompile Include="imgui\imgui_widgets.cpp" />
-    <ClCompile Include="Keybinds.cpp" />
+    <ClCompile Include="logging.cpp" />
     <ClCompile Include="Overlay.cpp" />
     <ClCompile Include="ProxyDbgcore.cpp" />
     <ClCompile Include="SkipIntro.cpp" />

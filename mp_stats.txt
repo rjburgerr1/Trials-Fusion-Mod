@@ -1,0 +1,7 @@
+=== MULTIPLAYER STATISTICS ===
+Total Sessions: 0
+Total Packets Received: 0
+Total Packets Sent: 0
+Total Bytes Received: 0
+Total Bytes Sent: 0
+Player State Updates: 0

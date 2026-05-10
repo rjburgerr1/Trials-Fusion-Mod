@@ -51,6 +51,11 @@ public:
         ShowSingleCountdown,
         ToggleLoadScreen,
         ToggleKeybindingsMenu,
+        DebugGameState,
+        SwapNextBike,
+        SwapPrevBike,
+        DebugBikeInfo,
+        ToggleConsole,
     };
 
     static void Initialize();
