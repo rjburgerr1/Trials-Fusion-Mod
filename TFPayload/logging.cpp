@@ -11,6 +11,28 @@ namespace Logging {
     bool g_verboseLoggingEnabled = false;
     std::ofstream g_logFile;
     static std::string s_gameDirectory;
+
+    static void WriteToDebugAndConsole(const char* msg) {
+        if (!msg) {
+            return;
+        }
+
+        OutputDebugStringA(msg);
+        OutputDebugStringA("\n");
+
+        if (!GetConsoleWindow()) {
+            return;
+        }
+
+        HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (hConsole == INVALID_HANDLE_VALUE || hConsole == NULL) {
+            return;
+        }
+
+        DWORD written = 0;
+        WriteConsoleA(hConsole, msg, (DWORD)strlen(msg), &written, NULL);
+        WriteConsoleA(hConsole, "\n", 1, &written, NULL);
+    }
     
     // ImGui console state
     bool g_consoleVisible = false;
@@ -81,10 +103,10 @@ namespace Logging {
             g_logFile.flush();
         }
         
-        std::cout << "[Logging] System initialized. Verbose logging: " 
-                  << (g_verboseLoggingEnabled ? "ON" : "OFF") << std::endl;
-        std::cout << "[Logging] Log file: " << logPath << std::endl;
-        std::cout << "[Logging] Press '=' to toggle verbose logging" << std::endl;
+        WriteToDebugAndConsole((std::string("[Logging] System initialized. Verbose logging: ") +
+            (g_verboseLoggingEnabled ? "ON" : "OFF")).c_str());
+        WriteToDebugAndConsole((std::string("[Logging] Log file: ") + logPath).c_str());
+        WriteToDebugAndConsole("[Logging] Press '=' to toggle verbose logging");
     }
     
     void Shutdown() {
@@ -100,8 +122,9 @@ namespace Logging {
     void ToggleVerbose() {
         g_verboseLoggingEnabled = !g_verboseLoggingEnabled;
         
-        // Print a clean, single message
-        std::cout << "Verbose logging " << (g_verboseLoggingEnabled ? "ENABLED" : "DISABLED") << std::endl;
+        // Print a clean, single message when a console is attached.
+        WriteToDebugAndConsole((std::string("Verbose logging ") +
+            (g_verboseLoggingEnabled ? "ENABLED" : "DISABLED")).c_str());
         
         WriteToFile(std::string("Verbose logging ") + (g_verboseLoggingEnabled ? "ENABLED" : "DISABLED"));
         
@@ -146,8 +169,7 @@ namespace Logging {
             fclose(crashFile);
         }
         
-        // Also write to console for immediate feedback
-        printf("%s\n", msg);
+        WriteToDebugAndConsole(msg);
     }
     
     std::string GetConfigPath() {
@@ -160,7 +182,7 @@ namespace Logging {
         
         std::ofstream file(configPath);
         if (!file.is_open()) {
-            std::cout << "[Logging] Failed to save config to: " << configPath << std::endl;
+            WriteToDebugAndConsole((std::string("[Logging] Failed to save config to: ") + configPath).c_str());
             return false;
         }
         
