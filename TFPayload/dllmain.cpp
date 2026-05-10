@@ -38,6 +38,7 @@
 
 // FORWARD DECLARATIONS
 DWORD WINAPI KeyMonitorThread(LPVOID lpParam);
+static bool StartKeyMonitorThread(DWORD_PTR baseAddress);
 
 // GLOBAL STATE
 std::atomic<bool> g_isInitialized(false);
@@ -200,14 +201,12 @@ static void LogCrash(const char* moduleName, DWORD exceptionCode) {
     char buffer[256];
     sprintf_s(buffer, sizeof(buffer), "[CRASH] %s crashed with exception 0x%08X\n", moduleName, exceptionCode);
     OutputDebugStringA(buffer);
-    printf("%s", buffer);
 }
 
 static void LogInitFailed(const char* moduleName) {
     char buffer[256];
     sprintf_s(buffer, sizeof(buffer), "[INIT FAILED] %s returned false\n", moduleName);
     OutputDebugStringA(buffer);
-    printf("%s", buffer);
 }
 
 // Log init start immediately to crash trace file
@@ -402,6 +401,25 @@ static bool Init_DevMenuSync(void* userData) {
     return true;
 }
 
+static bool StartKeyMonitorThread(DWORD_PTR baseAddress)
+{
+    if (g_hKeyMonitorThread != NULL) {
+        LOG_VERBOSE("[TFPayload] Key monitor thread already running");
+        return true;
+    }
+
+    DWORD threadId;
+    g_hKeyMonitorThread = CreateThread(0, 0, (LPTHREAD_START_ROUTINE)KeyMonitorThread, (LPVOID)baseAddress, 0, &threadId);
+
+    if (g_hKeyMonitorThread == NULL) {
+        LOG_ERROR("[TFPayload] Failed to create key monitor thread!");
+        return false;
+    }
+
+    LOG_VERBOSE("[TFPayload] Key monitor thread created successfully!");
+    return true;
+}
+
 // Helper to attach to existing console
 void AttachToExistingConsole()
 {
@@ -516,23 +534,19 @@ void InitializeTFPayload()
     // Initialize DevMenuSync with crash protection
     SafeInitCall("DevMenuSync", Init_DevMenuSync, &ctx);
 
-    DWORD threadId;
-    g_hKeyMonitorThread = CreateThread(0, 0, (LPTHREAD_START_ROUTINE)KeyMonitorThread, (LPVOID)baseAddress, 0, &threadId);
-
-    if (g_hKeyMonitorThread == NULL) {
-        LOG_ERROR("[TFPayload] Failed to create key monitor thread!");
+    if (!StartKeyMonitorThread(baseAddress)) {
         return;
     }
-
-    LOG_VERBOSE("[TFPayload] Key monitor thread created successfully!");
     
     LOG_INFO("[TFPayload] === INITIALIZATION COMPLETE ===");
 }
 
+extern "C" __declspec(dllexport) void ManualInitialize();
+
 // Export for ProxyDLL (backward compatibility)
 extern "C" __declspec(dllexport) void PayloadInit()
 {
-    InitializeTFPayload();
+    ManualInitialize();
 }
 
 // Exports for proxy DLL to call
