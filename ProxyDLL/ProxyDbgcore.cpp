@@ -1,4 +1,5 @@
 #include "ProxyDbgcore.h"
+#include "logging.h"
 #include <iostream>
 
 #define EXPORT __declspec(dllexport)
@@ -21,12 +22,12 @@ void StartProxy()
 
     HMODULE real = LoadLibraryA(path);
     if (!real) {
-        std::cout << "[Proxy] Failed to load real dbgcore.dll\n";
+        LOG_ERROR("[Proxy] Failed to load real dbgcore.dll");
         return;
     }
 
     pMiniDumpReadDumpStream = GetProcAddress(real, "MiniDumpReadDumpStream");
     pMiniDumpWriteDump = GetProcAddress(real, "MiniDumpWriteDump");
 
-    std::cout << "[Proxy] Loaded real dbgcore.dll\n";
+    LOG_INFO("[Proxy] Loaded real dbgcore.dll");
 }

@@ -1,115 +1,181 @@
-// bike-swap.cpp
-// Implementation of runtime bike swapping functionality
-// Based on Ghidra reverse engineering of Trials Fusion bike selection system
-
 #include "pch.h"
 #include "bike-swap.h"
-#include "respawn.h"
 #include "logging.h"
 #include "keybindings.h"
+#include "base-address.h"
+#include "respawn.h"
 #include <Windows.h>
-#include <unordered_map>
+#include <TlHelp32.h>
+#include <vector>
+#include <MinHook.h>
 
 namespace BikeSwap {
+    // RVA for ReloadBikeFromSettings
+    static constexpr uintptr_t RELOAD_BIKE_FROM_SETTINGS_RVA_UPLAY = 0x9fd40;
+    static constexpr uintptr_t RELOAD_BIKE_FROM_SETTINGS_RVA_STEAM = 0x9f810;
+
     // ============================================================================
-    // Game Memory Addresses (RVA offsets - subtract 0x700000 from Ghidra addresses)
+    // Game Memory Addresses - UPLAY VERSION (RVA offsets from Ghidra base 0x700000)
     // ============================================================================
 
-    // Global structure pointer (same as respawn.cpp)
-    static constexpr uintptr_t GLOBAL_STRUCT_RVA = 0x104b308;
+    // Global game manager pointer - same as respawn.cpp
+    static constexpr uintptr_t GLOBAL_STRUCT_RVA_UPLAY = 0x104b308;
 
-    // Bike-related offsets within bike/rider object
-    static constexpr uintptr_t BIKE_ID_OFFSET = 0x680;           // Bike type ID (byte)
-    static constexpr uintptr_t BIKE_GFX_HASH_OFFSET = 0x67c;     // Graphics hash for bike model
-    static constexpr uintptr_t BIKE_IS_REAL_OFFSET = 0x13c;      // Flag: 1 = real bike, 0 = ghost/replay
-    static constexpr uintptr_t BIKE_APPEARANCE_OFFSET = 0x9ec;   // Appearance/customization data (32 bytes)
-    
-    // Function RVAs (Ghidra address - 0x700000)
-    static constexpr uintptr_t LOAD_BIKE_SETTINGS_RVA = 0x208490;           // LoadBikeSettings
-    static constexpr uintptr_t BIKE_LOOKUP_RVA = 0x19a30;                   // Bike data lookup by ID
-    static constexpr uintptr_t INITIALIZE_BIKE_ATTACHMENTS_RVA = 0x20ce90;  // InitializeBikeAttachments
-    static constexpr uintptr_t CHANGE_BIKE_WITH_MESH_RVA = 0x229c00;        // ChangeBikeWithMeshReload (FUN_00929c00)
-    static constexpr uintptr_t LOAD_BIKE_MESH_RVA = 0x2144e0;               // FUN_009144e0 - loads bike mesh
-    static constexpr uintptr_t CLEANUP_SCENE_GEOMETRY_RVA = 0x21e610;       // CleanupSceneGeometry
-    static constexpr uintptr_t GET_APPEARANCE_DATA_RVA = 0x3055a0;          // FUN_00a055a0 - gets default appearance for bike
-    static constexpr uintptr_t INIT_BIKE_APPEARANCE_SLOTS_RVA = 0x229980;   // InitializeBikeAppearanceSlots
-    static constexpr uintptr_t SERIALIZE_BIKE_SCENE_RVA = 0x205750;         // SerializeBikeSceneObjects
-    static constexpr uintptr_t FINALIZE_RIDER_SETUP_RVA = 0x20a7c0;         // FinalizeRiderSetup
-    static constexpr uintptr_t RESET_BIKE_STATE_RVA = 0x2059d0;             // ResetBikeState
-    static constexpr uintptr_t RELOAD_BIKE_WITH_NEW_ID_RVA = 0x9fd40;       // FUN_0079fd40 - reloads bike using ID at param+0x684
-    static constexpr uintptr_t ALLOCATE_MEMORY_RVA = 0xc340;                // AllocateMemory
-    static constexpr uintptr_t CONSTRUCT_GAME_MESSAGE_RVA = 0xc03f0;        // ConstructGameMessage
-    static constexpr uintptr_t SEND_MESSAGE_RVA = 0x67a040;                 // SendMessage
-    
-    // Bike database offset within global struct
-    static constexpr uintptr_t BIKE_DATABASE_OFFSET = 0x118;    // *(globalStruct+0x118) = bike database
+    // Bike-related function addresses - Uplay
+    static constexpr uintptr_t CHANGE_BIKE_WITH_MESH_RELOAD_RVA_UPLAY = 0x229c00;
+    static constexpr uintptr_t LOAD_BIKE_SETTINGS_RVA_UPLAY = 0x208490;
+    static constexpr uintptr_t LOAD_BIKE_MESH_AND_VISUALS_RVA_UPLAY = 0x2144e0;
+    static constexpr uintptr_t CLEANUP_SCENE_GEOMETRY_RVA_UPLAY = 0x21e610;
+    static constexpr uintptr_t FINALIZE_RIDER_SETUP_RVA_UPLAY = 0x20a7c0;
+    static constexpr uintptr_t RESET_BIKE_STATE_RVA_UPLAY = 0x2059d0;
+    static constexpr uintptr_t INIT_BIKE_APPEARANCE_SLOTS_RVA_UPLAY = 0x229980;
+    static constexpr uintptr_t SERIALIZE_BIKE_SCENE_OBJECTS_RVA_UPLAY = 0x205750;
+    static constexpr uintptr_t GET_BIKE_DATA_BY_INDEX_RVA_UPLAY = 0x19a30;
+    static constexpr uintptr_t GET_FIRST_ENTITY_FROM_LIST_RVA_UPLAY = 0x25f000;
+    static constexpr uintptr_t HANDLE_GAME_FRAME_UPDATE_RVA_UPLAY = 0x3b6980;
+
+    // ============================================================================
+    // Game Memory Addresses - STEAM VERSION (RVA offsets from Ghidra base 0x140000)
+    // ============================================================================
+
+    // Global game manager pointer - same as respawn.cpp
+    static constexpr uintptr_t GLOBAL_STRUCT_RVA_STEAM = 0x104d308;
+
+    // Bike-related function addresses - Steam
+    static constexpr uintptr_t CHANGE_BIKE_WITH_MESH_RELOAD_RVA_STEAM = 0x2294d0;
+    static constexpr uintptr_t LOAD_BIKE_SETTINGS_RVA_STEAM = 0x207d40;
+    static constexpr uintptr_t LOAD_BIKE_MESH_AND_VISUALS_RVA_STEAM = 0x213dd0;
+    static constexpr uintptr_t CLEANUP_SCENE_GEOMETRY_RVA_STEAM = 0x21df00;
+    static constexpr uintptr_t FINALIZE_RIDER_SETUP_RVA_STEAM = 0x20a070;
+    static constexpr uintptr_t RESET_BIKE_STATE_RVA_STEAM = 0x205310;
+    static constexpr uintptr_t INIT_BIKE_APPEARANCE_SLOTS_RVA_STEAM = 0x229250;
+    static constexpr uintptr_t SERIALIZE_BIKE_SCENE_OBJECTS_RVA_STEAM = 0x205090;
+    static constexpr uintptr_t GET_BIKE_DATA_BY_INDEX_RVA_STEAM = 0x19940;
+    static constexpr uintptr_t GET_FIRST_ENTITY_FROM_LIST_RVA_STEAM = 0x25eb20;
+    static constexpr uintptr_t HANDLE_GAME_FRAME_UPDATE_RVA_STEAM = 0x3b6140;
+
+    // ============================================================================
+    // Structure offsets (same for both versions)
+    // ============================================================================
+
+    // GameManager offsets
+    static constexpr uintptr_t ENTITY_MANAGER_OFFSET = 0xdc;     // Entity list / game state manager
+    static constexpr uintptr_t EDITOR_MANAGER_OFFSET = 0x104;    // Editor/track/session manager (ReloadBikeFromSettings 'this')
+    static constexpr uintptr_t BIKE_DATA_MANAGER_OFFSET = 0x118;
+
+    // Bike list structure offsets
+    static constexpr uintptr_t BIKE_LIST_STRUCT_OFFSET = 0x2f0;
+    static constexpr uintptr_t BIKE_LIST_FIRST_PTR_OFFSET = 0x14;
+    static constexpr uintptr_t BIKE_LIST_COUNT_OFFSET = 0x34;
+
+    // Bike entity offsets
+    static constexpr uintptr_t BIKE_ID_OFFSET = 0x680;
+
+    // Editor manager offsets
+    static constexpr uintptr_t SELECTED_BIKE_ID_OFFSET = 0x684;  // Byte: selected bike index (on editor manager)
+
+    // ============================================================================
+    // Helper functions to get correct RVA based on detected version
+    // ============================================================================
+
+    static uintptr_t GetGlobalStructRVA() {
+        return BaseAddress::IsSteamVersion() ? GLOBAL_STRUCT_RVA_STEAM : GLOBAL_STRUCT_RVA_UPLAY;
+    }
+
+    static uintptr_t GetChangeBikeWithMeshReloadRVA() {
+        return BaseAddress::IsSteamVersion() ? CHANGE_BIKE_WITH_MESH_RELOAD_RVA_STEAM : CHANGE_BIKE_WITH_MESH_RELOAD_RVA_UPLAY;
+    }
+
+    static uintptr_t GetLoadBikeSettingsRVA() {
+        return BaseAddress::IsSteamVersion() ? LOAD_BIKE_SETTINGS_RVA_STEAM : LOAD_BIKE_SETTINGS_RVA_UPLAY;
+    }
+
+    static uintptr_t GetLoadBikeMeshAndVisualsRVA() {
+        return BaseAddress::IsSteamVersion() ? LOAD_BIKE_MESH_AND_VISUALS_RVA_STEAM : LOAD_BIKE_MESH_AND_VISUALS_RVA_UPLAY;
+    }
+
+    static uintptr_t GetCleanupSceneGeometryRVA() {
+        return BaseAddress::IsSteamVersion() ? CLEANUP_SCENE_GEOMETRY_RVA_STEAM : CLEANUP_SCENE_GEOMETRY_RVA_UPLAY;
+    }
+
+    static uintptr_t GetFinalizeRiderSetupRVA() {
+        return BaseAddress::IsSteamVersion() ? FINALIZE_RIDER_SETUP_RVA_STEAM : FINALIZE_RIDER_SETUP_RVA_UPLAY;
+    }
+
+    static uintptr_t GetResetBikeStateRVA() {
+        return BaseAddress::IsSteamVersion() ? RESET_BIKE_STATE_RVA_STEAM : RESET_BIKE_STATE_RVA_UPLAY;
+    }
+
+    static uintptr_t GetInitBikeAppearanceSlotsRVA() {
+        return BaseAddress::IsSteamVersion() ? INIT_BIKE_APPEARANCE_SLOTS_RVA_STEAM : INIT_BIKE_APPEARANCE_SLOTS_RVA_UPLAY;
+    }
+
+    static uintptr_t GetSerializeBikeSceneObjectsRVA() {
+        return BaseAddress::IsSteamVersion() ? SERIALIZE_BIKE_SCENE_OBJECTS_RVA_STEAM : SERIALIZE_BIKE_SCENE_OBJECTS_RVA_UPLAY;
+    }
+
+    static uintptr_t GetBikeDataByIndexRVA() {
+        return BaseAddress::IsSteamVersion() ? GET_BIKE_DATA_BY_INDEX_RVA_STEAM : GET_BIKE_DATA_BY_INDEX_RVA_UPLAY;
+    }
+
+    static uintptr_t GetFirstEntityFromListRVA() {
+        return BaseAddress::IsSteamVersion() ? GET_FIRST_ENTITY_FROM_LIST_RVA_STEAM : GET_FIRST_ENTITY_FROM_LIST_RVA_UPLAY;
+    }
+
+    static uintptr_t GetHandleGameFrameUpdateRVA() {
+        return BaseAddress::IsSteamVersion() ? HANDLE_GAME_FRAME_UPDATE_RVA_STEAM : HANDLE_GAME_FRAME_UPDATE_RVA_UPLAY;
+    }
+
+    static uintptr_t GetReloadBikeFromSettingsRVA() {
+        return BaseAddress::IsSteamVersion() ? RELOAD_BIKE_FROM_SETTINGS_RVA_STEAM : RELOAD_BIKE_FROM_SETTINGS_RVA_UPLAY;
+    }
 
     // ============================================================================
     // Function Pointer Types
     // ============================================================================
 
-    // LoadBikeSettings(void* bikePtr) - __fastcall, bike pointer in ECX
-    typedef void(__fastcall* LoadBikeSettingsFunc)(void* bikePtr);
+    // void __thiscall ChangeBikeWithMeshReload(void* this, byte bikeId, undefined2* bikeAppearanceData)
+    typedef void* ChangeBikeWithMeshReloadFunc;  // We'll call via asm
 
-    // Bike lookup: returns bike data pointer for given bike ID
-    // FUN_00719a30(void* bikeDatabase, byte bikeId)
-    typedef void*(__thiscall* BikeLookupFunc)(void* bikeDatabase, uint8_t bikeId);
+    // void __fastcall LoadBikeSettings(void* bikeEntity)
+    typedef void(__fastcall* LoadBikeSettingsFunc)(void* bikeEntity);
 
-    // InitializeBikeAttachments(void* bikePtr)
-    typedef void(__fastcall* InitializeBikeAttachmentsFunc)(void* bikePtr);
+    // void __fastcall LoadBikeMeshAndVisuals(void* bikeEntity)  
+    typedef void(__fastcall* LoadBikeMeshAndVisualsFunc)(void* bikeEntity);
 
-    // ChangeBikeWithMeshReload(void* bikePtr, byte bikeId, void* appearanceData)
-    // __thiscall: bikePtr in ECX, bikeId and appearanceData on stack
-    typedef void(__thiscall* ChangeBikeWithMeshReloadFunc)(void* bikePtr, uint8_t bikeId, void* appearanceData);
+    // void __thiscall CleanupSceneGeometry(void* this, char param1)
+    typedef void(__thiscall* CleanupSceneGeometryFunc)(void* thisPtr, char param1);
 
-    // LoadBikeMesh(void* bikePtr) - __fastcall
-    typedef void(__fastcall* LoadBikeMeshFunc)(void* bikePtr);
+    // void __fastcall FinalizeRiderSetup(void* bikeEntity)
+    typedef void(__fastcall* FinalizeRiderSetupFunc)(void* bikeEntity);
 
-    // LoadBikeMeshAndVisuals - the actual mesh loading function
-    // FUN_009144e0 at RVA 0x2144e0
-    typedef void(__fastcall* LoadBikeMeshAndVisualsFunc)(void* bikePtr);
+    // void __fastcall ResetBikeState(int bikeEntity)
+    typedef void(__fastcall* ResetBikeStateFunc)(int bikeEntity);
 
-    // CleanupSceneGeometry(void* bikePtr, char fullCleanup) - __thiscall
-    typedef void(__thiscall* CleanupSceneGeometryFunc)(void* bikePtr, char fullCleanup);
+    // void __thiscall InitializeBikeAppearanceSlots(void* this, char param1)
+    typedef void(__thiscall* InitBikeAppearanceSlotsFunc)(void* thisPtr, char param1);
 
-    // GetAppearanceData(void* appearanceDb, ushort* outData, byte bikeId, byte param3) - __thiscall
-    // Returns pointer to outData after populating it
-    typedef uint16_t*(__thiscall* GetAppearanceDataFunc)(void* appearanceDb, uint16_t* outData, uint8_t bikeId, uint8_t param3);
+    // void __fastcall SerializeBikeSceneObjects(int bikeEntity)
+    typedef void(__fastcall* SerializeBikeSceneObjectsFunc)(int bikeEntity);
 
-    // InitializeBikeAppearanceSlots(void* bikePtr, char param1) - __thiscall
-    typedef void(__thiscall* InitBikeAppearanceSlotsFunc)(void* bikePtr, char param1);
+    // int __thiscall GetBikeDataByIndex(void* bikeDataManager, byte index)
+    typedef int(__thiscall* GetBikeDataByIndexFunc)(void* bikeDataManager, uint8_t index);
 
-    // SerializeBikeSceneObjects(int bikePtr) - __fastcall
-    typedef void(__fastcall* SerializeBikeSceneFunc)(int bikePtr);
+    // int __fastcall GetFirstEntityFromList(int gameManager)
+    typedef int(__fastcall* GetFirstEntityFromListFunc)(int gameManager);
 
-    // FinalizeRiderSetup(void* bikePtr) - __fastcall
-    typedef void(__fastcall* FinalizeRiderSetupFunc)(void* bikePtr);
+    // void __fastcall ReloadBikeFromSettings(void* editorManager)
+    typedef void(__fastcall* ReloadBikeFromSettingsFunc)(void* editorManager);
 
-    // ResetBikeState(int bikePtr) - __fastcall (takes int, not void*)
-    typedef void(__fastcall* ResetBikeStateFunc)(int bikePtr);
-
-    // ReloadBikeWithNewId(void* playerSettings) - __fastcall
-    // FUN_0079fd40 - reads bike ID from playerSettings+0x684, reloads bike mesh
-    typedef void(__fastcall* ReloadBikeWithNewIdFunc)(void* playerSettings);
-
-    // ============================================================================
-    // Appearance Data Structure (32 bytes at bike+0x9ec)
-    // ============================================================================
-    #pragma pack(push, 1)
-    struct BikeAppearanceData {
-        uint16_t field_0;       // +0x00
-        uint16_t field_2;       // +0x02
-        uint16_t field_4;       // +0x04
-        uint32_t field_6;       // +0x06 (was 0x9f4)
-        uint32_t field_A;       // +0x0A (was 0x9f8)
-        uint32_t field_E;       // +0x0E (was 0x9fc)
-        uint16_t field_12;      // +0x12 (was 0xa00)
-        uint16_t field_14;      // +0x14 (was 0xa02)
-        uint32_t field_16;      // +0x16 (was 0xa04)
-        uint32_t field_1A;      // +0x1A (was 0xa08)
-        uint16_t padding;       // +0x1E padding to 32 bytes
-    };
-    #pragma pack(pop)
+    // HandleGameFrameUpdate is __thiscall with 2 stack params:
+    //   MOV ECX, [0x0174d8f4]   ; this in ECX
+    //   PUSH ptr                ; param2 (pointer to local)
+    //   PUSH int                ; param3 (bool/int)
+    //   CALL HandleGameFrameUpdate
+    //   RET 0x8                 ; callee cleans 8 bytes
+    // For MinHook we model __thiscall as __fastcall with an unused EDX param.
+    // The stack params follow after ECX(this) and EDX(unused).
+    typedef void(__fastcall* HandleGameFrameUpdateFunc)(void* thisPtr, void* edx_unused, void* param2, int param3);
 
     // ============================================================================
     // Global State
@@ -118,168 +184,90 @@ namespace BikeSwap {
     static bool g_initialized = false;
     static uintptr_t g_baseAddress = 0;
     static void** g_globalStructPtr = nullptr;
-    
+
+    // Function pointers
+    static ChangeBikeWithMeshReloadFunc g_changeBikeWithMeshReload = nullptr;
     static LoadBikeSettingsFunc g_loadBikeSettings = nullptr;
-    static BikeLookupFunc g_bikeLookup = nullptr;
-    static InitializeBikeAttachmentsFunc g_initBikeAttachments = nullptr;
-    static ChangeBikeWithMeshReloadFunc g_changeBikeWithMesh = nullptr;
-    static LoadBikeMeshFunc g_loadBikeMesh = nullptr;
     static LoadBikeMeshAndVisualsFunc g_loadBikeMeshAndVisuals = nullptr;
     static CleanupSceneGeometryFunc g_cleanupSceneGeometry = nullptr;
-    static GetAppearanceDataFunc g_getAppearanceData = nullptr;
-    static InitBikeAppearanceSlotsFunc g_initBikeAppearanceSlots = nullptr;
-    static SerializeBikeSceneFunc g_serializeBikeScene = nullptr;
     static FinalizeRiderSetupFunc g_finalizeRiderSetup = nullptr;
     static ResetBikeStateFunc g_resetBikeState = nullptr;
-    static ReloadBikeWithNewIdFunc g_reloadBikeWithNewId = nullptr;
+    static InitBikeAppearanceSlotsFunc g_initBikeAppearanceSlots = nullptr;
+    static SerializeBikeSceneObjectsFunc g_serializeBikeSceneObjects = nullptr;
+    static GetBikeDataByIndexFunc g_getBikeDataByIndex = nullptr;
+    static GetFirstEntityFromListFunc g_getFirstEntityFromList = nullptr;
+    static ReloadBikeFromSettingsFunc g_reloadBikeFromSettings = nullptr;
 
-    // Bike name lookup table
-    static std::unordered_map<uint8_t, std::string> g_bikeNames = {
-        {1, "Squid (125cc)"},
-        {2, "Donkey (250cc)"},
-        {3, "Pit Viper (450cc)"},
-        {4, "Roach (FMX)"},
-        {5, "Banshee (Quad)"},
-        {6, "Turtle (Unicycle)"},
-        {7, "Mantis (Helium)"},
-        {8, "Rabbit (Raptor)"},
-    };
+    // Hook-based swap state (must be declared before Initialize uses them)
+    static volatile LONG g_pendingBikeId = -1;      // -1 = no pending swap (atomic via InterlockedExchange)
+    static bool g_hookInstalled = false;
+    static volatile bool g_swapInProgress = false;   // Guard against overlapping swaps
+    static DWORD g_lastSwapTick = 0;                 // Cooldown timer
+    static constexpr DWORD SWAP_COOLDOWN_MS = 1000;  // Minimum ms between swaps (give engine time to settle)
+    static volatile int g_pendingRespawnFrames = -1;  // Countdown frames before respawn after swap
+    static constexpr int RESPAWN_DELAY_FRAMES = 5;    // Wait N frames after swap before respawning
 
-    // State machine for pending bike swap
-    enum class SwapState {
-        None,
-        WaitingForRespawn,      // Waiting for initial respawn to complete
-        ExecutingSwap,          // Executing the mesh swap
-        WaitingForStabilize     // Waiting for final stabilization
-    };
+    // Original function pointer for HandleGameFrameUpdate
+    static HandleGameFrameUpdateFunc g_OriginalHandleGameFrameUpdate = nullptr;
 
-    // Pending bike swap state - used to defer bike swap to a safe execution point
-    static bool g_pendingBikeSwap = false;
-    static uint8_t g_pendingBikeId = 0;
-    static DWORD g_swapRequestTime = 0;
-    static const DWORD SWAP_COOLDOWN_MS = 500;  // Minimum time between swap attempts
-    static SwapState g_swapState = SwapState::None;
-    
-    // Track restart function pointer for safer bike swapping
-    typedef void*(__cdecl* AllocateMemoryFunc)(int size);
-    typedef void*(__thiscall* ConstructGameMessageFunc)(void* obj, int type, int p1, int p2);
-    typedef void(__thiscall* SendMessageFunc)(void* queue, int msg, int p1, int p2);
-    
-    static constexpr uintptr_t ALLOCATE_MEMORY_RVA_LOCAL = 0xc340;
-    static constexpr uintptr_t CONSTRUCT_GAME_MESSAGE_RVA_LOCAL = 0xc03f0;
-    static constexpr uintptr_t SEND_MESSAGE_RVA_LOCAL = 0x67a040;
-
-    // List of known valid bike IDs for cycling
-    static const uint8_t g_validBikeIds[] = {1, 2, 3, 4, 5, 6, 7, 8};
-    static const int g_validBikeCount = sizeof(g_validBikeIds) / sizeof(g_validBikeIds[0]);
+    // Forward declarations for hook and queue functions
+    static void __fastcall Hook_HandleGameFrameUpdate(void* thisPtr, void* edx_unused, void* param2, int param3);
+    static bool QueueBikeSwapForMainThread(int bikeId);
 
     // ============================================================================
-    // SEH-Safe Helper Functions (no C++ objects that need unwinding)
+    // Thread Suspension Helpers (for thread-safe bike swapping)
     // ============================================================================
 
-    // Safe wrapper for bike lookup - returns nullptr on exception
-    static void* SafeBikeLookup(void* bikeDatabase, uint8_t bikeId) {
-        __try {
-            return g_bikeLookup(bikeDatabase, bikeId);
+    static std::vector<HANDLE> SuspendOtherThreads() {
+        std::vector<HANDLE> suspendedThreads;
+        DWORD currentThreadId = GetCurrentThreadId();
+        DWORD processId = GetCurrentProcessId();
+
+        HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (snapshot == INVALID_HANDLE_VALUE) {
+            LOG_ERROR("[BikeSwap] Failed to create thread snapshot");
+            return suspendedThreads;
         }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return nullptr;
+
+        THREADENTRY32 te32;
+        te32.dwSize = sizeof(THREADENTRY32);
+
+        if (Thread32First(snapshot, &te32)) {
+            do {
+                if (te32.th32OwnerProcessID == processId && te32.th32ThreadID != currentThreadId) {
+                    HANDLE hThread = OpenThread(THREAD_SUSPEND_RESUME, FALSE, te32.th32ThreadID);
+                    if (hThread != NULL) {
+                        if (SuspendThread(hThread) != (DWORD)-1) {
+                            suspendedThreads.push_back(hThread);
+                        }
+                        else {
+                            CloseHandle(hThread);
+                        }
+                    }
+                }
+            } while (Thread32Next(snapshot, &te32));
         }
+
+        CloseHandle(snapshot);
+        LOG_INFO("[BikeSwap] Suspended " << suspendedThreads.size() << " threads");
+        return suspendedThreads;
     }
 
-    // Safe wrapper for LoadBikeSettings - returns false on exception
-    static bool SafeLoadBikeSettings(void* bikePtr) {
-        __try {
-            g_loadBikeSettings(bikePtr);
-            return true;
+    static void ResumeThreads(std::vector<HANDLE>& threads) {
+        for (HANDLE hThread : threads) {
+            ResumeThread(hThread);
+            CloseHandle(hThread);
         }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
+        LOG_INFO("[BikeSwap] Resumed " << threads.size() << " threads");
+        threads.clear();
     }
 
-    // Safe wrapper for writing bike ID - returns false on exception
-    static bool SafeWriteBikeId(void* bikePtr, uint8_t bikeId) {
-        __try {
-            uintptr_t bikeIdAddr = reinterpret_cast<uintptr_t>(bikePtr) + BIKE_ID_OFFSET;
-            *reinterpret_cast<int*>(bikeIdAddr) = static_cast<int>(bikeId);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
+    // ============================================================================
+    // Pointer Resolution Helpers
+    // ============================================================================
 
-    // Safe wrapper for InitializeBikeAttachments - returns false on exception
-    static bool SafeInitBikeAttachments(void* bikePtr) {
-        __try {
-            g_initBikeAttachments(bikePtr);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
-
-    // Safe wrapper for ChangeBikeWithMeshReload - returns false on exception
-    static bool SafeChangeBikeWithMesh(void* bikePtr, uint8_t bikeId, void* appearanceData) {
-        __try {
-            g_changeBikeWithMesh(bikePtr, bikeId, appearanceData);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
-
-    // Safe wrapper for LoadBikeMesh - returns false on exception
-    static bool SafeLoadBikeMesh(void* bikePtr) {
-        __try {
-            g_loadBikeMesh(bikePtr);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
-
-    // Safe wrapper for LoadBikeMeshAndVisuals - returns false on exception
-    static bool SafeLoadBikeMeshAndVisuals(void* bikePtr) {
-        __try {
-            g_loadBikeMeshAndVisuals(bikePtr);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
-
-    // Safe wrapper for CleanupSceneGeometry - returns false on exception
-    static bool SafeCleanupSceneGeometry(void* bikePtr, char fullCleanup) {
-        __try {
-            g_cleanupSceneGeometry(bikePtr, fullCleanup);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
-
-    // Read appearance data from bike - returns false on exception
-    static bool SafeReadAppearanceData(void* bikePtr, BikeAppearanceData* outData) {
-        __try {
-            uintptr_t appearanceAddr = reinterpret_cast<uintptr_t>(bikePtr) + BIKE_APPEARANCE_OFFSET;
-            memcpy(outData, reinterpret_cast<void*>(appearanceAddr), sizeof(BikeAppearanceData));
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
-
-    // Get the appearance database pointer from global struct
-    // Path: globalStruct + 0x120 -> dereference -> +0x10 -> dereference
-    static void* GetAppearanceDatabase() {
+    // Get the game manager value (the struct pointed to by g_pGameManager)
+    static void* GetGameManagerStruct() {
         if (!g_globalStructPtr || IsBadReadPtr(g_globalStructPtr, sizeof(void*))) {
             return nullptr;
         }
@@ -289,764 +277,821 @@ namespace BikeSwap {
             return nullptr;
         }
 
-        // globalStruct + 0x120
-        uintptr_t step1Addr = reinterpret_cast<uintptr_t>(globalStruct) + 0x120;
-        if (IsBadReadPtr((void*)step1Addr, sizeof(void*))) {
-            return nullptr;
-        }
-
-        void* step1Ptr = *reinterpret_cast<void**>(step1Addr);
-        if (!step1Ptr || IsBadReadPtr(step1Ptr, 0x20)) {
-            return nullptr;
-        }
-
-        // step1Ptr + 0x10
-        uintptr_t step2Addr = reinterpret_cast<uintptr_t>(step1Ptr) + 0x10;
-        if (IsBadReadPtr((void*)step2Addr, sizeof(void*))) {
-            return nullptr;
-        }
-
-        void* appearanceDb = *reinterpret_cast<void**>(step2Addr);
-        
-        // Validate the appearance database pointer
-        if (appearanceDb && IsBadReadPtr(appearanceDb, 0x100)) {
-            return nullptr;
-        }
-        
-        return appearanceDb;
+        return globalStruct;
     }
 
-    // Safe wrapper for GetAppearanceData - returns false on exception
-    static bool SafeGetAppearanceData(void* appearanceDb, uint16_t* outData, uint8_t bikeId) {
-        __try {
-            g_getAppearanceData(appearanceDb, outData, bikeId, 0);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
+    // Get *(g_pGameManager + 0xdc) - entity list / game state manager
+    static void* GetEntityManager() {
+        void* gameManager = GetGameManagerStruct();
+        if (!gameManager) return nullptr;
+
+        uintptr_t addr = reinterpret_cast<uintptr_t>(gameManager) + ENTITY_MANAGER_OFFSET;
+        if (IsBadReadPtr((void*)addr, sizeof(void*))) return nullptr;
+
+        void* entityMgr = *reinterpret_cast<void**>(addr);
+        if (!entityMgr || IsBadReadPtr(entityMgr, 0x1000)) return nullptr;
+
+        return entityMgr;
     }
 
-    // Safe wrapper for InitializeBikeAppearanceSlots - returns false on exception
-    static bool SafeInitBikeAppearanceSlots(void* bikePtr, char param1) {
-        __try {
-            g_initBikeAppearanceSlots(bikePtr, param1);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
+    // Get *(g_pGameManager + 0x104) - editor/track/session manager
+    // This is the correct 'this' pointer for ReloadBikeFromSettings
+    static void* GetEditorManager() {
+        void* gameManager = GetGameManagerStruct();
+        if (!gameManager) return nullptr;
+
+        uintptr_t addr = reinterpret_cast<uintptr_t>(gameManager) + EDITOR_MANAGER_OFFSET;
+        if (IsBadReadPtr((void*)addr, sizeof(void*))) return nullptr;
+
+        void* editorMgr = *reinterpret_cast<void**>(addr);
+        if (!editorMgr || IsBadReadPtr(editorMgr, 0x800)) return nullptr;
+
+        return editorMgr;
     }
 
-    // Safe wrapper for SerializeBikeSceneObjects - returns false on exception
-    static bool SafeSerializeBikeScene(void* bikePtr) {
-        __try {
-            g_serializeBikeScene(reinterpret_cast<int>(bikePtr));
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
+    static void* GetBikeDataManager() {
+        void* gameManager = GetGameManagerStruct();
+        if (!gameManager) return nullptr;
+
+        uintptr_t addr = reinterpret_cast<uintptr_t>(gameManager) + BIKE_DATA_MANAGER_OFFSET;
+        if (IsBadReadPtr((void*)addr, sizeof(void*))) return nullptr;
+
+        void* bikeDataMgr = *reinterpret_cast<void**>(addr);
+        if (!bikeDataMgr || IsBadReadPtr(bikeDataMgr, 0x100)) return nullptr;
+
+        return bikeDataMgr;
     }
 
-    // Safe wrapper for FinalizeRiderSetup - returns false on exception
-    static bool SafeFinalizeRiderSetup(void* bikePtr) {
-        __try {
-            g_finalizeRiderSetup(bikePtr);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
-
-    // Safe wrapper for ResetBikeState - returns false on exception
-    static bool SafeResetBikeState(void* bikePtr) {
-        __try {
-            g_resetBikeState(reinterpret_cast<int>(bikePtr));
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
-
-    // Safe wrapper for ReloadBikeWithNewId - returns false on exception
-    static bool SafeReloadBikeWithNewId(void* playerSettings) {
-        __try {
-            g_reloadBikeWithNewId(playerSettings);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
-
-    // Send a track restart message (message type 0x10)
-    // This triggers the game's built-in restart sequence which safely reloads everything
-    static bool SendTrackRestartMessage() {
-        if (!g_baseAddress) return false;
-
-        void* globalStruct = *g_globalStructPtr;
-        if (!globalStruct || IsBadReadPtr(globalStruct, 0x104)) {
-            return false;
-        }
-
-        // Get message queue
-        void* messageQueue = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(globalStruct) + 0x100);
-        if (!messageQueue) {
-            return false;
-        }
-
-        // Get function pointers
-        AllocateMemoryFunc allocMem = reinterpret_cast<AllocateMemoryFunc>(g_baseAddress + ALLOCATE_MEMORY_RVA_LOCAL);
-        ConstructGameMessageFunc constructMsg = reinterpret_cast<ConstructGameMessageFunc>(g_baseAddress + CONSTRUCT_GAME_MESSAGE_RVA_LOCAL);
-        SendMessageFunc sendMsg = reinterpret_cast<SendMessageFunc>(g_baseAddress + SEND_MESSAGE_RVA_LOCAL);
-
-        __try {
-            // Allocate message object (0x90 bytes as per SendRestartMessage)
-            void* msgObj = allocMem(0x90);
-            if (!msgObj) return false;
-
-            // Construct game message with type 0x10 (restart)
-            void* msg = constructMsg(msgObj, 0x10, 0, 0);
-            if (!msg) return false;
-
-            // Send the message
-            sendMsg(messageQueue, reinterpret_cast<int>(msg), 0, 0);
-            
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
-
-    // ============================================================================
-    // Helper Functions
-    // ============================================================================
-
-    static void* GetGameManager() {
-        if (!g_globalStructPtr || IsBadReadPtr(g_globalStructPtr, sizeof(void*))) {
-            return nullptr;
-        }
-
-        void* globalStruct = *g_globalStructPtr;
-        if (!globalStruct || IsBadReadPtr(globalStruct, 0x200)) {
-            return nullptr;
-        }
-
-        uintptr_t managerAddr = reinterpret_cast<uintptr_t>(globalStruct) + 0xdc;
-        if (IsBadReadPtr((void*)managerAddr, sizeof(void*))) {
-            return nullptr;
-        }
-
-        void* manager = *reinterpret_cast<void**>(managerAddr);
-        if (!manager || IsBadReadPtr(manager, 0x1000)) {
-            return nullptr;
-        }
-
-        return manager;
-    }
-
-    static void* GetBikePointer() {
-        // Reuse the respawn system's bike pointer getter for consistency
+    static void* GetCurrentBikeEntity() {
+        // Use the GetBikePointer from Respawn module since it does the same thing
         return Respawn::GetBikePointer();
     }
 
-    static void* GetBikeDatabase() {
-        if (!g_globalStructPtr || IsBadReadPtr(g_globalStructPtr, sizeof(void*))) {
-            return nullptr;
-        }
+    // ============================================================================
+    // SEH-safe Wrapper Functions
+    // These use a two-layer approach: inner function does SEH, outer does logging
+    // ============================================================================
 
-        void* globalStruct = *g_globalStructPtr;
-        if (!globalStruct || IsBadReadPtr(globalStruct, 0x200)) {
-            return nullptr;
+    // Assembly wrapper for thiscall function
+    // ChangeBikeWithMeshReload: void __thiscall(void* this, byte bikeId, void* appearanceData)
+    // thiscall: this in ECX, params pushed right-to-left
+    static void CallChangeBikeWithMeshReload_Asm(void* bikeEntity, uint8_t bikeId, void* appearanceData) {
+        __asm {
+            push appearanceData    // param2: appearance data pointer
+            movzx eax, bikeId      // param1: bike ID (extend byte to dword)
+            push eax
+            mov ecx, bikeEntity    // this pointer in ECX
+            call g_changeBikeWithMeshReload
         }
+    }
 
-        uintptr_t dbAddr = reinterpret_cast<uintptr_t>(globalStruct) + BIKE_DATABASE_OFFSET;
-        if (IsBadReadPtr((void*)dbAddr, sizeof(void*))) {
-            return nullptr;
+    // Inner SEH wrapper - no C++ objects allowed
+    static bool CallChangeBikeWithMeshReload_Inner(void* bikeEntity, uint8_t bikeId, void* appearanceData, DWORD* exceptionCode) {
+        *exceptionCode = 0;
+        __try {
+            CallChangeBikeWithMeshReload_Asm(bikeEntity, bikeId, appearanceData);
+            return true;
         }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            *exceptionCode = GetExceptionCode();
+            return false;
+        }
+    }
 
-        void* bikeDatabase = *reinterpret_cast<void**>(dbAddr);
-        return bikeDatabase;
+    // Outer wrapper with logging
+    static bool CallChangeBikeWithMeshReload(void* bikeEntity, uint8_t bikeId, void* appearanceData) {
+        DWORD exceptionCode = 0;
+        bool result = CallChangeBikeWithMeshReload_Inner(bikeEntity, bikeId, appearanceData, &exceptionCode);
+        if (!result) {
+            LOG_ERROR("[BikeSwap] Exception in ChangeBikeWithMeshReload: 0x" << std::hex << exceptionCode);
+        }
+        return result;
+    }
+
+    // Inner SEH wrapper
+    static bool CallLoadBikeSettings_Inner(void* bikeEntity, DWORD* exceptionCode) {
+        *exceptionCode = 0;
+        __try {
+            g_loadBikeSettings(bikeEntity);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            *exceptionCode = GetExceptionCode();
+            return false;
+        }
+    }
+
+    static bool CallLoadBikeSettings(void* bikeEntity) {
+        DWORD exceptionCode = 0;
+        bool result = CallLoadBikeSettings_Inner(bikeEntity, &exceptionCode);
+        if (!result) {
+            LOG_ERROR("[BikeSwap] Exception in LoadBikeSettings: 0x" << std::hex << exceptionCode);
+        }
+        return result;
+    }
+
+    // Inner SEH wrapper
+    static bool CallLoadBikeMeshAndVisuals_Inner(void* bikeEntity, DWORD* exceptionCode) {
+        *exceptionCode = 0;
+        __try {
+            g_loadBikeMeshAndVisuals(bikeEntity);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            *exceptionCode = GetExceptionCode();
+            return false;
+        }
+    }
+
+    static bool CallLoadBikeMeshAndVisuals(void* bikeEntity) {
+        DWORD exceptionCode = 0;
+        bool result = CallLoadBikeMeshAndVisuals_Inner(bikeEntity, &exceptionCode);
+        if (!result) {
+            LOG_ERROR("[BikeSwap] Exception in LoadBikeMeshAndVisuals: 0x" << std::hex << exceptionCode);
+        }
+        return result;
+    }
+
+    // Inner SEH wrapper
+    static bool CallCleanupSceneGeometry_Inner(void* bikeEntity, char param1, DWORD* exceptionCode) {
+        *exceptionCode = 0;
+        __try {
+            g_cleanupSceneGeometry(bikeEntity, param1);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            *exceptionCode = GetExceptionCode();
+            return false;
+        }
+    }
+
+    static bool CallCleanupSceneGeometry(void* bikeEntity, char param1) {
+        DWORD exceptionCode = 0;
+        bool result = CallCleanupSceneGeometry_Inner(bikeEntity, param1, &exceptionCode);
+        if (!result) {
+            LOG_ERROR("[BikeSwap] Exception in CleanupSceneGeometry: 0x" << std::hex << exceptionCode);
+        }
+        return result;
+    }
+
+    // Inner SEH wrapper
+    static bool CallFinalizeRiderSetup_Inner(void* bikeEntity, DWORD* exceptionCode) {
+        *exceptionCode = 0;
+        __try {
+            g_finalizeRiderSetup(bikeEntity);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            *exceptionCode = GetExceptionCode();
+            return false;
+        }
+    }
+
+    static bool CallFinalizeRiderSetup(void* bikeEntity) {
+        DWORD exceptionCode = 0;
+        bool result = CallFinalizeRiderSetup_Inner(bikeEntity, &exceptionCode);
+        if (!result) {
+            LOG_ERROR("[BikeSwap] Exception in FinalizeRiderSetup: 0x" << std::hex << exceptionCode);
+        }
+        return result;
+    }
+
+    // Inner SEH wrapper
+    static bool CallResetBikeState_Inner(void* bikeEntity, DWORD* exceptionCode) {
+        *exceptionCode = 0;
+        __try {
+            g_resetBikeState(reinterpret_cast<int>(bikeEntity));
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            *exceptionCode = GetExceptionCode();
+            return false;
+        }
+    }
+
+    static bool CallResetBikeState(void* bikeEntity) {
+        DWORD exceptionCode = 0;
+        bool result = CallResetBikeState_Inner(bikeEntity, &exceptionCode);
+        if (!result) {
+            LOG_ERROR("[BikeSwap] Exception in ResetBikeState: 0x" << std::hex << exceptionCode);
+        }
+        return result;
+    }
+
+    // Inner SEH wrapper
+    static bool CallInitBikeAppearanceSlots_Inner(void* bikeEntity, char param1, DWORD* exceptionCode) {
+        *exceptionCode = 0;
+        __try {
+            g_initBikeAppearanceSlots(bikeEntity, param1);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            *exceptionCode = GetExceptionCode();
+            return false;
+        }
+    }
+
+    static bool CallInitBikeAppearanceSlots(void* bikeEntity, char param1) {
+        DWORD exceptionCode = 0;
+        bool result = CallInitBikeAppearanceSlots_Inner(bikeEntity, param1, &exceptionCode);
+        if (!result) {
+            LOG_ERROR("[BikeSwap] Exception in InitializeBikeAppearanceSlots: 0x" << std::hex << exceptionCode);
+        }
+        return result;
+    }
+
+    // Inner SEH wrapper
+    static bool CallSerializeBikeSceneObjects_Inner(void* bikeEntity, DWORD* exceptionCode) {
+        *exceptionCode = 0;
+        __try {
+            g_serializeBikeSceneObjects(reinterpret_cast<int>(bikeEntity));
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            *exceptionCode = GetExceptionCode();
+            return false;
+        }
+    }
+
+    static bool CallSerializeBikeSceneObjects(void* bikeEntity) {
+        DWORD exceptionCode = 0;
+        bool result = CallSerializeBikeSceneObjects_Inner(bikeEntity, &exceptionCode);
+        if (!result) {
+            LOG_ERROR("[BikeSwap] Exception in SerializeBikeSceneObjects: 0x" << std::hex << exceptionCode);
+        }
+        return result;
+    }
+
+    // Inner SEH wrapper
+    static int CallGetBikeDataByIndex_Inner(void* bikeDataManager, uint8_t index, DWORD* exceptionCode) {
+        *exceptionCode = 0;
+        __try {
+            return g_getBikeDataByIndex(bikeDataManager, index);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            *exceptionCode = GetExceptionCode();
+            return 0;
+        }
+    }
+
+    static int CallGetBikeDataByIndex(void* bikeDataManager, uint8_t index) {
+        DWORD exceptionCode = 0;
+        int result = CallGetBikeDataByIndex_Inner(bikeDataManager, index, &exceptionCode);
+        if (exceptionCode != 0) {
+            LOG_ERROR("[BikeSwap] Exception in GetBikeDataByIndex: 0x" << std::hex << exceptionCode);
+        }
+        return result;
+    }
+
+    // Inner SEH wrapper for ReloadBikeFromSettings (no C++ objects allowed)
+    static bool CallReloadBikeFromSettings_Inner(void* editorManager, DWORD* exceptionCode) {
+        *exceptionCode = 0;
+        __try {
+            g_reloadBikeFromSettings(editorManager);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            *exceptionCode = GetExceptionCode();
+            return false;
+        }
     }
 
     // ============================================================================
-    // Initialization & Shutdown
+    // Hook-based Bike Swap (executes on game main thread)
+    // ============================================================================
+
+    // Game frame update hook - runs on the game's main thread
+    // Must match real signature: __thiscall(this, ptr, int) with RET 0x8
+    // Modeled as __fastcall(ECX=this, EDX=unused, stack_param1, stack_param2)
+    static void __fastcall Hook_HandleGameFrameUpdate(void* thisPtr, void* edx_unused, void* param2, int param3) {
+        // Call original function FIRST so the game frame is in a consistent state
+        if (g_OriginalHandleGameFrameUpdate) {
+            g_OriginalHandleGameFrameUpdate(thisPtr, edx_unused, param2, param3);
+        }
+
+        // Handle pending respawn countdown (runs after bike swap completes)
+        if (g_pendingRespawnFrames > 0) {
+            g_pendingRespawnFrames--;
+        }
+        else if (g_pendingRespawnFrames == 0) {
+            g_pendingRespawnFrames = -1;
+            LOG_INFO("[BikeSwap] Delayed respawn executing...");
+            Respawn::RespawnAtCheckpoint();
+            g_swapInProgress = false;
+            LOG_INFO("[BikeSwap] Bike swap + respawn complete");
+        }
+
+        // Check if we have a pending bike swap
+        LONG targetBike = InterlockedExchange(&g_pendingBikeId, -1);
+        if (targetBike >= 0) {
+            g_swapInProgress = true;
+
+            void* editorManager = GetEditorManager();
+            if (!editorManager) {
+                LOG_ERROR("[BikeSwap] Invalid editor manager during main-thread swap");
+                g_swapInProgress = false;
+            }
+            else {
+                uintptr_t bikeSelAddr = reinterpret_cast<uintptr_t>(editorManager) + SELECTED_BIKE_ID_OFFSET;
+                if (IsBadReadPtr((void*)bikeSelAddr, sizeof(uint8_t))) {
+                    LOG_ERROR("[BikeSwap] Cannot access editor manager + 0x684");
+                    g_swapInProgress = false;
+                }
+                else {
+                    LOG_INFO("[BikeSwap] Main thread: swapping to bike " << (int)targetBike
+                        << " (" << GetBikeName((int)targetBike) << ")");
+
+                    // Write the selected bike ID to editorManager + 0x684
+                    *reinterpret_cast<uint8_t*>(bikeSelAddr) = static_cast<uint8_t>(targetBike);
+
+                    // Call ReloadBikeFromSettings AFTER the original frame update has completed
+                    // so the game is in a consistent state
+                    DWORD exCode = 0;
+                    bool success = CallReloadBikeFromSettings_Inner(editorManager, &exCode);
+
+                    if (success) {
+                        LOG_INFO("[BikeSwap] ReloadBikeFromSettings completed on main thread");
+                        // Schedule a delayed respawn to reset physics/position
+                        g_pendingRespawnFrames = RESPAWN_DELAY_FRAMES;
+                    }
+                    else {
+                        LOG_ERROR("[BikeSwap] Exception in ReloadBikeFromSettings: 0x"
+                            << std::hex << exCode);
+                        g_swapInProgress = false;
+                    }
+                }
+            }
+        }
+    }
+
+    // Queue a bike swap to be executed on the next game frame (thread-safe)
+    static bool QueueBikeSwapForMainThread(int bikeId) {
+        if (!g_initialized) {
+            LOG_ERROR("[BikeSwap] Not initialized");
+            return false;
+        }
+
+        if (!g_hookInstalled) {
+            LOG_ERROR("[BikeSwap] Frame update hook not installed");
+            return false;
+        }
+
+        if (bikeId < 0 || bikeId >= GetTotalBikeCount()) {
+            LOG_ERROR("[BikeSwap] Invalid bike ID: " << bikeId);
+            return false;
+        }
+
+        // Check cooldown
+        DWORD now = GetTickCount();
+        if (now - g_lastSwapTick < SWAP_COOLDOWN_MS) {
+            LOG_WARNING("[BikeSwap] Swap cooldown active, ignoring request");
+            return false;
+        }
+
+        // Check if a swap is already in progress (including pending respawn)
+        if (g_swapInProgress) {
+            LOG_WARNING("[BikeSwap] Swap already in progress, ignoring request");
+            return false;
+        }
+
+        g_lastSwapTick = now;
+        InterlockedExchange(&g_pendingBikeId, bikeId);
+        LOG_INFO("[BikeSwap] Queued swap to bike " << bikeId << " (" << GetBikeName(bikeId) << ") - will execute on next frame");
+        return true;
+    }
+
+    // ============================================================================
+    // Public API Implementation
     // ============================================================================
 
     bool Initialize(uintptr_t baseAddress) {
         if (g_initialized) {
-            LOG_VERBOSE("[BikeSwap] Already initialized");
+            LOG_WARNING("[BikeSwap] Already initialized");
             return true;
         }
 
+        if (baseAddress == 0) {
+            LOG_ERROR("[BikeSwap] Invalid base address");
+            return false;
+        }
+
+        if (BaseAddress::IsSteamVersion()) {
+            LOG_INFO("[BikeSwap] Steam version detected - using Steam addresses");
+        }
+        else {
+            LOG_INFO("[BikeSwap] Uplay version detected - using Uplay addresses");
+        }
+
         g_baseAddress = baseAddress;
+        g_globalStructPtr = reinterpret_cast<void**>(baseAddress + GetGlobalStructRVA());
 
-        // Get global struct pointer
-        g_globalStructPtr = reinterpret_cast<void**>(baseAddress + GLOBAL_STRUCT_RVA);
+        // Initialize function pointers
+        g_changeBikeWithMeshReload = reinterpret_cast<ChangeBikeWithMeshReloadFunc>(
+            baseAddress + GetChangeBikeWithMeshReloadRVA());
+        g_loadBikeSettings = reinterpret_cast<LoadBikeSettingsFunc>(
+            baseAddress + GetLoadBikeSettingsRVA());
+        g_loadBikeMeshAndVisuals = reinterpret_cast<LoadBikeMeshAndVisualsFunc>(
+            baseAddress + GetLoadBikeMeshAndVisualsRVA());
+        g_cleanupSceneGeometry = reinterpret_cast<CleanupSceneGeometryFunc>(
+            baseAddress + GetCleanupSceneGeometryRVA());
+        g_finalizeRiderSetup = reinterpret_cast<FinalizeRiderSetupFunc>(
+            baseAddress + GetFinalizeRiderSetupRVA());
+        g_resetBikeState = reinterpret_cast<ResetBikeStateFunc>(
+            baseAddress + GetResetBikeStateRVA());
+        g_initBikeAppearanceSlots = reinterpret_cast<InitBikeAppearanceSlotsFunc>(
+            baseAddress + GetInitBikeAppearanceSlotsRVA());
+        g_serializeBikeSceneObjects = reinterpret_cast<SerializeBikeSceneObjectsFunc>(
+            baseAddress + GetSerializeBikeSceneObjectsRVA());
+        g_getBikeDataByIndex = reinterpret_cast<GetBikeDataByIndexFunc>(
+            baseAddress + GetBikeDataByIndexRVA());
+        g_getFirstEntityFromList = reinterpret_cast<GetFirstEntityFromListFunc>(
+            baseAddress + GetFirstEntityFromListRVA());
+        g_reloadBikeFromSettings = reinterpret_cast<ReloadBikeFromSettingsFunc>(
+            baseAddress + GetReloadBikeFromSettingsRVA());
+
         if (IsBadReadPtr(g_globalStructPtr, sizeof(void*))) {
-            LOG_ERROR("[BikeSwap] Failed to get global struct pointer");
+            LOG_ERROR("[BikeSwap] Invalid global struct pointer");
             return false;
-        }
-
-        // Get function pointers
-        g_loadBikeSettings = reinterpret_cast<LoadBikeSettingsFunc>(baseAddress + LOAD_BIKE_SETTINGS_RVA);
-        g_bikeLookup = reinterpret_cast<BikeLookupFunc>(baseAddress + BIKE_LOOKUP_RVA);
-        g_initBikeAttachments = reinterpret_cast<InitializeBikeAttachmentsFunc>(baseAddress + INITIALIZE_BIKE_ATTACHMENTS_RVA);
-        g_changeBikeWithMesh = reinterpret_cast<ChangeBikeWithMeshReloadFunc>(baseAddress + CHANGE_BIKE_WITH_MESH_RVA);
-        g_loadBikeMesh = reinterpret_cast<LoadBikeMeshFunc>(baseAddress + LOAD_BIKE_MESH_RVA);
-        g_loadBikeMeshAndVisuals = reinterpret_cast<LoadBikeMeshAndVisualsFunc>(baseAddress + LOAD_BIKE_MESH_RVA);  // Same RVA
-        g_cleanupSceneGeometry = reinterpret_cast<CleanupSceneGeometryFunc>(baseAddress + CLEANUP_SCENE_GEOMETRY_RVA);
-        g_getAppearanceData = reinterpret_cast<GetAppearanceDataFunc>(baseAddress + GET_APPEARANCE_DATA_RVA);
-        g_initBikeAppearanceSlots = reinterpret_cast<InitBikeAppearanceSlotsFunc>(baseAddress + INIT_BIKE_APPEARANCE_SLOTS_RVA);
-        g_serializeBikeScene = reinterpret_cast<SerializeBikeSceneFunc>(baseAddress + SERIALIZE_BIKE_SCENE_RVA);
-        g_finalizeRiderSetup = reinterpret_cast<FinalizeRiderSetupFunc>(baseAddress + FINALIZE_RIDER_SETUP_RVA);
-        g_resetBikeState = reinterpret_cast<ResetBikeStateFunc>(baseAddress + RESET_BIKE_STATE_RVA);
-        g_reloadBikeWithNewId = reinterpret_cast<ReloadBikeWithNewIdFunc>(baseAddress + RELOAD_BIKE_WITH_NEW_ID_RVA);
-
-        // Validate critical function pointers
-        if (IsBadCodePtr((FARPROC)g_loadBikeSettings)) {
-            LOG_ERROR("[BikeSwap] Invalid LoadBikeSettings function pointer");
-            return false;
-        }
-
-        if (IsBadCodePtr((FARPROC)g_bikeLookup)) {
-            LOG_ERROR("[BikeSwap] Invalid BikeLookup function pointer");
-            return false;
-        }
-
-        if (IsBadCodePtr((FARPROC)g_changeBikeWithMesh)) {
-            LOG_WARNING("[BikeSwap] Invalid ChangeBikeWithMeshReload function pointer - mesh swap may not work");
-        }
-
-        if (IsBadCodePtr((FARPROC)g_getAppearanceData)) {
-            LOG_WARNING("[BikeSwap] Invalid GetAppearanceData function pointer - using fallback");
         }
 
         g_initialized = true;
-        LOG_VERBOSE("[BikeSwap] Initialized successfully");
-        LOG_VERBOSE("[BikeSwap] LoadBikeSettings @ 0x" << std::hex << (uintptr_t)g_loadBikeSettings);
-        LOG_VERBOSE("[BikeSwap] ChangeBikeWithMesh @ 0x" << std::hex << (uintptr_t)g_changeBikeWithMesh);
-        LOG_VERBOSE("[BikeSwap] GetAppearanceData @ 0x" << std::hex << (uintptr_t)g_getAppearanceData);
+
+        // Install the frame update hook so bike swaps run on the game's main thread
+        if (!g_hookInstalled && GetReloadBikeFromSettingsRVA() != 0) {
+            uintptr_t frameUpdateAddr = baseAddress + GetHandleGameFrameUpdateRVA();
+            MH_STATUS hookStatus = MH_CreateHook(
+                reinterpret_cast<LPVOID>(frameUpdateAddr),
+                reinterpret_cast<LPVOID>(&Hook_HandleGameFrameUpdate),
+                reinterpret_cast<LPVOID*>(&g_OriginalHandleGameFrameUpdate));
+
+            if (hookStatus == MH_OK) {
+                hookStatus = MH_EnableHook(reinterpret_cast<LPVOID>(frameUpdateAddr));
+                if (hookStatus == MH_OK) {
+                    g_hookInstalled = true;
+                    LOG_INFO("[BikeSwap] Frame update hook installed - bike swaps will run on main thread");
+                }
+                else {
+                    LOG_ERROR("[BikeSwap] Failed to enable frame hook: " << MH_StatusToString(hookStatus));
+                }
+            }
+            else {
+                LOG_ERROR("[BikeSwap] Failed to create frame hook: " << MH_StatusToString(hookStatus));
+            }
+        }
+        else if (GetReloadBikeFromSettingsRVA() == 0) {
+            LOG_WARNING("[BikeSwap] ReloadBikeFromSettings RVA is 0 - hook-based swap unavailable");
+        }
+
+        LOG_INFO("[BikeSwap] Initialized successfully (hook: " << (g_hookInstalled ? "active" : "inactive") << ")");
 
         return true;
     }
 
     void Shutdown() {
-        g_initialized = false;
-        g_baseAddress = 0;
-        g_globalStructPtr = nullptr;
-        g_loadBikeSettings = nullptr;
-        g_bikeLookup = nullptr;
-        g_initBikeAttachments = nullptr;
-        g_changeBikeWithMesh = nullptr;
-        g_loadBikeMesh = nullptr;
-        g_loadBikeMeshAndVisuals = nullptr;
-        g_cleanupSceneGeometry = nullptr;
-        g_getAppearanceData = nullptr;
-        g_initBikeAppearanceSlots = nullptr;
-        g_serializeBikeScene = nullptr;
-        g_finalizeRiderSetup = nullptr;
-        g_resetBikeState = nullptr;
-        g_reloadBikeWithNewId = nullptr;
-        
-        // Reset pending swap state
-        g_pendingBikeSwap = false;
-        g_pendingBikeId = 0;
-        g_swapRequestTime = 0;
-        g_swapState = SwapState::None;
-        
-        LOG_VERBOSE("[BikeSwap] Shutdown complete");
-    }
-
-    bool IsInitialized() {
-        return g_initialized;
-    }
-
-    // ============================================================================
-    // Bike Information Functions
-    // ============================================================================
-
-    std::vector<BikeInfo> GetAvailableBikes() {
-        std::vector<BikeInfo> bikes;
-
-        void* bikeDatabase = GetBikeDatabase();
-
-        for (int i = 0; i < g_validBikeCount; i++) {
-            uint8_t id = g_validBikeIds[i];
-            BikeInfo info;
-            info.id = id;
-            
-            auto nameIt = g_bikeNames.find(id);
-            if (nameIt != g_bikeNames.end()) {
-                info.name = nameIt->second;
-            } else {
-                info.name = "Unknown Bike " + std::to_string(id);
-            }
-            
-            info.internalName = "Bike_" + std::to_string(id);
-            
-            // Check if bike data exists in the database
-            if (bikeDatabase && g_bikeLookup) {
-                void* bikeData = SafeBikeLookup(bikeDatabase, id);
-                info.available = (bikeData != nullptr);
-            } else {
-                info.available = false;
-            }
-            
-            bikes.push_back(info);
-        }
-
-        return bikes;
-    }
-
-    uint8_t GetCurrentBikeId() {
-        void* bikePtr = GetBikePointer();
-        if (!bikePtr) {
-            return 0;
-        }
-
-        uintptr_t bikeIdAddr = reinterpret_cast<uintptr_t>(bikePtr) + BIKE_ID_OFFSET;
-        if (IsBadReadPtr((void*)bikeIdAddr, sizeof(int))) {
-            return 0;
-        }
-
-        // Bike ID is stored as an int at +0x680, but only the low byte matters
-        int bikeIdFull = *reinterpret_cast<int*>(bikeIdAddr);
-        return static_cast<uint8_t>(bikeIdFull);
-    }
-
-    std::string GetCurrentBikeName() {
-        uint8_t id = GetCurrentBikeId();
-        return GetBikeNameFromId(id);
-    }
-
-    std::string GetBikeNameFromId(uint8_t bikeId) {
-        auto it = g_bikeNames.find(bikeId);
-        if (it != g_bikeNames.end()) {
-            return it->second;
-        }
-        return "Unknown (" + std::to_string(bikeId) + ")";
-    }
-
-    // ============================================================================
-    // Bike Swap Functions
-    // ============================================================================
-
-    bool SetBike(BikeType bike) {
-        return SetBikeById(static_cast<uint8_t>(bike));
-    }
-
-    // Internal function to execute the actual bike swap
-    // This should only be called when the game is in a safe state
-    static bool ExecuteBikeSwapInternal(uint8_t bikeId) {
-        void* bikePtr = GetBikePointer();
-        if (!bikePtr) {
-            LOG_ERROR("[BikeSwap] No active bike found during swap execution");
-            return false;
-        }
-
-        // Get appearance data
-        void* appearanceDb = GetAppearanceDatabase();
-        uint16_t appearanceData[16];  // 32 bytes
-        memset(appearanceData, 0, sizeof(appearanceData));
-        
-        if (appearanceDb && g_getAppearanceData && !IsBadCodePtr((FARPROC)g_getAppearanceData)) {
-            SafeGetAppearanceData(appearanceDb, appearanceData, bikeId);
-        }
-        
-        // Call ChangeBikeWithMeshReload
-        bool meshChanged = false;
-        if (g_changeBikeWithMesh && !IsBadCodePtr((FARPROC)g_changeBikeWithMesh)) {
-            LOG_VERBOSE("[BikeSwap] Executing ChangeBikeWithMeshReload...");
-            meshChanged = SafeChangeBikeWithMesh(bikePtr, bikeId, appearanceData);
-        }
-        
-        return meshChanged;
-    }
-
-    // Process any pending bike swap - called from CheckHotkey
-    // Uses a state machine to safely sequence the swap operations
-    void ProcessPendingBikeSwap() {
-        if (!g_pendingBikeSwap) {
-            g_swapState = SwapState::None;
+        if (!g_initialized) {
             return;
         }
 
-        DWORD currentTime = GetTickCount();
-        DWORD elapsed = currentTime - g_swapRequestTime;
-
-        switch (g_swapState) {
-            case SwapState::WaitingForRespawn: {
-                // Wait 250ms for the initial respawn to fully complete
-                // This gives time for CleanupSceneGeometry and LoadSceneObjectsFromStream
-                if (elapsed < 250) {
-                    return;
-                }
-
-                // Extra safety check - make sure bike pointer is still valid
-                void* bikePtr = GetBikePointer();
-                if (!bikePtr) {
-                    LOG_ERROR("[BikeSwap] Bike pointer became invalid, canceling swap");
-                    g_pendingBikeSwap = false;
-                    g_swapState = SwapState::None;
-                    return;
-                }
-
-                // Now execute the actual mesh swap
-                std::string bikeName = GetBikeNameFromId(g_pendingBikeId);
-                LOG_VERBOSE("[BikeSwap] Executing mesh swap to " << bikeName);
-
-                if (ExecuteBikeSwapInternal(g_pendingBikeId)) {
-                    LOG_INFO("[BikeSwap] Mesh swap successful!");
-                    
-                    // Move to stabilization phase
-                    g_swapState = SwapState::ExecutingSwap;
-                    g_swapRequestTime = currentTime;  // Reset timer for next phase
-                    
-                    // Trigger another respawn to reset game state after mesh change
-                    LOG_VERBOSE("[BikeSwap] Triggering stabilization respawn...");
-                    Respawn::RespawnAtCheckpoint();
-                } else {
-                    LOG_WARNING("[BikeSwap] Mesh swap may have failed");
-                    g_pendingBikeSwap = false;
-                    g_swapState = SwapState::None;
-                }
-                break;
-            }
-
-            case SwapState::ExecutingSwap:
-            case SwapState::WaitingForStabilize: {
-                // Wait another 200ms after the stabilization respawn
-                if (elapsed < 200) {
-                    return;
-                }
-
-                // Swap complete!
-                std::string bikeName = GetBikeNameFromId(g_pendingBikeId);
-                LOG_INFO("[BikeSwap] Bike swap complete! Now riding " << bikeName);
-                
-                g_pendingBikeSwap = false;
-                g_pendingBikeId = 0;
-                g_swapState = SwapState::None;
-                break;
-            }
-
-            case SwapState::None:
-            default:
-                // Shouldn't happen, but reset state just in case
-                g_pendingBikeSwap = false;
-                break;
+        // Disable the frame update hook
+        if (g_hookInstalled) {
+            uintptr_t frameUpdateAddr = g_baseAddress + GetHandleGameFrameUpdateRVA();
+            MH_DisableHook(reinterpret_cast<LPVOID>(frameUpdateAddr));
+            MH_RemoveHook(reinterpret_cast<LPVOID>(frameUpdateAddr));
+            g_hookInstalled = false;
+            g_OriginalHandleGameFrameUpdate = nullptr;
+            LOG_VERBOSE("[BikeSwap] Frame update hook removed");
         }
+
+        g_initialized = false;
+        g_globalStructPtr = nullptr;
+        g_changeBikeWithMeshReload = nullptr;
+        g_loadBikeSettings = nullptr;
+        g_loadBikeMeshAndVisuals = nullptr;
+        g_cleanupSceneGeometry = nullptr;
+        g_finalizeRiderSetup = nullptr;
+        g_resetBikeState = nullptr;
+        g_initBikeAppearanceSlots = nullptr;
+        g_serializeBikeSceneObjects = nullptr;
+        g_getBikeDataByIndex = nullptr;
+        g_getFirstEntityFromList = nullptr;
+        g_reloadBikeFromSettings = nullptr;
+        g_swapInProgress = false;
+        g_pendingBikeId = -1;
+        g_pendingRespawnFrames = -1;
+
+        LOG_VERBOSE("[BikeSwap] Shutdown complete");
     }
 
-    bool SetBikeById(uint8_t bikeId) {
+    bool IsSwapAvailable() {
+        if (!g_initialized) {
+            return false;
+        }
+
+        void* bikeEntity = GetCurrentBikeEntity();
+        return bikeEntity != nullptr;
+    }
+
+    int GetCurrentBikeId() {
+        if (!g_initialized) {
+            return -1;
+        }
+
+        void* bikeEntity = GetCurrentBikeEntity();
+        if (!bikeEntity) {
+            return -1;
+        }
+
+        // Read bike ID from bike entity at offset 0x680
+        uintptr_t bikeIdAddr = reinterpret_cast<uintptr_t>(bikeEntity) + BIKE_ID_OFFSET;
+        if (IsBadReadPtr((void*)bikeIdAddr, sizeof(int))) {
+            return -1;
+        }
+
+        int bikeId = *reinterpret_cast<int*>(bikeIdAddr);
+        return bikeId;
+    }
+
+    int GetTotalBikeCount() {
+        if (!g_initialized) {
+            return 0;
+        }
+
+        // The game has a fixed set of bikes (typically 8-10)
+        // Bikes: Pit Viper (0), Squid (1), Roach (2), Turtle (3), Jackal (4), 
+        //        Mantis (5), Donkey (6), Rabbit (7), Rhino (8)
+        return 9;
+    }
+
+    bool SwapToBike(int bikeId) {
         if (!g_initialized) {
             LOG_ERROR("[BikeSwap] Not initialized");
             return false;
         }
 
-        // Check cooldown to prevent rapid swapping
-        DWORD currentTime = GetTickCount();
-        if (g_swapRequestTime != 0 && (currentTime - g_swapRequestTime) < SWAP_COOLDOWN_MS) {
-            LOG_VERBOSE("[BikeSwap] Swap on cooldown, please wait");
+        if (bikeId < 0 || bikeId >= GetTotalBikeCount()) {
+            LOG_ERROR("[BikeSwap] Invalid bike ID: " << bikeId);
             return false;
         }
 
-        void* bikePtr = GetBikePointer();
-        if (!bikePtr) {
-            LOG_ERROR("[BikeSwap] No active bike found - are you in a track?");
-            return false;
-        }
-
-        // Verify the bike ID is valid by checking the database
-        void* bikeDatabase = GetBikeDatabase();
-        if (!bikeDatabase) {
-            LOG_ERROR("[BikeSwap] Could not get bike database");
-            return false;
-        }
-
-        void* bikeData = SafeBikeLookup(bikeDatabase, bikeId);
-        if (!bikeData) {
-            LOG_ERROR("[BikeSwap] Bike ID " << (int)bikeId << " not found in database");
-            return false;
-        }
-
-        uint8_t currentId = GetCurrentBikeId();
-        if (currentId == bikeId) {
-            LOG_VERBOSE("[BikeSwap] Already using bike ID " << (int)bikeId);
+        int currentBikeId = GetCurrentBikeId();
+        if (currentBikeId == bikeId) {
+            LOG_VERBOSE("[BikeSwap] Already on bike " << bikeId);
             return true;
         }
 
-        // Get names for logging
-        std::string fromName = GetBikeNameFromId(currentId);
-        std::string toName = GetBikeNameFromId(bikeId);
-        
-        LOG_INFO("[BikeSwap] Requesting swap from " << fromName << " to " << toName);
-
-        // SAFER APPROACH: Defer the bike swap to execute after a respawn
-        // This ensures the game is in a transitional state where mesh changes are safer
-        
-        // Step 1: Write bike ID to player settings (for future restarts)
-        void* globalStruct = *g_globalStructPtr;
-        if (globalStruct && !IsBadReadPtr(globalStruct, 0x108)) {
-            uintptr_t playerSettingsAddr = reinterpret_cast<uintptr_t>(globalStruct) + 0x104;
-            if (!IsBadReadPtr((void*)playerSettingsAddr, sizeof(void*))) {
-                void* playerSettings = *reinterpret_cast<void**>(playerSettingsAddr);
-                if (playerSettings && !IsBadWritePtr(reinterpret_cast<uint8_t*>(playerSettings) + 0x684, 1)) {
-                    *reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(playerSettings) + 0x684) = bikeId;
-                    LOG_VERBOSE("[BikeSwap] Bike ID written to player settings");
-                }
-            }
+        // Prefer the hook-based approach (main thread safe)
+        if (g_hookInstalled) {
+            return QueueBikeSwapForMainThread(bikeId);
         }
-        
-        // Step 2: Set up pending swap state
-        g_pendingBikeSwap = true;
-        g_pendingBikeId = bikeId;
-        g_swapRequestTime = currentTime;
-        g_swapState = SwapState::WaitingForRespawn;  // Start state machine
-        
-        // Step 3: Trigger respawn - the actual swap will happen after respawn completes
-        LOG_VERBOSE("[BikeSwap] Triggering initial respawn, swap will execute in ~250ms...");
-        Respawn::RespawnAtCheckpoint();
-        
-        return true;
+
+        // Fallback: direct call (unsafe, kept for compatibility)
+        LOG_WARNING("[BikeSwap] No frame hook - using direct ChangeBikeWithMeshReload (may crash!)");
+
+        void* bikeEntity = GetCurrentBikeEntity();
+        if (!bikeEntity) {
+            LOG_ERROR("[BikeSwap] Could not get current bike entity - not in a race?");
+            return false;
+        }
+
+        uintptr_t appearanceDataAddr = reinterpret_cast<uintptr_t>(bikeEntity) + 0x9ec;
+        if (IsBadReadPtr((void*)appearanceDataAddr, 0x20)) {
+            LOG_ERROR("[BikeSwap] Cannot read appearance data");
+            return false;
+        }
+
+        uint8_t appearanceDataCopy[0x20];
+        memcpy(appearanceDataCopy, reinterpret_cast<void*>(appearanceDataAddr), 0x20);
+
+        bool success = CallChangeBikeWithMeshReload(bikeEntity, static_cast<uint8_t>(bikeId),
+            appearanceDataCopy);
+
+        if (success) {
+            LOG_INFO("[BikeSwap] Successfully swapped to bike " << bikeId);
+        }
+        else {
+            LOG_ERROR("[BikeSwap] Failed to swap to bike " << bikeId);
+        }
+
+        return success;
     }
 
-    bool CycleNextBike() {
-        uint8_t currentId = GetCurrentBikeId();
-        if (currentId == 0) {
+    bool SwapToNextBike() {
+        int currentId = GetCurrentBikeId();
+        if (currentId < 0) {
             LOG_ERROR("[BikeSwap] Could not get current bike ID");
             return false;
         }
 
-        // Find current bike in the list
-        int currentIndex = -1;
-        for (int i = 0; i < g_validBikeCount; i++) {
-            if (g_validBikeIds[i] == currentId) {
-                currentIndex = i;
-                break;
-            }
-        }
+        int totalBikes = GetTotalBikeCount();
+        int nextId = (currentId + 1) % totalBikes;
 
-        // Get next bike ID (wrap around)
-        int nextIndex = (currentIndex + 1) % g_validBikeCount;
-        uint8_t nextId = g_validBikeIds[nextIndex];
-
-        return SetBikeById(nextId);
+        return SwapToBike(nextId);
     }
 
-    bool CyclePreviousBike() {
-        uint8_t currentId = GetCurrentBikeId();
-        if (currentId == 0) {
+    bool SwapToPreviousBike() {
+        int currentId = GetCurrentBikeId();
+        if (currentId < 0) {
             LOG_ERROR("[BikeSwap] Could not get current bike ID");
             return false;
         }
 
-        // Find current bike in the list
-        int currentIndex = -1;
-        for (int i = 0; i < g_validBikeCount; i++) {
-            if (g_validBikeIds[i] == currentId) {
-                currentIndex = i;
-                break;
-            }
-        }
+        int totalBikes = GetTotalBikeCount();
+        int prevId = (currentId - 1 + totalBikes) % totalBikes;
 
-        // Get previous bike ID (wrap around)
-        int prevIndex = (currentIndex - 1 + g_validBikeCount) % g_validBikeCount;
-        uint8_t prevId = g_validBikeIds[prevIndex];
-
-        return SetBikeById(prevId);
+        return SwapToBike(prevId);
     }
 
-    bool ReloadBikeSettings() {
-        if (!g_initialized || !g_loadBikeSettings) {
-            LOG_ERROR("[BikeSwap] Not initialized or LoadBikeSettings unavailable");
-            return false;
+    std::string GetBikeName(int bikeId) {
+        // Bike names based on Trials Fusion
+        static const char* bikeNames[] = {
+            "Pit Viper",    // 0 - Beginner
+            "Squid",        // 1 - Easy
+            "Roach",        // 2 - Medium  
+            "Turtle",       // 3 - Medium
+            "Jackal",       // 4 - Hard
+            "Mantis",       // 5 - Hard
+            "Donkey",       // 6 - Extreme
+            "Rabbit",       // 7 - Unicorn/Special
+            "Rhino"         // 8 - Helium/Special
+        };
+
+        if (bikeId < 0 || bikeId >= static_cast<int>(sizeof(bikeNames) / sizeof(bikeNames[0]))) {
+            return "Unknown";
         }
 
-        void* bikePtr = GetBikePointer();
-        if (!bikePtr) {
-            LOG_ERROR("[BikeSwap] No active bike found");
-            return false;
-        }
-
-        LOG_VERBOSE("[BikeSwap] Reloading bike settings...");
-
-        if (SafeLoadBikeSettings(bikePtr)) {
-            LOG_INFO("[BikeSwap] Bike settings reloaded successfully!");
-            return true;
-        } else {
-            LOG_ERROR("[BikeSwap] Exception in LoadBikeSettings");
-            return false;
-        }
+        return bikeNames[bikeId];
     }
 
-    // ============================================================================
-    // Advanced Functions
-    // ============================================================================
-
-    void* GetBikeDataPointer(uint8_t bikeId) {
-        if (!g_initialized) {
-            return nullptr;
-        }
-
-        void* bikeDatabase = GetBikeDatabase();
-        if (!bikeDatabase) {
-            return nullptr;
-        }
-
-        return SafeBikeLookup(bikeDatabase, bikeId);
+    std::string GetCurrentBikeName() {
+        int currentId = GetCurrentBikeId();
+        return GetBikeName(currentId);
     }
-
-    bool ForceFullBikeReload() {
-        if (!g_initialized) {
-            LOG_ERROR("[BikeSwap] Not initialized");
-            return false;
-        }
-
-        void* bikePtr = GetBikePointer();
-        if (!bikePtr) {
-            LOG_ERROR("[BikeSwap] No active bike found");
-            return false;
-        }
-
-        uint8_t currentId = GetCurrentBikeId();
-        LOG_INFO("[BikeSwap] Performing full bike reload for " << GetBikeNameFromId(currentId) << "...");
-
-        // Use respawn to trigger a full reload - this is the safest approach
-        // The respawn transition gives the game a safe point to reload everything
-        LOG_VERBOSE("[BikeSwap] Triggering respawn for full bike reload...");
-        
-        if (Respawn::RespawnAtCheckpoint()) {
-            LOG_INFO("[BikeSwap] Full bike reload complete via respawn!");
-            return true;
-        }
-        
-        // Fallback if respawn fails: just reload settings
-        if (!ReloadBikeSettings()) {
-            return false;
-        }
-
-        // Try to reinitialize attachments if available
-        if (g_initBikeAttachments && !IsBadCodePtr((FARPROC)g_initBikeAttachments)) {
-            if (SafeInitBikeAttachments(bikePtr)) {
-                LOG_VERBOSE("[BikeSwap] Bike attachments reinitialized");
-            } else {
-                LOG_WARNING("[BikeSwap] Exception in InitializeBikeAttachments (non-fatal)");
-            }
-        }
-
-        LOG_INFO("[BikeSwap] Full bike reload complete!");
-        return true;
-    }
-
-    void DebugDumpBikeState() {
-        LOG_INFO("");
-        LOG_INFO("=== BIKE SWAP DEBUG INFO ===");
-        LOG_INFO("Initialized: " << (g_initialized ? "Yes" : "No"));
-        LOG_INFO("ChangeBikeWithMesh available: " << ((g_changeBikeWithMesh && !IsBadCodePtr((FARPROC)g_changeBikeWithMesh)) ? "Yes" : "No"));
-        
-        void* bikePtr = GetBikePointer();
-        if (bikePtr) {
-            LOG_INFO("Bike Pointer: 0x" << std::hex << reinterpret_cast<uintptr_t>(bikePtr));
-            
-            uint8_t bikeId = GetCurrentBikeId();
-            LOG_INFO("Current Bike ID: " << std::dec << (int)bikeId);
-            LOG_INFO("Current Bike Name: " << GetBikeNameFromId(bikeId));
-
-            // Read some additional fields for debugging
-            uintptr_t bikePtrAddr = reinterpret_cast<uintptr_t>(bikePtr);
-            
-            if (!IsBadReadPtr((void*)(bikePtrAddr + BIKE_GFX_HASH_OFFSET), sizeof(uint32_t))) {
-                uint32_t gfxHash = *reinterpret_cast<uint32_t*>(bikePtrAddr + BIKE_GFX_HASH_OFFSET);
-                LOG_INFO("Bike GFX Hash: 0x" << std::hex << gfxHash);
-            }
-            
-            if (!IsBadReadPtr((void*)(bikePtrAddr + BIKE_IS_REAL_OFFSET), sizeof(uint8_t))) {
-                uint8_t isReal = *reinterpret_cast<uint8_t*>(bikePtrAddr + BIKE_IS_REAL_OFFSET);
-                LOG_INFO("Is Real Bike: " << (isReal ? "Yes" : "No (Ghost/Replay)"));
-            }
-
-            // Dump appearance data
-            BikeAppearanceData appearanceData;
-            if (SafeReadAppearanceData(bikePtr, &appearanceData)) {
-                LOG_INFO("Appearance Data @ 0x" << std::hex << (bikePtrAddr + BIKE_APPEARANCE_OFFSET));
-                LOG_INFO("  field_0: " << std::dec << appearanceData.field_0);
-                LOG_INFO("  field_2: " << appearanceData.field_2);
-                LOG_INFO("  field_4: " << appearanceData.field_4);
-            }
-        } else {
-            LOG_INFO("Bike Pointer: NULL (not in track?)");
-        }
-
-        void* bikeDb = GetBikeDatabase();
-        if (bikeDb) {
-            LOG_INFO("Bike Database: 0x" << std::hex << reinterpret_cast<uintptr_t>(bikeDb));
-        } else {
-            LOG_INFO("Bike Database: NULL");
-        }
-
-        LOG_INFO("");
-        LOG_INFO("Available Bikes:");
-        std::vector<BikeInfo> bikes = GetAvailableBikes();
-        for (size_t i = 0; i < bikes.size(); i++) {
-            const BikeInfo& bike = bikes[i];
-            LOG_INFO("  ID " << std::dec << (int)bike.id << ": " << bike.name 
-                     << (bike.available ? " [Available]" : " [Not Found]"));
-        }
-        
-        LOG_INFO("============================");
-        LOG_INFO("");
-    }
-
-    // ============================================================================
-    // Hotkey Handler
-    // ============================================================================
-
-    static bool g_bracketLeftPressed = false;
-    static bool g_bracketRightPressed = false;
-    static bool g_backslashPressed = false;
 
     void CheckHotkey() {
         if (!g_initialized) {
             return;
         }
 
-        // Process any pending bike swap (deferred execution)
-        ProcessPendingBikeSwap();
+        // Check for bike swap hotkeys - queue swaps for main thread execution
+        if (Keybindings::IsActionPressed(Keybindings::Action::SwapNextBike)) {
+            int currentId = GetCurrentBikeId();
+            if (currentId >= 0) {
+                int nextId = (currentId + 1) % GetTotalBikeCount();
 
-        // [ key - Cycle to previous bike
-        bool bracketLeftDown = (GetAsyncKeyState(VK_OEM_4) & 0x8000) != 0;
-        if (bracketLeftDown && !g_bracketLeftPressed) {
-            g_bracketLeftPressed = true;
-            LOG_VERBOSE("[BikeSwap] '[' pressed - Cycling to previous bike");
-            CyclePreviousBike();
-        } else if (!bracketLeftDown) {
-            g_bracketLeftPressed = false;
+                if (g_hookInstalled) {
+                    QueueBikeSwapForMainThread(nextId);
+                }
+                else {
+                    LOG_WARNING("[BikeSwap] Frame hook not installed - bike swap unavailable");
+                }
+            }
         }
 
-        // ] key - Cycle to next bike
-        bool bracketRightDown = (GetAsyncKeyState(VK_OEM_6) & 0x8000) != 0;
-        if (bracketRightDown && !g_bracketRightPressed) {
-            g_bracketRightPressed = true;
-            LOG_VERBOSE("[BikeSwap] ']' pressed - Cycling to next bike");
-            CycleNextBike();
-        } else if (!bracketRightDown) {
-            g_bracketRightPressed = false;
+        if (Keybindings::IsActionPressed(Keybindings::Action::SwapPrevBike)) {
+            int currentId = GetCurrentBikeId();
+            if (currentId >= 0) {
+                int totalBikes = GetTotalBikeCount();
+                int prevId = (currentId - 1 + totalBikes) % totalBikes;
+
+                if (g_hookInstalled) {
+                    QueueBikeSwapForMainThread(prevId);
+                }
+                else {
+                    LOG_WARNING("[BikeSwap] Frame hook not installed - bike swap unavailable");
+                }
+            }
         }
 
-        // \ key - Debug dump bike state
-        bool backslashDown = (GetAsyncKeyState(VK_OEM_5) & 0x8000) != 0;
-        if (backslashDown && !g_backslashPressed) {
-            g_backslashPressed = true;
-            DebugDumpBikeState();
-        } else if (!backslashDown) {
-            g_backslashPressed = false;
+        if (Keybindings::IsActionPressed(Keybindings::Action::DebugBikeInfo)) {
+            DebugDumpBikeInfo();
         }
     }
 
-} // namespace BikeSwap
+    // Simple bike swap - just change ID and respawn
+    // This is safer because respawn handles the reload on the main thread
+    bool SwapToBikeSimple(int bikeId) {
+        if (!g_initialized) {
+            LOG_ERROR("[BikeSwap] Not initialized");
+            return false;
+        }
+
+        if (bikeId < 0 || bikeId >= GetTotalBikeCount()) {
+            LOG_ERROR("[BikeSwap] Invalid bike ID: " << bikeId);
+            return false;
+        }
+
+        void* editorManager = GetEditorManager();
+        if (!editorManager) {
+            LOG_ERROR("[BikeSwap] Could not get editor manager");
+            return false;
+        }
+
+        LOG_INFO("[BikeSwap] Simple swap: Setting bike ID to " << bikeId << " and respawning");
+
+        // Write the selected bike ID to the editor manager at +0x684
+        *reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(editorManager) + SELECTED_BIKE_ID_OFFSET) =
+            static_cast<uint8_t>(bikeId);
+
+        LOG_INFO("[BikeSwap] Bike ID set at editorManager+0x684, now triggering respawn...");
+
+        // Trigger a respawn - this should cause the game to reload the bike on its main thread
+        bool respawnResult = Respawn::RespawnAtCheckpoint();
+
+        if (respawnResult) {
+            LOG_INFO("[BikeSwap] Respawn triggered successfully");
+        }
+        else {
+            LOG_ERROR("[BikeSwap] Respawn failed");
+        }
+
+        return respawnResult;
+    }
+
+    // Manual step-by-step bike swap for debugging
+    // NOTE: This crashes due to threading issues - kept for reference only
+    bool SwapToBikeManual(int bikeId) {
+        if (!g_initialized) {
+            LOG_ERROR("[BikeSwap] Not initialized");
+            return false;
+        }
+
+        if (bikeId < 0 || bikeId >= GetTotalBikeCount()) {
+            LOG_ERROR("[BikeSwap] Invalid bike ID: " << bikeId);
+            return false;
+        }
+
+        void* bikeEntity = GetCurrentBikeEntity();
+        if (!bikeEntity) {
+            LOG_ERROR("[BikeSwap] Could not get current bike entity");
+            return false;
+        }
+
+        LOG_INFO("[BikeSwap] === MANUAL SWAP (reference only - crashes due to threading) ===");
+        LOG_INFO("[BikeSwap] Bike entity: 0x" << std::hex << reinterpret_cast<uintptr_t>(bikeEntity));
+        LOG_INFO("[BikeSwap] Target bike ID: " << std::dec << bikeId);
+        LOG_INFO("[BikeSwap] This function is disabled - use hook-based swap instead");
+
+        return false;
+    }
+
+    void DebugDumpBikeInfo() {
+        LOG_INFO("[BikeSwap] === DEBUG BIKE INFO ===");
+
+        if (!g_initialized) {
+            LOG_ERROR("[BikeSwap] Not initialized");
+            return;
+        }
+
+        void* bikeEntity = GetCurrentBikeEntity();
+        if (!bikeEntity) {
+            LOG_ERROR("[BikeSwap] No bike entity found");
+            return;
+        }
+
+        LOG_INFO("[BikeSwap] Bike entity ptr: 0x" << std::hex << reinterpret_cast<uintptr_t>(bikeEntity));
+
+        int currentId = GetCurrentBikeId();
+        LOG_INFO("[BikeSwap] Current bike ID: " << std::dec << currentId);
+        LOG_INFO("[BikeSwap] Current bike name: " << GetCurrentBikeName());
+
+        // Show editor manager info
+        void* editorMgr = GetEditorManager();
+        if (editorMgr) {
+            LOG_INFO("[BikeSwap] Editor manager ptr: 0x" << std::hex << reinterpret_cast<uintptr_t>(editorMgr));
+            uintptr_t selBikeAddr = reinterpret_cast<uintptr_t>(editorMgr) + SELECTED_BIKE_ID_OFFSET;
+            if (!IsBadReadPtr((void*)selBikeAddr, sizeof(uint8_t))) {
+                LOG_INFO("[BikeSwap] Selected bike at editorMgr+0x684: " << std::dec
+                    << (int)*reinterpret_cast<uint8_t*>(selBikeAddr));
+            }
+        }
+        else {
+            LOG_WARNING("[BikeSwap] Editor manager is null");
+        }
+
+        // Dump appearance data
+        uintptr_t appearanceDataAddr = reinterpret_cast<uintptr_t>(bikeEntity) + 0x9ec;
+        if (!IsBadReadPtr((void*)appearanceDataAddr, 0x20)) {
+            LOG_INFO("[BikeSwap] Appearance data at bike+0x9ec:");
+            uint8_t* data = reinterpret_cast<uint8_t*>(appearanceDataAddr);
+            for (int i = 0; i < 0x20; i += 4) {
+                LOG_INFO("[BikeSwap]   +0x" << std::hex << i << ": "
+                    << std::hex << (int)data[i] << " "
+                    << std::hex << (int)data[i + 1] << " "
+                    << std::hex << (int)data[i + 2] << " "
+                    << std::hex << (int)data[i + 3]);
+            }
+        }
+
+        LOG_INFO("[BikeSwap] Total bikes: " << std::dec << GetTotalBikeCount());
+        LOG_INFO("[BikeSwap] Available bikes:");
+        for (int i = 0; i < GetTotalBikeCount(); i++) {
+            LOG_INFO("[BikeSwap]   " << i << ": " << GetBikeName(i));
+        }
+
+        LOG_INFO("[BikeSwap] Hook installed: " << (g_hookInstalled ? "yes" : "no"));
+        LOG_INFO("[BikeSwap] Swap in progress: " << (g_swapInProgress ? "yes" : "no"));
+        LOG_INFO("[BikeSwap] Pending respawn frames: " << g_pendingRespawnFrames);
+
+        LOG_INFO("[BikeSwap] === END DEBUG ===");
+    }
+}

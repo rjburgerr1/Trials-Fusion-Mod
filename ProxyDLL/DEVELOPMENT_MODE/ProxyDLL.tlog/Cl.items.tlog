@@ -1,0 +1,12 @@
+F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\dllmain.cpp;F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\DEVELOPMENT_MODE\dllmain.obj
+F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\imgui\backends\imgui_impl_dx11.cpp;F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\DEVELOPMENT_MODE\imgui_impl_dx11.obj
+F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\imgui\backends\imgui_impl_win32.cpp;F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\DEVELOPMENT_MODE\imgui_impl_win32.obj
+F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\imgui\imgui.cpp;F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\DEVELOPMENT_MODE\imgui.obj
+F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\imgui\imgui_demo.cpp;F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\DEVELOPMENT_MODE\imgui_demo.obj
+F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\imgui\imgui_draw.cpp;F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\DEVELOPMENT_MODE\imgui_draw.obj
+F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\imgui\imgui_tables.cpp;F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\DEVELOPMENT_MODE\imgui_tables.obj
+F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\imgui\imgui_widgets.cpp;F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\DEVELOPMENT_MODE\imgui_widgets.obj
+F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\logging.cpp;F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\DEVELOPMENT_MODE\logging.obj
+F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\Overlay.cpp;F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\DEVELOPMENT_MODE\Overlay.obj
+F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\ProxyDbgcore.cpp;F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\DEVELOPMENT_MODE\ProxyDbgcore.obj
+F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\SkipIntro.cpp;F:\VSProjects\BasicProxy\BasicProxy\ProxyDLL\DEVELOPMENT_MODE\SkipIntro.obj

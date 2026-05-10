@@ -4,6 +4,7 @@
 
 #include "leaderboard_direct.h"
 #include "logging.h"
+#include "base-address.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
@@ -197,6 +198,12 @@ namespace LeaderboardScanner {
     }
 
     bool Initialize(DWORD_PTR baseAddress) {
+        // Check if Steam version - skip initialization until addresses are mapped
+        if (BaseAddress::IsSteamVersion()) {
+            LOG_WARNING("[Scanner] Steam version detected - leaderboard scanner disabled (addresses not yet mapped)");
+            return false;
+        }
+
         s_baseAddress = baseAddress;
 
         LOG_VERBOSE("[Scanner] Initializing with base address: 0x" << std::hex << baseAddress << std::dec);

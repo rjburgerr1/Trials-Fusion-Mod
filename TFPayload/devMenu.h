@@ -6,6 +6,7 @@
 #include <functional>
 #include <unordered_map>
 #include "keybindings.h"
+#include "imgui/imgui.h"  // For ImVec4 and other ImGui types
 
 // Forward declarations
 class DevMenuNode;
@@ -85,7 +86,10 @@ public:
           m_value(defaultValue),
           m_defaultValue(defaultValue),
           m_minValue(minValue),
-          m_maxValue(maxValue) {}
+          m_maxValue(maxValue),
+          m_customWidth(0.0f),
+          m_hideLabel(false),
+          m_renderInline(false) {}
     
     void Render() override;
     void Reset() override { m_value = m_defaultValue; }
@@ -101,6 +105,18 @@ public:
     void SetOnChangeCallback(std::function<void(int)> callback) {
         m_onChange = callback;
     }
+    
+    // Set custom width for slider (0 = default width)
+    void SetCustomWidth(float width) { m_customWidth = width; }
+    float GetCustomWidth() const { return m_customWidth; }
+    
+    // Hide the label text after the slider
+    void SetHideLabel(bool hide) { m_hideLabel = hide; }
+    bool IsLabelHidden() const { return m_hideLabel; }
+    
+    // Set whether this slider should render inline (same line as previous element)
+    void SetRenderInline(bool inline_render) { m_renderInline = inline_render; }
+    bool IsRenderInline() const { return m_renderInline; }
 
 private:
     int m_value;
@@ -108,6 +124,9 @@ private:
     int m_minValue;
     int m_maxValue;
     std::function<void(int)> m_onChange;
+    float m_customWidth;
+    bool m_hideLabel;
+    bool m_renderInline;
 };
 
 // Bool tweakable
@@ -138,7 +157,13 @@ private:
 class TweakableButton : public TweakableItem {
 public:
     TweakableButton(int id, const std::string& name)
-        : TweakableItem(id, name, TweakableType::Button) {}
+        : TweakableItem(id, name, TweakableType::Button), 
+          m_renderInline(false),
+          m_fixedWidth(0.0f),
+          m_useCustomColors(false),
+          m_buttonColor(ImVec4(0, 0, 0, 0)),
+          m_buttonHoveredColor(ImVec4(0, 0, 0, 0)),
+          m_buttonActiveColor(ImVec4(0, 0, 0, 0)) {}
     
     void Render() override;
     void Reset() override {} // Buttons don't need reset
@@ -153,9 +178,36 @@ public:
             m_onClick();
         }
     }
+    
+    // Set whether this button should render inline (same line as previous element)
+    void SetRenderInline(bool inline_render) { m_renderInline = inline_render; }
+    bool IsRenderInline() const { return m_renderInline; }
+    
+    // Set fixed width for button (0 = auto-size)
+    void SetFixedWidth(float width) { m_fixedWidth = width; }
+    float GetFixedWidth() const { return m_fixedWidth; }
+    
+    // Set custom colors for button (optional)
+    void SetCustomColors(ImVec4 normal, ImVec4 hovered, ImVec4 active) {
+        m_useCustomColors = true;
+        m_buttonColor = normal;
+        m_buttonHoveredColor = hovered;
+        m_buttonActiveColor = active;
+    }
+    
+    bool UsesCustomColors() const { return m_useCustomColors; }
+    ImVec4 GetButtonColor() const { return m_buttonColor; }
+    ImVec4 GetButtonHoveredColor() const { return m_buttonHoveredColor; }
+    ImVec4 GetButtonActiveColor() const { return m_buttonActiveColor; }
 
 private:
     std::function<void()> m_onClick;
+    bool m_renderInline;
+    float m_fixedWidth;
+    bool m_useCustomColors;
+    ImVec4 m_buttonColor;
+    ImVec4 m_buttonHoveredColor;
+    ImVec4 m_buttonActiveColor;
 };
 
 // Folder tweakable (contains other tweakables)

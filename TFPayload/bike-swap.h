@@ -1,37 +1,12 @@
 #pragma once
 #include <cstdint>
-#include <string>
 #include <vector>
+#include <string>
 
 namespace BikeSwap {
-    // ============================================================================
-    // Bike ID Constants (from game data)
-    // These are the byte values used internally by the game
-    // ============================================================================
-    
-    enum class BikeType : uint8_t {
-        Squid = 1,      // 125cc beginner bike
-        Donkey = 2,     // 250cc medium bike  
-        Pit_Viper = 3,  // 450cc pro bike
-        Roach = 4,      // FMX trick bike
-        Banshee = 5,    // Quad/ATV
-        Turtle = 6,     // Unicycle (DLC)
-        Mantis = 7,     // Helium (DLC)
-        Rabbit = 8,     // Raptor (DLC - custom physics)
-        // Note: Some bikes may have different IDs in different game versions
-    };
-
-    // Bike info structure
-    struct BikeInfo {
-        uint8_t id;
-        std::string name;
-        std::string internalName;
-        bool available;  // Whether the bike data was found in memory
-    };
-
-    // ============================================================================
-    // Initialization & Shutdown
-    // ============================================================================
+    // =============================================================================
+    // PUBLIC API
+    // =============================================================================
     
     // Initialize the bike swap system with the game's base address
     bool Initialize(uintptr_t baseAddress);
@@ -39,70 +14,40 @@ namespace BikeSwap {
     // Shutdown and cleanup
     void Shutdown();
 
-    // Check if system is initialized
-    bool IsInitialized();
+    // Check if bike swap is currently available (must be in a race)
+    bool IsSwapAvailable();
 
-    // ============================================================================
-    // Bike Information Functions
-    // ============================================================================
+    // Get the current bike ID (0-based index)
+    int GetCurrentBikeId();
 
-    // Get a list of all available bikes
-    std::vector<BikeInfo> GetAvailableBikes();
+    // Get total number of available bikes
+    int GetTotalBikeCount();
 
-    // Get the current bike ID
-    uint8_t GetCurrentBikeId();
+    // Swap to a specific bike by ID (0-based index)
+    // Returns true if successful, false if bike ID is invalid or swap failed
+    bool SwapToBike(int bikeId);
 
-    // Get the current bike name
+    // Swap to the next bike in the list (wraps around)
+    bool SwapToNextBike();
+
+    // Swap to the previous bike in the list (wraps around)
+    bool SwapToPreviousBike();
+
+    // Get the name of a bike by ID (returns empty string if invalid)
+    std::string GetBikeName(int bikeId);
+
+    // Get the name of the current bike
     std::string GetCurrentBikeName();
 
-    // Get bike name from ID
-    std::string GetBikeNameFromId(uint8_t bikeId);
-
-    // ============================================================================
-    // Bike Swap Functions
-    // ============================================================================
-
-    // Set the bike type (changes bike ID, reloads settings AND mesh)
-    // This uses the game's ChangeBikeWithMeshReload function for full swap
-    // Returns true on success
-    bool SetBike(BikeType bike);
-
-    // Set bike by ID (for custom/unlisted bikes)
-    // This will attempt full mesh reload, falling back to physics-only if needed
-    bool SetBikeById(uint8_t bikeId);
-
-    // Cycle to next bike (with full mesh reload)
-    bool CycleNextBike();
-
-    // Cycle to previous bike (with full mesh reload)
-    bool CyclePreviousBike();
-
-    // Reload current bike settings only (physics, no mesh change)
-    bool ReloadBikeSettings();
-
-    // ============================================================================
-    // Advanced Functions
-    // ============================================================================
-
-    // Get the bike data pointer for a given bike ID
-    // Returns nullptr if bike not found
-    void* GetBikeDataPointer(uint8_t bikeId);
-
-    // Force full bike reinitialization (includes visual/mesh reload)
-    // This calls ChangeBikeWithMeshReload with the current bike ID
-    bool ForceFullBikeReload();
-
-    // Debug: dump current bike state
-    void DebugDumpBikeState();
-
-    // ============================================================================
-    // Hotkey Handler
-    // ============================================================================
-
-    // Check and handle hotkeys for bike swapping
-    // Default hotkeys:
-    //   [ - Cycle to previous bike
-    //   ] - Cycle to next bike  
-    //   \ - Debug dump bike state
+    // Process bike swap hotkeys
     void CheckHotkey();
+
+    // Debug function to dump bike list info
+    void DebugDumpBikeInfo();
+
+    // Manual step-by-step bike swap for debugging (calls each function individually)
+    bool SwapToBikeManual(int bikeId);
+
+    // Simple bike swap - changes bike ID and triggers respawn (safer, uses game's main thread)
+    bool SwapToBikeSimple(int bikeId);
 }

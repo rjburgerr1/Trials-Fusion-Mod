@@ -3,6 +3,36 @@
 #include "logging.h"
 #include <fstream>
 #include <sstream>
+#include <Windows.h>
+
+// Helper function to get game directory
+static std::string GetGameDirectory() {
+    static std::string s_gameDirectory;
+    
+    if (!s_gameDirectory.empty()) {
+        return s_gameDirectory;
+    }
+
+    char path[MAX_PATH];
+    HMODULE hModule = NULL;
+    
+    GetModuleHandleExA(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        (LPCSTR)&GetGameDirectory,
+        &hModule
+    );
+    
+    if (GetModuleFileNameA(hModule, path, MAX_PATH) > 0) {
+        std::string fullPath(path);
+        size_t lastSlash = fullPath.find_last_of("\\/");
+        if (lastSlash != std::string::npos) {
+            s_gameDirectory = fullPath.substr(0, lastSlash + 1);
+            return s_gameDirectory;
+        }
+    }
+    
+    return "./";
+}
 
 // Static member initialization
 std::unordered_map<Keybindings::Action, int> Keybindings::s_keybindings;
@@ -79,6 +109,17 @@ void Keybindings::Initialize() {
     // Keybindings Menu
     s_keybindings[Action::ToggleKeybindingsMenu] = 'K';  // K key
     
+    // Debug
+    s_keybindings[Action::DebugGameState] = VK_F8;  // F8 key
+    
+    // Bike Swap
+    s_keybindings[Action::SwapNextBike] = VK_OEM_PERIOD;  // . key
+    s_keybindings[Action::SwapPrevBike] = VK_OEM_COMMA;   // , key
+    s_keybindings[Action::DebugBikeInfo] = VK_F9;         // F9 key
+    
+    // Console
+    s_keybindings[Action::ToggleConsole] = VK_F11;  // F11 key
+    
     // Initialize key states
     s_keyStates[Action::InstantFinish] = false;
     s_keyStates[Action::ToggleDevMenu] = false;
@@ -119,6 +160,11 @@ void Keybindings::Initialize() {
     s_keyStates[Action::ShowSingleCountdown] = false;
     s_keyStates[Action::ToggleLoadScreen] = false;
     s_keyStates[Action::ToggleKeybindingsMenu] = false;
+    s_keyStates[Action::DebugGameState] = false;
+    s_keyStates[Action::SwapNextBike] = false;
+    s_keyStates[Action::SwapPrevBike] = false;
+    s_keyStates[Action::DebugBikeInfo] = false;
+    s_keyStates[Action::ToggleConsole] = false;
     
     // Try to load from file
     if (!LoadFromFile()) {
@@ -340,6 +386,16 @@ std::string Keybindings::GetActionName(Action action) {
             return "Toggle Load Screen";
         case Action::ToggleKeybindingsMenu:
             return "Toggle Keybindings Menu";
+        case Action::DebugGameState:
+            return "Debug Game State";
+        case Action::SwapNextBike:
+            return "Swap Next Bike";
+        case Action::SwapPrevBike:
+            return "Swap Prev Bike";
+        case Action::DebugBikeInfo:
+            return "Debug Bike Info";
+        case Action::ToggleConsole:
+            return "Toggle Console";
         default:
             return "Unknown Action";
     }
@@ -491,6 +547,16 @@ bool Keybindings::LoadFromFile() {
                 s_keybindings[Action::ToggleLoadScreen] = vkCode;
             } else if (actionName == "Toggle Keybindings Menu") {
                 s_keybindings[Action::ToggleKeybindingsMenu] = vkCode;
+            } else if (actionName == "Debug Game State") {
+                s_keybindings[Action::DebugGameState] = vkCode;
+            } else if (actionName == "Swap Next Bike") {
+                s_keybindings[Action::SwapNextBike] = vkCode;
+            } else if (actionName == "Swap Prev Bike") {
+                s_keybindings[Action::SwapPrevBike] = vkCode;
+            } else if (actionName == "Debug Bike Info") {
+                s_keybindings[Action::DebugBikeInfo] = vkCode;
+            } else if (actionName == "Toggle Console") {
+                s_keybindings[Action::ToggleConsole] = vkCode;
             }
         } catch (const std::exception& e) {
             LOG_WARNING("[Keybindings] Failed to parse line: " << line << ": " << e.what());
@@ -502,6 +568,5 @@ bool Keybindings::LoadFromFile() {
 }
 
 std::string Keybindings::GetConfigPath() {
-    // Save to F:\tfpayload_keybindings.cfg
-    return "F:\\tfpayload_keybindings.cfg";
+    return GetGameDirectory() + "tfpayload_keybindings.cfg";
 }
