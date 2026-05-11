@@ -190,11 +190,6 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
     static int frameCount = 0;
     frameCount++;
     
-    // Log every 60 frames to verify hook is being called
-    if (frameCount % 60 == 0) {
-        LOG_VERBOSE("[Overlay] hkPresent called (frame " << frameCount << ")");
-    }
-    
     // F2 key toggle for overlay
     static bool lastF2State = false;
     bool f2Down = (GetAsyncKeyState(VK_F2) & 0x8000) != 0;
@@ -251,11 +246,6 @@ HRESULT __stdcall hkPresent1(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UIN
 {
     static int frameCount = 0;
     frameCount++;
-    
-    // Log every 60 frames to verify hook is being called
-    if (frameCount % 60 == 0) {
-        LOG_VERBOSE("[Overlay] hkPresent1 called (frame " << frameCount << ") - DXGI 1.2 path");
-    }
     
     // F2 key toggle for overlay
     static bool lastF2State = false;

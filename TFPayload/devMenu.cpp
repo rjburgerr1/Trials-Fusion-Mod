@@ -8,7 +8,6 @@
 #include "actionscript.h"
 #include "keybindings.h"
 #include "multiplayer.h"
-#include "acorns.h"
 #include "money.h"
 #include "host-join.h"
 #include "base-address.h"
@@ -4007,23 +4006,20 @@ void DevMenu::InitializeMod() {
     mod->AddChild(hostJoinFolder);
 
     // ============================================================================
-    // Currency Subcategory (Money on left, Acorns on right)
+    // Currency Subcategory
     // ============================================================================
     auto currencyFolder = std::make_shared<TweakableFolder>(10060, "Currency");
     
-    // Calculate column widths (two columns with spacing)
-    const float columnWidth = (totalButtonsWidth - 8.0f) / 2.0f;
-    
     // ============================================================================
-    // ROW 1: Get Balance Buttons
+    // ROW 1: Get Balance Button
     // ============================================================================
     
-    // Get Money Balance Button (LEFT)
+    // Get Money Balance Button
     auto getMoneyBalanceButton = std::make_shared<TweakableButton>(
         10021,
         "Get Money"
     );
-    getMoneyBalanceButton->SetFixedWidth(columnWidth);
+    getMoneyBalanceButton->SetFixedWidth(totalButtonsWidth);
     getMoneyBalanceButton->SetRenderInline(false);  // First on line
     getMoneyBalanceButton->SetOnClickCallback([]() {
         int balance = Money::GetBalance();
@@ -4035,30 +4031,12 @@ void DevMenu::InitializeMod() {
     });
     RegisterTweakable(getMoneyBalanceButton);
     currencyFolder->AddChild(getMoneyBalanceButton);
-    
-    // Get Acorns Balance Button (RIGHT)
-    auto getAcornsBalanceButton = std::make_shared<TweakableButton>(
-        10020,
-        "Get Acorns"
-    );
-    getAcornsBalanceButton->SetFixedWidth(columnWidth);
-    getAcornsBalanceButton->SetRenderInline(true);  // Inline with money button
-    getAcornsBalanceButton->SetOnClickCallback([]() {
-        int balance = Acorns::GetBalance();
-        if (balance >= 0) {
-            LOG_INFO("[DevMenu] Current acorn balance: " << balance);
-        } else {
-            LOG_WARNING("[DevMenu] Could not retrieve acorn balance - are you in-game?");
-        }
-    });
-    RegisterTweakable(getAcornsBalanceButton);
-    currencyFolder->AddChild(getAcornsBalanceButton);
 
     // ============================================================================
-    // ROW 2: Amount Sliders
+    // ROW 2: Amount Slider
     // ============================================================================
     
-    // Money Amount Slider (LEFT)
+    // Money Amount Slider
     auto moneyAmount = std::make_shared<TweakableInt>(
         10022,
         "Money",
@@ -4066,36 +4044,22 @@ void DevMenu::InitializeMod() {
         1,        // Min: 1 (AwardMoneyToPlayer only supports positive)
         100000    // Max: +100000
     );
-    moneyAmount->SetCustomWidth(columnWidth);
+    moneyAmount->SetCustomWidth(totalButtonsWidth);
     moneyAmount->SetHideLabel(true);
     moneyAmount->SetRenderInline(false);  // First on line
     RegisterTweakable(moneyAmount);
     currencyFolder->AddChild(moneyAmount);
-    
-    // Acorns Amount Slider (RIGHT)
-    auto acornsAmount = std::make_shared<TweakableInt>(
-        10018,
-        "Acorns",
-        100,      // Default: 100
-        -10000,   // Min: -10000 (to remove acorns)
-        10000     // Max: +10000
-    );
-    acornsAmount->SetCustomWidth(columnWidth);
-    acornsAmount->SetHideLabel(true);
-    acornsAmount->SetRenderInline(true);  // Inline with money slider
-    RegisterTweakable(acornsAmount);
-    currencyFolder->AddChild(acornsAmount);
 
     // ============================================================================
-    // ROW 3: Add Buttons
+    // ROW 3: Add Button
     // ============================================================================
     
-    // Add Money Button (LEFT)
+    // Add Money Button
     auto addMoneyButton = std::make_shared<TweakableButton>(
         10023,
         "Add Money"
     );
-    addMoneyButton->SetFixedWidth(columnWidth);
+    addMoneyButton->SetFixedWidth(totalButtonsWidth);
     addMoneyButton->SetRenderInline(false);  // First on line
     addMoneyButton->SetOnClickCallback([moneyAmount]() {
         int amount = moneyAmount->GetValue();
@@ -4109,26 +4073,6 @@ void DevMenu::InitializeMod() {
     });
     RegisterTweakable(addMoneyButton);
     currencyFolder->AddChild(addMoneyButton);
-    
-    // Add Acorns Button (RIGHT)
-    auto addAcornsButton = std::make_shared<TweakableButton>(
-        10019,
-        "Add Acorns"
-    );
-    addAcornsButton->SetFixedWidth(columnWidth);
-    addAcornsButton->SetRenderInline(true);  // Inline with money button
-    addAcornsButton->SetOnClickCallback([acornsAmount]() {
-        int amount = acornsAmount->GetValue();
-        LOG_INFO("[DevMenu] Adding " << amount << " acorns to player balance");
-        
-        if (Acorns::AddToBalance(amount)) {
-            LOG_INFO("[DevMenu] Successfully added " << amount << " acorns!");
-        } else {
-            LOG_ERROR("[DevMenu] Failed to add acorns - check if player profile is loaded");
-        }
-    });
-    RegisterTweakable(addAcornsButton);
-    currencyFolder->AddChild(addAcornsButton);
     
     // Register and add currency folder to mod
     RegisterTweakable(currencyFolder);
