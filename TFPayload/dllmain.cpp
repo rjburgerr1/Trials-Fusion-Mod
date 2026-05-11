@@ -34,6 +34,7 @@
 #include "prevent-finish.h"
 #include "gamemode.h"
 #include "bike-swap.h"
+#include "pak-runtime-hook.h"
 #include <MinHook.h>
 
 // FORWARD DECLARATIONS
@@ -157,6 +158,7 @@ void ShutdownTFPayload()
     }
 
     Tracks::Shutdown();
+    PakRuntimeHook::Shutdown();
     LeaderboardScanner::Shutdown();
     LeaderboardDirect::Shutdown();
     Pause::Shutdown();
@@ -281,6 +283,11 @@ static bool Init_LeaderboardScanner(void* userData) {
     LeaderboardScanner::Initialize(ctx->baseAddress);
     LOG_VERBOSE("[TFPayload] Leaderboard scanner initialized");
     return true;
+}
+
+static bool Init_PakRuntimeHook(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return PakRuntimeHook::Initialize(ctx->baseAddress);
 }
 
 static bool Init_LeaderboardDirect(void* userData) {
@@ -505,6 +512,7 @@ void InitializeTFPayload()
     InitContext ctx;
     ctx.baseAddress = baseAddress;
     
+    SafeInitCall("PakRuntimeHook", Init_PakRuntimeHook, &ctx);
     SafeInitCall("Tracks", Init_Tracks, nullptr);
     SafeInitCall("LeaderboardScanner", Init_LeaderboardScanner, &ctx);
     SafeInitCall("LeaderboardDirect", Init_LeaderboardDirect, &ctx);
