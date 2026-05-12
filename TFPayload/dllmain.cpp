@@ -34,6 +34,7 @@
 #include "prevent-finish.h"
 #include "gamemode.h"
 #include "bike-swap.h"
+#include "saved-games-refresh.h"
 #include <MinHook.h>
 
 // FORWARD DECLARATIONS
@@ -165,6 +166,7 @@ void ShutdownTFPayload()
     Multiplayer::Shutdown();
     HostJoin::Shutdown();
     BikeSwap::Shutdown();
+    SavedGamesRefresh::Shutdown();
     Keybindings::Shutdown();
 
     LOG_VERBOSE("[Main] All resources cleaned up.");
@@ -352,6 +354,11 @@ static bool Init_BikeSwap(void* userData) {
     return BikeSwap::Initialize(ctx->baseAddress);
 }
 
+static bool Init_SavedGamesRefresh(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return SavedGamesRefresh::Initialize(ctx->baseAddress);
+}
+
 static bool Init_Logging(void* userData) {
     Logging::Initialize();
     return true;
@@ -519,6 +526,7 @@ void InitializeTFPayload()
     SafeInitCall("PreventFinish", Init_PreventFinish, nullptr);
     SafeInitCall("GameMode", Init_GameMode, &ctx);
     SafeInitCall("BikeSwap", Init_BikeSwap, &ctx);
+    SafeInitCall("SavedGamesRefresh", Init_SavedGamesRefresh, &ctx);
     SafeInitCall("Keybindings", Init_Keybindings, nullptr);
 
     // Wait a moment to ensure ProxyDLL has hooked D3D11
@@ -626,6 +634,7 @@ void PrintHelpText()
     std::string ResetTimeKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ResetTime));
     std::string ToggleLimitValidationKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleLimitValidation));
     std::string ToggleConsoleKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleConsole));
+    std::string RefreshSavedGamesTracksKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::RefreshSavedGamesTracks));
     // Leaderboard Scanner
     std::string ScanLeaderboardByIDKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ScanLeaderboardByID));
     std::string ScanCurrentLeaderboardKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ScanCurrentLeaderboard));
@@ -688,6 +697,7 @@ void PrintHelpText()
     LOG_INFO("\t" << CycleSearchKey << "\t\t\t- Cycle through searches: Ninja -> Mountain -> Speed");
     LOG_INFO("\t" << DecreaseScrollDelayKey << "\t\t\t- Decrease scroll delay (-200ms)");
     LOG_INFO("\t" << IncreaseScrollDelayKey << "\t\t\t- Increase scroll delay (+200ms)");
+    LOG_INFO("\t" << RefreshSavedGamesTracksKey << "\t\t\t- Refresh SavedGames track catalog (experimental)");
     LOG_VERBOSE("  NOTE: All tracks auto-saved to datapack/tracks_data.csv");
     LOG_INFO("");
     LOG_INFO("\tCheckpoints");
@@ -1039,6 +1049,7 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         Camera::CheckHotkey();
         Multiplayer::CheckHotkey();
         BikeSwap::CheckHotkey();
+        SavedGamesRefresh::CheckHotkey();
         PreventFinish::Update();
         
         Sleep(80);

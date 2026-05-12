@@ -56,6 +56,7 @@ public:
         SwapPrevBike,
         DebugBikeInfo,
         ToggleConsole,
+        RefreshSavedGamesTracks,
     };
 
     static void Initialize();

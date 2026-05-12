@@ -119,6 +119,9 @@ void Keybindings::Initialize() {
     
     // Console
     s_keybindings[Action::ToggleConsole] = VK_F11;  // F11 key
+
+    // SavedGames track catalog refresh
+    s_keybindings[Action::RefreshSavedGamesTracks] = VK_F12;  // F12 key
     
     // Initialize key states
     s_keyStates[Action::InstantFinish] = false;
@@ -165,6 +168,7 @@ void Keybindings::Initialize() {
     s_keyStates[Action::SwapPrevBike] = false;
     s_keyStates[Action::DebugBikeInfo] = false;
     s_keyStates[Action::ToggleConsole] = false;
+    s_keyStates[Action::RefreshSavedGamesTracks] = false;
     
     // Try to load from file
     if (!LoadFromFile()) {
@@ -396,6 +400,8 @@ std::string Keybindings::GetActionName(Action action) {
             return "Debug Bike Info";
         case Action::ToggleConsole:
             return "Toggle Console";
+        case Action::RefreshSavedGamesTracks:
+            return "Refresh SavedGames Tracks";
         default:
             return "Unknown Action";
     }
@@ -557,6 +563,8 @@ bool Keybindings::LoadFromFile() {
                 s_keybindings[Action::DebugBikeInfo] = vkCode;
             } else if (actionName == "Toggle Console") {
                 s_keybindings[Action::ToggleConsole] = vkCode;
+            } else if (actionName == "Refresh SavedGames Tracks") {
+                s_keybindings[Action::RefreshSavedGamesTracks] = vkCode;
             }
         } catch (const std::exception& e) {
             LOG_WARNING("[Keybindings] Failed to parse line: " << line << ": " << e.what());

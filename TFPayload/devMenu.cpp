@@ -4200,6 +4200,7 @@ void DevMenu::InitializeKeybindings() {
     static bool waitingForFullCountdownSequence = false;
     static bool waitingForShowSingleCountdown = false;
     static bool waitingForToggleLoadScreen = false;
+    static bool waitingForRefreshSavedGamesTracks = false;
     
     // Clear the action and default vectors in case of re-initialization
     m_keybindingActions.clear();
@@ -4483,6 +4484,12 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(ToggleLoadScreenBtn);
     m_keybindingActions.push_back(Keybindings::Action::ToggleLoadScreen);
     m_keybindingDefaults.push_back('L');
+
+    auto refreshSavedGamesTracksBtn = CreateKeybindButton(10144, Keybindings::Action::RefreshSavedGamesTracks, &waitingForRefreshSavedGamesTracks, this);
+    RegisterTweakable(refreshSavedGamesTracksBtn);
+    m_keybindingItems.push_back(refreshSavedGamesTracksBtn);
+    m_keybindingActions.push_back(Keybindings::Action::RefreshSavedGamesTracks);
+    m_keybindingDefaults.push_back(VK_F12);
     
     // Save as Default button - explicitly saves current keybindings to config file
     auto saveKeybindings = std::make_shared<TweakableButton>(
