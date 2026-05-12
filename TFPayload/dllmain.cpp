@@ -34,6 +34,7 @@
 #include "prevent-finish.h"
 #include "gamemode.h"
 #include "bike-swap.h"
+#include "pak-runtime-hook.h"
 #include <MinHook.h>
 
 // FORWARD DECLARATIONS
@@ -165,6 +166,7 @@ void ShutdownTFPayload()
     Multiplayer::Shutdown();
     HostJoin::Shutdown();
     BikeSwap::Shutdown();
+    PakRuntimeHook::Shutdown();
     Keybindings::Shutdown();
 
     LOG_VERBOSE("[Main] All resources cleaned up.");
@@ -352,6 +354,11 @@ static bool Init_BikeSwap(void* userData) {
     return BikeSwap::Initialize(ctx->baseAddress);
 }
 
+static bool Init_PakRuntimeHook(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return PakRuntimeHook::Initialize(ctx->baseAddress);
+}
+
 static bool Init_Logging(void* userData) {
     Logging::Initialize();
     return true;
@@ -518,6 +525,7 @@ void InitializeTFPayload()
     SafeInitCall("Money", Init_Money, &ctx);
     SafeInitCall("PreventFinish", Init_PreventFinish, nullptr);
     SafeInitCall("GameMode", Init_GameMode, &ctx);
+    SafeInitCall("PakRuntimeHook", Init_PakRuntimeHook, &ctx);
     SafeInitCall("BikeSwap", Init_BikeSwap, &ctx);
     SafeInitCall("Keybindings", Init_Keybindings, nullptr);
 
@@ -651,6 +659,7 @@ void PrintHelpText()
     std::string FullCountdownSequenceKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::FullCountdownSequence));
     std::string ShowSingleCountdownKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ShowSingleCountdown));
     std::string ToggleLoadScreen = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleLoadScreen));
+    std::string ReloadObjectCollectionKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ReloadObjectCollection));
     
     LOG_INFO("  TRIALS FUSION MOD - HOTKEY CONTROLS");
     LOG_INFO("========================================");
@@ -663,6 +672,7 @@ void PrintHelpText()
     LOG_INFO("\t" << ToggleDevMenuKey << "\t\t\t- Open DevMenu");
     LOG_INFO("\tK\t\t\t- Open Keybindings Menu");
     LOG_INFO("\t" << ToggleConsoleKey << "\t\t\t- Toggle ImGui Console");
+    LOG_INFO("\t" << ReloadObjectCollectionKey << "\t\t\t- Reload objectcollection.xml probe");
     LOG_INFO("");
     LOG_INFO("\tTrack Functions");
     LOG_INFO("\t" << InstantFinishKey << "\t\t\t- Instant Pass Track");
@@ -1039,6 +1049,7 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         Camera::CheckHotkey();
         Multiplayer::CheckHotkey();
         BikeSwap::CheckHotkey();
+        PakRuntimeHook::CheckHotkey();
         PreventFinish::Update();
         
         Sleep(80);

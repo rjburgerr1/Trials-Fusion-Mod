@@ -56,6 +56,7 @@ public:
         SwapPrevBike,
         DebugBikeInfo,
         ToggleConsole,
+        ReloadObjectCollection,
     };
 
     static void Initialize();

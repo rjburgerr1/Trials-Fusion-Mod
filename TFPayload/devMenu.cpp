@@ -12,6 +12,7 @@
 #include "host-join.h"
 #include "base-address.h"
 #include "prevent-finish.h"
+#include "pak-runtime-hook.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -3665,9 +3666,26 @@ void DevMenu::InitializeMod() {
     RegisterTweakable(checkpointFolder);
     mod->AddChild(checkpointFolder);
 
+    // ============================================================================
+    // Editor Subcategory
+    // ============================================================================
+    auto editorFolder = std::make_shared<TweakableFolder>(10070, "Editor");
 
+    auto runtimeObjectScale = std::make_shared<TweakableFloat>(
+        10071,
+        "Runtime Object Scale",
+        PakRuntimeHook::GetRuntimeCodexGfxScale(),
+        0.01f,
+        50.0f
+    );
+    runtimeObjectScale->SetOnChangeCallback([](float value) {
+        PakRuntimeHook::SetRuntimeCodexGfxScale(value, true);
+    });
+    RegisterTweakable(runtimeObjectScale);
+    editorFolder->AddChild(runtimeObjectScale);
 
-
+    RegisterTweakable(editorFolder);
+    mod->AddChild(editorFolder);
 
     // ============================================================================
     // Fault/Time Subcategory
@@ -4200,6 +4218,7 @@ void DevMenu::InitializeKeybindings() {
     static bool waitingForFullCountdownSequence = false;
     static bool waitingForShowSingleCountdown = false;
     static bool waitingForToggleLoadScreen = false;
+    static bool waitingForReloadObjectCollection = false;
     
     // Clear the action and default vectors in case of re-initialization
     m_keybindingActions.clear();
@@ -4483,6 +4502,13 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(ToggleLoadScreenBtn);
     m_keybindingActions.push_back(Keybindings::Action::ToggleLoadScreen);
     m_keybindingDefaults.push_back('L');
+
+    // === Runtime Pak / Resource Probes ===
+    auto reloadObjectCollectionBtn = CreateKeybindButton(10144, Keybindings::Action::ReloadObjectCollection, &waitingForReloadObjectCollection, this);
+    RegisterTweakable(reloadObjectCollectionBtn);
+    m_keybindingItems.push_back(reloadObjectCollectionBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ReloadObjectCollection);
+    m_keybindingDefaults.push_back(VK_F12);
     
     // Save as Default button - explicitly saves current keybindings to config file
     auto saveKeybindings = std::make_shared<TweakableButton>(

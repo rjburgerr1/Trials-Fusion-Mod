@@ -292,6 +292,7 @@ copy /Y "$(TargetPath)" "F:\SteamLibrary\steamapps\common\Trials Fusion\datapack
     <ClInclude Include="money.h" />
     <ClInclude Include="multiplayer.h" />
     <ClInclude Include="pause.h" />
+    <ClInclude Include="pak-runtime-hook.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="payload.h" />
     <ClInclude Include="prevent-finish.h" />
@@ -325,6 +326,7 @@ copy /Y "$(TargetPath)" "F:\SteamLibrary\steamapps\common\Trials Fusion\datapack
     <ClCompile Include="money.cpp" />
     <ClCompile Include="multiplayer.cpp" />
     <ClCompile Include="pause.cpp" />
+    <ClCompile Include="pak-runtime-hook.cpp" />
     <ClCompile Include="prevent-finish.cpp" />
     <ClCompile Include="rendering.cpp" />
     <ClCompile Include="pch.cpp">

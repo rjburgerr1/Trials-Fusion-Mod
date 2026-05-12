@@ -4,6 +4,7 @@
 #include "keybindings.h"
 #include "base-address.h"
 #include "respawn.h"
+#include "pak-runtime-hook.h"
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <vector>
@@ -568,6 +569,8 @@ namespace BikeSwap {
         if (g_OriginalHandleGameFrameUpdate) {
             g_OriginalHandleGameFrameUpdate(thisPtr, edx_unused, param2, param3);
         }
+
+        PakRuntimeHook::UpdateOnGameFrame();
 
         // Handle pending respawn countdown (runs after bike swap completes)
         if (g_pendingRespawnFrames > 0) {
