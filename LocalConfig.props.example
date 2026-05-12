@@ -1,0 +1,5 @@
+<Project>
+  <PropertyGroup>
+    <CustomDeployPath>C:\MyExternalFolder\Plugins</CustomDeployPath>
+  </PropertyGroup>
+</Project>
