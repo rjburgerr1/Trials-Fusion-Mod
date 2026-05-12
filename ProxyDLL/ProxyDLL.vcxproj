@@ -234,7 +234,7 @@ copy /Y "$(SolutionDir)$(Configuration)\dbgcore.dll" "F:\SteamLibrary\steamapps\
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>F:\VSProjects\minhook\include;$(ProjectDir)\imgui\backends;$(ProjectDir)\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)minhook\include;$(ProjectDir)\imgui\backends;$(ProjectDir)\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
