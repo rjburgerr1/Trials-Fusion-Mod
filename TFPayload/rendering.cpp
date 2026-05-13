@@ -5,6 +5,7 @@
 #include "logging.h"
 #include "prevent-finish.h"
 #include "gamemode.h"
+#include "bike-swap.h"
 #include "imgui/imgui.h"
 #include <iostream>
 #include <algorithm>
@@ -134,6 +135,50 @@ void TFPayloadRenderCallback()
                 ImGui::PopStyleVar(3);
                 ImGui::PopStyleColor(2);
             }
+        }
+
+        // =========================================================================
+        // BIKE SWAP COOLDOWN INDICATOR
+        // =========================================================================
+
+        float bikeSwapSeconds = 0.0f;
+        float bikeSwapProgress = 1.0f;
+        std::string bikeSwapStatus;
+        if (GameMode::IsPlaying() && BikeSwap::GetCooldownStatus(&bikeSwapSeconds, &bikeSwapProgress, &bikeSwapStatus)) {
+            ImGuiIO& io = ImGui::GetIO();
+            const float windowWidth = 260.0f;
+            const float windowHeight = 58.0f;
+            const float windowX = (io.DisplaySize.x - windowWidth) * 0.5f;
+            const float windowY = 72.0f;
+
+            ImGui::SetNextWindowPos(ImVec2(windowX, windowY), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(windowWidth, windowHeight), ImGuiCond_Always);
+            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.08f, 0.86f));
+            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.25f, 0.75f, 1.0f, 0.85f));
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.25f, 0.75f, 1.0f, 0.95f));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 5.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 8));
+
+            ImGui::Begin("BikeSwapCooldownOverlay", nullptr,
+                ImGuiWindowFlags_NoTitleBar |
+                ImGuiWindowFlags_NoResize |
+                ImGuiWindowFlags_NoMove |
+                ImGuiWindowFlags_NoScrollbar |
+                ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_NoInputs);
+
+            if (bikeSwapSeconds > 0.05f) {
+                ImGui::Text("%s: %.1fs", bikeSwapStatus.c_str(), bikeSwapSeconds);
+            }
+            else {
+                ImGui::Text("%s", bikeSwapStatus.c_str());
+            }
+            ImGui::ProgressBar(bikeSwapProgress, ImVec2(-1.0f, 8.0f), "");
+
+            ImGui::End();
+            ImGui::PopStyleVar(3);
+            ImGui::PopStyleColor(3);
         }
         
         // =========================================================================

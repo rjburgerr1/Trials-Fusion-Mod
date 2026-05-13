@@ -110,10 +110,11 @@ static std::string GetKeybindingCategory(Keybindings::Action action) {
         return "Debug / Patch Controls";
     case Keybindings::Action::ToggleConsole:
         return "Console Controls";
-    case Keybindings::Action::DebugGameState:
     case Keybindings::Action::SwapNextBike:
     case Keybindings::Action::SwapPrevBike:
     case Keybindings::Action::DebugBikeInfo:
+        return "Bike Swap Controls";
+    case Keybindings::Action::DebugGameState:
         return "Bike / Game Debug Controls";
     default:
         return "Other Controls";
@@ -4349,6 +4350,9 @@ void DevMenu::InitializeKeybindings() {
     static bool waitingForShowSingleCountdown = false;
     static bool waitingForToggleLoadScreen = false;
     static bool waitingForToggleOverlay = false;
+    static bool waitingForSwapNextBike = false;
+    static bool waitingForSwapPrevBike = false;
+    static bool waitingForDebugBikeInfo = false;
     
     // Clear the action and default vectors in case of re-initialization
     m_keybindingActions.clear();
@@ -4544,6 +4548,29 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(CycleHUDBtn);
     m_keybindingActions.push_back(Keybindings::Action::CycleHUD);
     m_keybindingDefaults.push_back('V');
+
+    // === Bike Swap Controls ===
+
+    // Swap Next Bike
+    auto swapNextBikeBtn = CreateKeybindButton(10145, Keybindings::Action::SwapNextBike, &waitingForSwapNextBike, this);
+    RegisterTweakable(swapNextBikeBtn);
+    m_keybindingItems.push_back(swapNextBikeBtn);
+    m_keybindingActions.push_back(Keybindings::Action::SwapNextBike);
+    m_keybindingDefaults.push_back(VK_OEM_PERIOD);
+
+    // Swap Previous Bike
+    auto swapPrevBikeBtn = CreateKeybindButton(10146, Keybindings::Action::SwapPrevBike, &waitingForSwapPrevBike, this);
+    RegisterTweakable(swapPrevBikeBtn);
+    m_keybindingItems.push_back(swapPrevBikeBtn);
+    m_keybindingActions.push_back(Keybindings::Action::SwapPrevBike);
+    m_keybindingDefaults.push_back(VK_OEM_COMMA);
+
+    // Debug Bike Info
+    auto debugBikeInfoBtn = CreateKeybindButton(10147, Keybindings::Action::DebugBikeInfo, &waitingForDebugBikeInfo, this);
+    RegisterTweakable(debugBikeInfoBtn);
+    m_keybindingItems.push_back(debugBikeInfoBtn);
+    m_keybindingActions.push_back(Keybindings::Action::DebugBikeInfo);
+    m_keybindingDefaults.push_back(VK_F9);
     
     // === Track Central Auto-Scroll Controls ===
     
