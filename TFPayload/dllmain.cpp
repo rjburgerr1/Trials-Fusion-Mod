@@ -179,13 +179,22 @@ extern "C" __declspec(dllexport) void ShutdownPayload()
 }
 
 // C-style function for safe DevMenuSync call (no C++ objects with destructors)
-static bool TrySyncFromGame() {
+static bool TrySyncFromGame(bool captureDefaults) {
     __try {
-        DevMenuSync::SyncFromGame();
+        DevMenuSync::SyncFromGame(captureDefaults);
         return true;  // Success
     }
     __except(EXCEPTION_EXECUTE_HANDLER) {
         return false;  // Failed
+    }
+}
+
+static bool TryForceContentPackAvailability() {
+    __try {
+        return DevMenuSync::ForceContentPackAvailability();
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER) {
+        return false;
     }
 }
 
@@ -390,11 +399,18 @@ static bool Init_DevMenuSync(void* userData) {
     LOG_VERBOSE("[TFPayload] DevMenuSync initialized");
     
     // SAFETY: Call sync in separate C-style function with exception handling
-    if (TrySyncFromGame()) {
-        LOG_VERBOSE("[TFPayload] Initial sync complete");
+    if (TrySyncFromGame(true)) {
+        LOG_VERBOSE("[TFPayload] Initial sync complete; vanilla tweakable defaults captured");
     } else {
         LOG_WARNING("[TFPayload] Initial DevMenu sync failed (game not ready yet)");
         LOG_WARNING("[TFPayload] Sync will retry when menu opens");
+    }
+
+    if (TryForceContentPackAvailability()) {
+        LOG_VERBOSE("[TFPayload] ContentPack gates forced open");
+    }
+    else {
+        LOG_WARNING("[TFPayload] Failed to force ContentPack gates open");
     }
     
     LOG_VERBOSE("[TFPayload] Dev Menu ready! (Press HOME to toggle)");
@@ -625,6 +641,7 @@ void PrintHelpText()
     std::string Add10MinuteKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::Add10Minute));
     std::string ResetTimeKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ResetTime));
     std::string ToggleLimitValidationKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleLimitValidation));
+    std::string ToggleOverlayKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleOverlay));
     std::string ToggleConsoleKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleConsole));
     // Leaderboard Scanner
     std::string ScanLeaderboardByIDKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ScanLeaderboardByID));
@@ -661,6 +678,7 @@ void PrintHelpText()
     LOG_INFO("\tEND\t\t\t- Shutdown and unload TFPayload.dll");
     LOG_INFO("\tF1\t\t\t- Reload TFPayload.dll (load/unload toggle - dev mode only)");
     LOG_INFO("\t" << ToggleDevMenuKey << "\t\t\t- Open DevMenu");
+    LOG_INFO("\t" << ToggleOverlayKey << "\t\t\t- Show/Hide overlay");
     LOG_INFO("\tK\t\t\t- Open Keybindings Menu");
     LOG_INFO("\t" << ToggleConsoleKey << "\t\t\t- Toggle ImGui Console");
     LOG_INFO("");

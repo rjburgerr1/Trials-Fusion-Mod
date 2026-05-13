@@ -36,6 +36,7 @@ public:
     
     virtual void Render() = 0;
     virtual void Reset() = 0;
+    virtual void ResetToDefault() = 0;
 
 protected:
     int m_id;
@@ -56,9 +57,16 @@ public:
     
     void Render() override;
     void Reset() override { m_value = m_defaultValue; }
+    void ResetToDefault() override {
+        Reset();
+        if (m_onChange) {
+            m_onChange(m_value);
+        }
+    }
     
     float GetValue() const { return m_value; }
     void SetValue(float value) { m_value = value; }
+    void SetDefaultValue(float value) { m_defaultValue = value; }
     
     void SetRange(float min, float max) {
         m_minValue = min;
@@ -93,9 +101,16 @@ public:
     
     void Render() override;
     void Reset() override { m_value = m_defaultValue; }
+    void ResetToDefault() override {
+        Reset();
+        if (m_onChange) {
+            m_onChange(m_value);
+        }
+    }
     
     int GetValue() const { return m_value; }
     void SetValue(int value) { m_value = value; }
+    void SetDefaultValue(int value) { m_defaultValue = value; }
     
     void SetRange(int min, int max) {
         m_minValue = min;
@@ -139,9 +154,16 @@ public:
     
     void Render() override;
     void Reset() override { m_value = m_defaultValue; }
+    void ResetToDefault() override {
+        Reset();
+        if (m_onChange) {
+            m_onChange(m_value);
+        }
+    }
     
     bool GetValue() const { return m_value; }
     void SetValue(bool value) { m_value = value; }
+    void SetDefaultValue(bool value) { m_defaultValue = value; }
     
     void SetOnChangeCallback(std::function<void(bool)> callback) {
         m_onChange = callback;
@@ -167,6 +189,7 @@ public:
     
     void Render() override;
     void Reset() override {} // Buttons don't need reset
+    void ResetToDefault() override {}
     
     void SetOnClickCallback(std::function<void()> callback) {
         m_onClick = callback;
@@ -219,6 +242,7 @@ public:
     
     void Render() override;
     void Reset() override;
+    void ResetToDefault() override;
     
     void AddChild(std::shared_ptr<TweakableItem> child) {
         m_children.push_back(child);

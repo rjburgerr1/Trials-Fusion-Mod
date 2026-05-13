@@ -46,10 +46,10 @@ void Keybindings::Initialize() {
     
     // Set default keybindings
     // System controls
-    s_keybindings[Action::InstantFinish] = '`';  // Default to V key
-    s_keybindings[Action::ToggleDevMenu] = VK_HOME;  // Default to HOME key
+    s_keybindings[Action::InstantFinish] = 'F';  // F key
+    s_keybindings[Action::ToggleDevMenu] = VK_F2;  // F2 key
     s_keybindings[Action::ClearConsole] = 'C';  // Default to C key
-    s_keybindings[Action::ToggleVerboseLogging] = VK_OEM_PLUS;  // Default to = key
+    s_keybindings[Action::ToggleVerboseLogging] = 'L';  // L key
     s_keybindings[Action::ShowHelpText] = VK_OEM_MINUS;  // Default to - key
     s_keybindings[Action::DumpTweakables] = 'B';  // Default to B key
     
@@ -65,9 +65,9 @@ void Keybindings::Initialize() {
     s_keybindings[Action::IncreaseScrollDelay] = VK_DELETE;  // DELETE key
     
     // Leaderboard Direct
-    s_keybindings[Action::TestFetchTrackID] = VK_F10;  // F10 key
+    s_keybindings[Action::TestFetchTrackID] = 0;  // Unbound
     // Pause controls
-    s_keybindings[Action::TogglePause] = '0';  // 0 key
+    s_keybindings[Action::TogglePause] = 'P';  // P key
     
     // Camera controls
     s_keybindings[Action::CycleHUD] = 'O';  // O key
@@ -76,35 +76,36 @@ void Keybindings::Initialize() {
     s_keybindings[Action::RespawnAtCheckpoint] = 'W';  // Q key
     s_keybindings[Action::RespawnPrevCheckpoint] = 'Q';  // W key
     s_keybindings[Action::RespawnNextCheckpoint] = 'E';  // E key
-    s_keybindings[Action::RespawnForward5] = 'F';  // F key
+    s_keybindings[Action::RespawnForward5] = 0;  // Unbound
     
     // Fault controls
-    s_keybindings[Action::IncrementFault] = 'F';  // G key
+    s_keybindings[Action::IncrementFault] = 0;  // Unbound
     s_keybindings[Action::DebugFaultCounter] = VK_OEM_6;  // H key
-    s_keybindings[Action::Add100Faults] = 'J';  // J key
-    s_keybindings[Action::Subtract100Faults] = 'H';  // K key
+    s_keybindings[Action::Add100Faults] = 0;  // Unbound
+    s_keybindings[Action::Subtract100Faults] = 0;  // Unbound
     s_keybindings[Action::ResetFaults] = '1';  // R key
     
     // Time controls
     s_keybindings[Action::DebugTimeCounter] = VK_OEM_4;  // [ key
-    s_keybindings[Action::Add60Seconds] = 'U';  // Y key
-    s_keybindings[Action::Subtract60Seconds] = 'I';  // U key
-    s_keybindings[Action::Add10Minute] = 'Y';  // I key
+    s_keybindings[Action::Add60Seconds] = 0;  // Unbound
+    s_keybindings[Action::Subtract60Seconds] = 0;  // Unbound
+    s_keybindings[Action::Add10Minute] = 0;  // Unbound
     s_keybindings[Action::ResetTime] = '2';  // ] key
     
     // Limit controls
     s_keybindings[Action::RestoreDefaultLimits] = VK_OEM_3;  // ~ key
     s_keybindings[Action::DebugLimits] = VK_OEM_7;  // ' key
-    s_keybindings[Action::ToggleLimitValidation] = VK_F4;  // F4 key
+    s_keybindings[Action::ToggleLimitValidation] = VK_F3;  // F3 key
     
     // Multiplayer Monitoring
     s_keybindings[Action::SaveMultiplayerLogs] = 'M';  // M key
     s_keybindings[Action::CaptureSessionState] = 'N';  // N key
     
     // ActionScript Commands
-    s_keybindings[Action::FullCountdownSequence] = 'T';  // T key
-    s_keybindings[Action::ShowSingleCountdown] = VK_SHIFT;  // SHIFT+T (handled separately in code)
-    s_keybindings[Action::ToggleLoadScreen] = 'L';  // Z key
+    s_keybindings[Action::FullCountdownSequence] = 0;  // Unbound
+    s_keybindings[Action::ShowSingleCountdown] = 0;  // Unbound
+    s_keybindings[Action::ToggleLoadScreen] = 0;  // Unbound
+    s_keybindings[Action::ToggleOverlay] = VK_F4;  // F4 key
     
     // Keybindings Menu
     s_keybindings[Action::ToggleKeybindingsMenu] = 'K';  // K key
@@ -159,6 +160,7 @@ void Keybindings::Initialize() {
     s_keyStates[Action::FullCountdownSequence] = false;
     s_keyStates[Action::ShowSingleCountdown] = false;
     s_keyStates[Action::ToggleLoadScreen] = false;
+    s_keyStates[Action::ToggleOverlay] = false;
     s_keyStates[Action::ToggleKeybindingsMenu] = false;
     s_keyStates[Action::DebugGameState] = false;
     s_keyStates[Action::SwapNextBike] = false;
@@ -202,10 +204,22 @@ int Keybindings::GetKey(Action action) {
 void Keybindings::SetKey(Action action, int vkCode) {
     s_keybindings[action] = vkCode;
     SaveToFile();
-    LOG_VERBOSE("[Keybindings] Set " << GetActionName(action) << " to " << GetKeyName(vkCode));
+    if (vkCode == 0) {
+        LOG_VERBOSE("[Keybindings] Unbound " << GetActionName(action));
+    } else {
+        LOG_VERBOSE("[Keybindings] Set " << GetActionName(action) << " to " << GetKeyName(vkCode));
+    }
 }
 
 bool Keybindings::IsActionPressed(Action action) {
+#ifdef RELEASE_AUTOLOAD_MODE
+    if (action == Action::ClearConsole
+        || action == Action::ShowHelpText
+        || action == Action::DumpTweakables) {
+        return false;
+    }
+#endif
+
     int vkCode = GetKey(action);
     if (vkCode == 0) {
         return false;
@@ -303,7 +317,7 @@ std::string Keybindings::GetActionName(Action action) {
     switch (action) {
         // System controls
         case Action::InstantFinish:
-            return "Instant Finish";
+            return "Finish Track";
         case Action::ToggleDevMenu:
             return "Toggle Dev Menu";
         case Action::ClearConsole:
@@ -311,9 +325,9 @@ std::string Keybindings::GetActionName(Action action) {
         case Action::ToggleVerboseLogging:
             return "Toggle Verbose Logging";
         case Action::ShowHelpText:
-            return "Show Help Text";
+            return "Log Help Text";
         case Action::DumpTweakables:
-            return "Dump Tweakables";
+            return "Log Redlynx Tweaks";
         // Leaderboard Scanner
         case Action::ScanLeaderboardByID:
             return "Scan Leaderboard By ID";
@@ -367,11 +381,11 @@ std::string Keybindings::GetActionName(Action action) {
         case Action::Subtract60Seconds:
             return "-60 Seconds-";
         case Action::Add10Minute:
-            return "+10 Minute+";
+            return "+10 Minutes+";
         case Action::ResetTime:
             return "Reset Time";
         case Action::ToggleLimitValidation:
-            return "Toggle Limit Validation";
+            return "Toggle Fault/Time Limits";
         // Multiplayer Monitoring
         case Action::SaveMultiplayerLogs:
             return "Save Multiplayer Logs";
@@ -384,6 +398,8 @@ std::string Keybindings::GetActionName(Action action) {
             return "Show Single Countdown";
         case Action::ToggleLoadScreen:
             return "Toggle Load Screen";
+        case Action::ToggleOverlay:
+            return "Toggle Overlay";
         case Action::ToggleKeybindingsMenu:
             return "Toggle Keybindings Menu";
         case Action::DebugGameState:
@@ -463,7 +479,7 @@ bool Keybindings::LoadFromFile() {
             
             // Map action name to Action enum
             // System controls
-            if (actionName == "Instant Finish") {
+            if (actionName == "Finish Track" || actionName == "Instant Finish") {
                 s_keybindings[Action::InstantFinish] = vkCode;
             } else if (actionName == "Toggle Dev Menu") {
                 s_keybindings[Action::ToggleDevMenu] = vkCode;
@@ -471,9 +487,9 @@ bool Keybindings::LoadFromFile() {
                 s_keybindings[Action::ClearConsole] = vkCode;
             } else if (actionName == "Toggle Verbose Logging") {
                 s_keybindings[Action::ToggleVerboseLogging] = vkCode;
-            } else if (actionName == "Show Help Text") {
+            } else if (actionName == "Log Help Text" || actionName == "Show Help Text") {
                 s_keybindings[Action::ShowHelpText] = vkCode;
-            } else if (actionName == "Dump Tweakables") {
+            } else if (actionName == "Log Redlynx Tweaks" || actionName == "Dump Tweakables") {
                 s_keybindings[Action::DumpTweakables] = vkCode;
             // Leaderboard Scanner
             } else if (actionName == "Scan Leaderboard By ID") {
@@ -527,11 +543,11 @@ bool Keybindings::LoadFromFile() {
                 s_keybindings[Action::Add60Seconds] = vkCode;
             } else if (actionName == "-60 Seconds-" || actionName == "Subtract 10 Seconds") {
                 s_keybindings[Action::Subtract60Seconds] = vkCode;
-            } else if (actionName == "+10 Minute+" || actionName == "Add 1 Minute") {
+            } else if (actionName == "+10 Minutes+" || actionName == "+10 Minute+" || actionName == "Add 1 Minute") {
                 s_keybindings[Action::Add10Minute] = vkCode;
             } else if (actionName == "Reset Time") {
                 s_keybindings[Action::ResetTime] = vkCode;
-            } else if (actionName == "Toggle Limit Validation" || actionName == "Disable All Limit Validation") {
+            } else if (actionName == "Toggle Fault/Time Limits" || actionName == "Toggle Limit Validation" || actionName == "Disable All Limit Validation") {
                 s_keybindings[Action::ToggleLimitValidation] = vkCode;
             // Multiplayer Monitoring
             } else if (actionName == "Save Multiplayer Logs") {
@@ -545,6 +561,8 @@ bool Keybindings::LoadFromFile() {
                 s_keybindings[Action::ShowSingleCountdown] = vkCode;
             } else if (actionName == "Toggle Load Screen") {
                 s_keybindings[Action::ToggleLoadScreen] = vkCode;
+            } else if (actionName == "Toggle Overlay") {
+                s_keybindings[Action::ToggleOverlay] = vkCode;
             } else if (actionName == "Toggle Keybindings Menu") {
                 s_keybindings[Action::ToggleKeybindingsMenu] = vkCode;
             } else if (actionName == "Debug Game State") {

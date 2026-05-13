@@ -57,6 +57,9 @@ namespace Logging {
     
     // Write to log file
     void WriteToFile(const std::string& msg);
+
+    // Write to attached Windows console/debug output
+    void WriteToConsole(const char* msg);
     
     // Write to log file immediately (for crash debugging) - pure C, no exceptions
     void WriteImmediate(const char* msg);

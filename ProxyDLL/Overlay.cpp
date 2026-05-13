@@ -7,6 +7,7 @@
 #include <sstream>
 #include <mutex>
 #include <dxgi1_2.h>  // For IDXGISwapChain1, IDXGIFactory2, etc.
+#include <unordered_map>
 
 // ImGui
 #include "imgui/imgui.h"
@@ -56,6 +57,139 @@ static void* g_OtherModPresentHook = nullptr;
 
 // Minimal overlay visibility (always on, no toggle)
 static bool g_ShowOverlay = true;
+
+static std::string GetGameDirectoryFromModule()
+{
+    char path[MAX_PATH];
+    HMODULE hModule = NULL;
+
+    GetModuleHandleExA(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        (LPCSTR)&GetGameDirectoryFromModule,
+        &hModule
+    );
+
+    if (GetModuleFileNameA(hModule, path, MAX_PATH) > 0) {
+        std::string fullPath(path);
+        size_t lastSlash = fullPath.find_last_of("\\/");
+        if (lastSlash != std::string::npos) {
+            return fullPath.substr(0, lastSlash + 1);
+        }
+    }
+
+    return "./";
+}
+
+static int GetKeybindingFromConfig(const std::string& actionName, int fallbackKey)
+{
+    std::ifstream file(GetGameDirectoryFromModule() + "tfpayload_keybindings.cfg");
+    if (!file.is_open()) {
+        return fallbackKey;
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
+        size_t equalsPos = line.find('=');
+        if (equalsPos == std::string::npos) {
+            continue;
+        }
+
+        std::string parsedAction = line.substr(0, equalsPos);
+        std::string vkCodeStr = line.substr(equalsPos + 1);
+        size_t commentPos = vkCodeStr.find('#');
+        if (commentPos != std::string::npos) {
+            vkCodeStr = vkCodeStr.substr(0, commentPos);
+        }
+
+        vkCodeStr.erase(0, vkCodeStr.find_first_not_of(" \t"));
+        vkCodeStr.erase(vkCodeStr.find_last_not_of(" \t") + 1);
+
+        if (parsedAction == actionName) {
+            try {
+                return std::stoi(vkCodeStr);
+            } catch (...) {
+                return fallbackKey;
+            }
+        }
+    }
+
+    return fallbackKey;
+}
+
+static bool IsKeyPressedOnce(int vkCode, bool& lastState)
+{
+    if (vkCode == 0) {
+        lastState = false;
+        return false;
+    }
+
+    bool down = (GetAsyncKeyState(vkCode) & 0x8000) != 0;
+    bool pressed = down && !lastState;
+    lastState = down;
+    return pressed;
+}
+
+static std::string GetKeyName(int vkCode)
+{
+    switch (vkCode) {
+    case VK_BACK: return "Backspace";
+    case VK_TAB: return "Tab";
+    case VK_RETURN: return "Enter";
+    case VK_SHIFT: return "Shift";
+    case VK_CONTROL: return "Ctrl";
+    case VK_MENU: return "Alt";
+    case VK_PAUSE: return "Pause";
+    case VK_CAPITAL: return "Caps Lock";
+    case VK_ESCAPE: return "Escape";
+    case VK_SPACE: return "Space";
+    case VK_PRIOR: return "Page Up";
+    case VK_NEXT: return "Page Down";
+    case VK_END: return "End";
+    case VK_HOME: return "Home";
+    case VK_LEFT: return "Left Arrow";
+    case VK_UP: return "Up Arrow";
+    case VK_RIGHT: return "Right Arrow";
+    case VK_DOWN: return "Down Arrow";
+    case VK_INSERT: return "Insert";
+    case VK_DELETE: return "Delete";
+    case VK_F1: return "F1";
+    case VK_F2: return "F2";
+    case VK_F3: return "F3";
+    case VK_F4: return "F4";
+    case VK_F5: return "F5";
+    case VK_F6: return "F6";
+    case VK_F7: return "F7";
+    case VK_F8: return "F8";
+    case VK_F9: return "F9";
+    case VK_F10: return "F10";
+    case VK_F11: return "F11";
+    case VK_F12: return "F12";
+    case VK_OEM_MINUS: return "Hyphen";
+    case VK_OEM_PLUS: return "Equals";
+    case VK_OEM_COMMA: return "Comma";
+    case VK_OEM_PERIOD: return "Period";
+    case VK_OEM_1: return "Semicolon";
+    case VK_OEM_2: return "Forward Slash";
+    case VK_OEM_3: return "Tilde";
+    case VK_OEM_4: return "Left Bracket";
+    case VK_OEM_5: return "Backslash";
+    case VK_OEM_6: return "Right Bracket";
+    case VK_OEM_7: return "Quote";
+    case 0: return "None";
+    default:
+        break;
+    }
+
+    if ((vkCode >= '0' && vkCode <= '9') || (vkCode >= 'A' && vkCode <= 'Z')) {
+        return std::string(1, static_cast<char>(vkCode));
+    }
+
+    return "Unknown (" + std::to_string(vkCode) + ")";
+}
 
 // For hooking via CreateDXGIFactory approach
 typedef HRESULT(WINAPI* D3D11CreateDeviceAndSwapChainFn)(
@@ -188,16 +322,14 @@ void InitImGuiForSwapChain(IDXGISwapChain* swap)
 HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags)
 {
     static int frameCount = 0;
+    static bool lastOverlayToggleState = false;
     frameCount++;
     
-    // F2 key toggle for overlay
-    static bool lastF2State = false;
-    bool f2Down = (GetAsyncKeyState(VK_F2) & 0x8000) != 0;
-    if (f2Down && !lastF2State) {
+    const int overlayToggleKey = GetKeybindingFromConfig("Toggle Overlay", VK_F4);
+    if (IsKeyPressedOnce(overlayToggleKey, lastOverlayToggleState)) {
         g_ShowOverlay = !g_ShowOverlay;
         LOG_INFO(g_ShowOverlay ? "[Overlay] Overlay SHOWN" : "[Overlay] Overlay HIDDEN");
     }
-    lastF2State = f2Down;
     
     // Log only on first call
     if (frameCount == 1) {
@@ -245,16 +377,14 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 HRESULT __stdcall hkPresent1(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS* pPresentParameters)
 {
     static int frameCount = 0;
+    static bool lastOverlayToggleState = false;
     frameCount++;
     
-    // F2 key toggle for overlay
-    static bool lastF2State = false;
-    bool f2Down = (GetAsyncKeyState(VK_F2) & 0x8000) != 0;
-    if (f2Down && !lastF2State) {
+    const int overlayToggleKey = GetKeybindingFromConfig("Toggle Overlay", VK_F4);
+    if (IsKeyPressedOnce(overlayToggleKey, lastOverlayToggleState)) {
         g_ShowOverlay = !g_ShowOverlay;
         LOG_INFO(g_ShowOverlay ? "[Overlay] Overlay SHOWN" : "[Overlay] Overlay HIDDEN");
     }
-    lastF2State = f2Down;
     
     // Log only on first call
     if (frameCount == 1) {
@@ -830,6 +960,11 @@ void RenderOverlay()
     if (!g_ImGuiInit || !g_ShowOverlay)
         return;
 
+    const int devMenuKey = GetKeybindingFromConfig("Toggle Dev Menu", VK_F2);
+    const int overlayKey = GetKeybindingFromConfig("Toggle Overlay", VK_F4);
+    const std::string devMenuKeyName = GetKeyName(devMenuKey);
+    const std::string overlayKeyName = GetKeyName(overlayKey);
+
     // Always show the overlay, even if no callbacks registered
     // (TFPayload might not be loaded yet)
     ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
@@ -845,8 +980,8 @@ void RenderOverlay()
     ImGui::Begin("RJHUD", nullptr, flags);
     ImGui::Text("RJ's Trials Mod v0.1");
     ImGui::Separator();
-    ImGui::Text("Press HOME to toggle devmenu");
-    ImGui::Text("Press F2 to toggle this overlay");
+    ImGui::Text("Press %s to Show Mod Menu", devMenuKeyName.c_str());
+    ImGui::Text("Press %s to Show/Hide this overlay", overlayKeyName.c_str());
     if (g_PresentWasAlreadyHooked) {
         ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.5f, 1.0f), "Chained with other mod");
     }

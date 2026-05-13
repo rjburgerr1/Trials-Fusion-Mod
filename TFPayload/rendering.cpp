@@ -21,6 +21,18 @@ static UnregisterRenderCallbackFn g_UnregisterCallback = nullptr;
 static GetImGuiContextFn g_GetImGuiContext = nullptr;
 static bool g_IsRegistered = false;
 
+static void ForceWindowsCursorVisible(bool visible)
+{
+    if (visible) {
+        while (ShowCursor(TRUE) < 0) {
+        }
+        SetCursor(LoadCursor(nullptr, IDC_ARROW));
+    } else {
+        while (ShowCursor(FALSE) >= 0) {
+        }
+    }
+}
+
 // Safe callback with protection
 void TFPayloadRenderCallback()
 {
@@ -129,7 +141,8 @@ void TFPayloadRenderCallback()
         // =========================================================================
         
         // Try to render DevMenu (or just keybindings window)
-        if (g_DevMenu && (g_DevMenu->IsVisible() || g_DevMenu->IsKeybindingsWindowVisible())) {
+        if (g_DevMenu && g_DevMenu->IsVisible()) {
+            ForceWindowsCursorVisible(true);
             try {
                 g_DevMenu->Render();
             }
@@ -141,6 +154,9 @@ void TFPayloadRenderCallback()
                 LOG_ERROR("[Render] DevMenu unknown exception!");
                 g_DevMenu->Hide();
             }
+        }
+        else {
+            ForceWindowsCursorVisible(false);
         }
         
         // =========================================================================
