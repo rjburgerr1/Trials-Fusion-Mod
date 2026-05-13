@@ -39,6 +39,9 @@ namespace BikeSwap {
     // Get the name of the current bike
     std::string GetCurrentBikeName();
 
+    // Cooldown/status shown by the render overlay after a bike swap
+    bool GetCooldownStatus(float* secondsRemaining, float* progress01, std::string* statusText);
+
     // Process bike swap hotkeys
     void CheckHotkey();
 
@@ -48,6 +51,6 @@ namespace BikeSwap {
     // Manual step-by-step bike swap for debugging (calls each function individually)
     bool SwapToBikeManual(int bikeId);
 
-    // Simple bike swap - changes bike ID and triggers respawn (safer, uses game's main thread)
+    // Compatibility wrapper for the queued, main-thread-safe swap path
     bool SwapToBikeSimple(int bikeId);
 }
