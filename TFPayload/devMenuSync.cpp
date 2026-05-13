@@ -352,7 +352,7 @@ namespace DevMenuSync {
         return true;
     }
 
-    void SyncFromGame() {
+    void SyncFromGame(bool captureDefaults) {
         if (!g_DevMenu) return;
 
         // Iterate through all tweakables in the ImGui menu and update them from game memory
@@ -365,9 +365,13 @@ namespace DevMenuSync {
             if (memInfo.type == 1) {  // Bool
                 auto tweakable = g_DevMenu->GetBool(id);
                 if (tweakable) {
-                    int gameValue = 0;
-                    if (SafeReadInt(memInfo.valuePtr, &gameValue)) {
-                        tweakable->SetValue(gameValue != 0);
+                    unsigned char gameValue = 0;
+                    if (TryReadRaw<unsigned char>(memInfo.valuePtr, gameValue)) {
+                        bool value = gameValue != 0;
+                        tweakable->SetValue(value);
+                        if (captureDefaults) {
+                            tweakable->SetDefaultValue(value);
+                        }
                     }
                     else {
                         memInfo.isValid = false;
@@ -380,6 +384,9 @@ namespace DevMenuSync {
                     int gameValue = 0;
                     if (SafeReadInt(memInfo.valuePtr, &gameValue)) {
                         tweakable->SetValue(gameValue);
+                        if (captureDefaults) {
+                            tweakable->SetDefaultValue(gameValue);
+                        }
                     }
                     else {
                         memInfo.isValid = false;
@@ -392,6 +399,9 @@ namespace DevMenuSync {
                     float gameValue = 0.0f;
                     if (SafeReadFloat(memInfo.valuePtr, &gameValue)) {
                         tweakable->SetValue(gameValue);
+                        if (captureDefaults) {
+                            tweakable->SetDefaultValue(gameValue);
+                        }
                     }
                     else {
                         memInfo.isValid = false;
@@ -404,5 +414,60 @@ namespace DevMenuSync {
     void SyncToGame() {
         // This is handled by the onChange callbacks set up during initialization
         // See SetupSyncCallbacks() function
+    }
+
+    bool ForceContentPackAvailability() {
+        bool ok = true;
+
+        unsigned char enabled = 1;
+        unsigned char disabled = 0;
+
+        ok = WriteValue<unsigned char>(80, enabled) && ok;
+        ok = WriteValue<unsigned char>(132, enabled) && ok;
+        ok = WriteValue<unsigned char>(133, enabled) && ok;
+        ok = WriteValue<unsigned char>(134, disabled) && ok;
+        ok = WriteValue<unsigned char>(344, enabled) && ok;
+        ok = WriteValue<unsigned char>(491, enabled) && ok;
+
+        if (g_DevMenu) {
+            if (auto allBikesUnlocked = g_DevMenu->GetBool(80)) {
+                allBikesUnlocked->SetValue(true);
+                allBikesUnlocked->SetDefaultValue(true);
+            }
+
+            if (auto advertEvents = g_DevMenu->GetBool(132)) {
+                advertEvents->SetValue(true);
+                advertEvents->SetDefaultValue(true);
+            }
+
+            if (auto ownedTweakable = g_DevMenu->GetBool(133)) {
+                ownedTweakable->SetValue(true);
+                ownedTweakable->SetDefaultValue(true);
+            }
+
+            if (auto comingSoonTweakable = g_DevMenu->GetBool(134)) {
+                comingSoonTweakable->SetValue(false);
+                comingSoonTweakable->SetDefaultValue(false);
+            }
+
+            if (auto fmxTricksUnlocked = g_DevMenu->GetBool(344)) {
+                fmxTricksUnlocked->SetValue(true);
+                fmxTricksUnlocked->SetDefaultValue(true);
+            }
+
+            if (auto allTracksUnlocked = g_DevMenu->GetBool(491)) {
+                allTracksUnlocked->SetValue(true);
+                allTracksUnlocked->SetDefaultValue(true);
+            }
+        }
+
+        if (ok) {
+            LOG_VERBOSE("[DevMenuSync] Forced startup gates: bikes/tricks/tracks unlocked, content-pack advert/owned enabled, coming-soon disabled");
+        }
+        else {
+            LOG_WARNING("[DevMenuSync] Failed to force one or more startup gate flags");
+        }
+
+        return ok;
     }
 }

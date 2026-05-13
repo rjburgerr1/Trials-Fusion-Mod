@@ -43,6 +43,83 @@ static bool IsRiderId(int id) {
     return id >= 214 && id <= 217;
 }
 
+static bool IsStartupGateId(int id) {
+    return id == 80   // AllBikesUnlocked
+        || id == 132  // Enable Advert events for content packs
+        || id == 133  // ContentPack Owned
+        || id == 134  // ContentPack Coming Soon
+        || id == 344  // FMXTricksUnlocked
+        || id == 491; // AllTracksUnlocked
+}
+
+static std::string GetKeybindingCategory(Keybindings::Action action) {
+    switch (action) {
+    case Keybindings::Action::ToggleDevMenu:
+    case Keybindings::Action::ToggleKeybindingsMenu:
+    case Keybindings::Action::ToggleOverlay:
+    case Keybindings::Action::ClearConsole:
+    case Keybindings::Action::ToggleVerboseLogging:
+    case Keybindings::Action::ShowHelpText:
+    case Keybindings::Action::DumpTweakables:
+        return "General Controls";
+    case Keybindings::Action::CycleHUD:
+        return "Camera Controls";
+    case Keybindings::Action::RespawnAtCheckpoint:
+    case Keybindings::Action::RespawnPrevCheckpoint:
+    case Keybindings::Action::RespawnNextCheckpoint:
+    case Keybindings::Action::RespawnForward5:
+    case Keybindings::Action::InstantFinish:
+        return "Respawn Controls";
+    case Keybindings::Action::IncrementFault:
+    case Keybindings::Action::DebugFaultCounter:
+    case Keybindings::Action::Add100Faults:
+    case Keybindings::Action::Subtract100Faults:
+    case Keybindings::Action::ResetFaults:
+    case Keybindings::Action::DebugTimeCounter:
+    case Keybindings::Action::Add60Seconds:
+    case Keybindings::Action::Subtract60Seconds:
+    case Keybindings::Action::Add10Minute:
+    case Keybindings::Action::ResetTime:
+    case Keybindings::Action::ToggleLimitValidation:
+    case Keybindings::Action::RestoreDefaultLimits:
+    case Keybindings::Action::DebugLimits:
+        return "Fault / Time / Limit Controls";
+    case Keybindings::Action::TogglePause:
+        return "Pause Controls";
+    case Keybindings::Action::ScanLeaderboardByID:
+    case Keybindings::Action::ScanCurrentLeaderboard:
+    case Keybindings::Action::TestFetchTrackID:
+        return "Leaderboard Scanner Controls";
+    case Keybindings::Action::StartAutoScroll:
+    case Keybindings::Action::Killswitch:
+    case Keybindings::Action::CycleSearch:
+    case Keybindings::Action::DecreaseScrollDelay:
+    case Keybindings::Action::IncreaseScrollDelay:
+        return "Track Central Auto-Scroll Controls";
+    case Keybindings::Action::SaveMultiplayerLogs:
+    case Keybindings::Action::CaptureSessionState:
+        return "Multiplayer Monitoring Controls";
+    case Keybindings::Action::FullCountdownSequence:
+    case Keybindings::Action::ShowSingleCountdown:
+    case Keybindings::Action::ToggleLoadScreen:
+        return "ActionScript Controls";
+    case Keybindings::Action::TogglePatch:
+    case Keybindings::Action::TogglePhysicsLogging:
+    case Keybindings::Action::DumpPhysicsLog:
+    case Keybindings::Action::ModifyXPosition:
+        return "Debug / Patch Controls";
+    case Keybindings::Action::ToggleConsole:
+        return "Console Controls";
+    case Keybindings::Action::DebugGameState:
+    case Keybindings::Action::SwapNextBike:
+    case Keybindings::Action::SwapPrevBike:
+    case Keybindings::Action::DebugBikeInfo:
+        return "Bike / Game Debug Controls";
+    default:
+        return "Other Controls";
+    }
+}
+
 std::shared_ptr<TweakableFloat> CreateSyncedFloat(int id, const std::string& name,
     float defaultVal, float minVal, float maxVal) {
     auto tweakable = std::make_shared<TweakableFloat>(id, name, defaultVal, minVal, maxVal);
@@ -101,8 +178,15 @@ std::shared_ptr<TweakableBool> CreateSyncedBool(int id, const std::string& name,
 
     tweakable->SetOnChangeCallback([id, name](bool newValue) {
         LOG_VERBOSE("Bool changed: " << name << " (ID=" << id << ") = " << (newValue ? "true" : "false"));
-        // Game uses int for bool (0 or 1)
-        if (!DevMenuSync::WriteValue<int>(id, newValue ? 1 : 0)) {
+
+        if (IsStartupGateId(id)) {
+            LOG_VERBOSE("Bool ID=" << id << " is startup-managed; ignoring live DevMenu write");
+            return;
+        }
+
+        // RedLynx tweakable bools are byte-sized and can be packed adjacently.
+        unsigned char gameValue = newValue ? 1 : 0;
+        if (!DevMenuSync::WriteValue<unsigned char>(id, gameValue)) {
             LOG_WARNING("Failed to write Bool ID=" << id << " to game memory!");
             DevMenuSync::DebugPrintTweakable(id);
         }
@@ -149,10 +233,7 @@ void TweakableFloat::Render() {
         ImGui::SameLine();
         std::string resetLabel = "Reset##" + std::to_string(m_id);
         if (ImGui::SmallButton(resetLabel.c_str())) {
-            Reset();
-            if (m_onChange) {
-                m_onChange(m_value);
-            }
+            ResetToDefault();
         }
     }
 
@@ -211,10 +292,7 @@ void TweakableInt::Render() {
         ImGui::SameLine();
         std::string resetLabel = "Reset##" + std::to_string(m_id);
         if (ImGui::SmallButton(resetLabel.c_str())) {
-            Reset();
-            if (m_onChange) {
-                m_onChange(m_value);
-            }
+            ResetToDefault();
         }
     }
 
@@ -252,10 +330,7 @@ void TweakableBool::Render() {
         ImGui::SameLine();
         std::string resetLabel = "Reset##" + std::to_string(m_id);
         if (ImGui::SmallButton(resetLabel.c_str())) {
-            Reset();
-            if (m_onChange) {
-                m_onChange(m_value);
-            }
+            ResetToDefault();
         }
     }
 }
@@ -325,6 +400,12 @@ void TweakableFolder::Reset() {
     }
 }
 
+void TweakableFolder::ResetToDefault() {
+    for (auto& child : m_children) {
+        child->ResetToDefault();
+    }
+}
+
 // DevMenu Implementation
 DevMenu::DevMenu()
     : m_isVisible(false)
@@ -380,6 +461,35 @@ void DevMenu::Initialize() {
     InitializeDebugLocalization();
     InitializeMod();
     InitializeKeybindings();
+
+    // Wrap the existing game/editor categories under a single top-level folder
+    // while keeping the custom Mod folder separate and first in the list.
+    std::shared_ptr<TweakableFolder> modFolder = nullptr;
+    std::vector<std::shared_ptr<TweakableFolder>> developerChildren;
+    developerChildren.reserve(m_rootFolders.size());
+
+    for (const auto& folder : m_rootFolders) {
+        if (folder && folder->GetName() == "Mod") {
+            modFolder = folder;
+        }
+        else {
+            developerChildren.push_back(folder);
+        }
+    }
+
+    if (!developerChildren.empty()) {
+        auto redlynxDeveloperMenu = std::make_shared<TweakableFolder>(10001, "Redlynx Developer Menu");
+        for (const auto& child : developerChildren) {
+            redlynxDeveloperMenu->AddChild(child);
+        }
+
+        m_rootFolders.clear();
+        if (modFolder) {
+            m_rootFolders.push_back(modFolder);
+        }
+        m_rootFolders.push_back(redlynxDeveloperMenu);
+    }
+
     LOG_VERBOSE("[DevMenu] Initialized with " << m_rootFolders.size() << " root folders");
 }
 
@@ -465,6 +575,8 @@ void DevMenu::Render() {
             float keybindingButtonWidth = maxActionWidth + colonWidth + maxKeyWidth + buttonPadding + 10.0f; // 10 extra padding
             
             // Render keybindings with aligned columns
+            std::string lastCategory;
+            bool leaderboardScannerHeaderShown = false;
             for (size_t i = 0; i < m_keybindingItems.size(); i++) {
                 auto& item = m_keybindingItems[i];
                 
@@ -479,6 +591,23 @@ void DevMenu::Render() {
                 
                 // Get info for this keybinding
                 Keybindings::Action action = m_keybindingActions[i];
+                std::string category = GetKeybindingCategory(action);
+                if (i == 0 || category != lastCategory) {
+                    if (category == "Leaderboard Scanner Controls" && leaderboardScannerHeaderShown) {
+                        // Keep the scanner rows together under the first header only.
+                    } else {
+                        if (i != 0) {
+                            ImGui::Spacing();
+                        }
+                        ImGui::Separator();
+                        ImGui::TextDisabled("%s", category.c_str());
+                        ImGui::Separator();
+                        if (category == "Leaderboard Scanner Controls") {
+                            leaderboardScannerHeaderShown = true;
+                        }
+                    }
+                    lastCategory = category;
+                }
                 std::string actionName = Keybindings::GetActionName(action);
                 std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(action));
                 int currentKey = Keybindings::GetKey(action);
@@ -490,6 +619,7 @@ void DevMenu::Render() {
                 
                 // Check if this key is bound to multiple actions
                 bool isOverbound = (keyUsageCount[currentKey] > 1);
+                bool isUnbound = (currentKey == 0);
                 
                 // Build the button label
                 std::string buttonLabel;
@@ -515,7 +645,7 @@ void DevMenu::Render() {
                 // Render the button with fixed width and left-aligned text
                 ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f)); // 0.0 = left align, 0.5 = vertical center
                 
-                // Show visual indicator when waiting for key press or if key is overbound
+                // Show visual indicator when waiting for key press, if key is overbound, or if unbound
                 if (isWaitingForKey) {
                     // Use a different color to indicate we're waiting for input
                     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 0.3f, 1.0f));
@@ -526,6 +656,11 @@ void DevMenu::Render() {
                     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.3f, 0.3f, 1.0f));
                     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.7f, 0.1f, 0.1f, 1.0f));
+                } else if (isUnbound) {
+                    // Use a muted gray to indicate this action is currently unbound
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.35f, 0.35f, 0.35f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.45f, 0.45f, 0.45f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.25f, 0.25f, 0.25f, 1.0f));
                 }
                 
                 if (ImGui::Button(buttonLabel.c_str(), ImVec2(keybindingButtonWidth, 0))) {
@@ -535,14 +670,18 @@ void DevMenu::Render() {
                     }
                 }
                 
-                // Add tooltip for overbound keys
+                // Add tooltip for overbound keys and unbound keys
                 if (isOverbound && !isWaitingForKey) {
                     if (ImGui::IsItemHovered()) {
                         ImGui::SetTooltip("WARNING: This key is bound to multiple actions!");
                     }
+                } else if (isUnbound && !isWaitingForKey) {
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("This action is currently unbound.");
+                    }
                 }
                 
-                if (isWaitingForKey || isOverbound) {
+                if (isWaitingForKey || isOverbound || isUnbound) {
                     ImGui::PopStyleColor(3); // Pop the 3 color overrides
                 }
                 
@@ -618,6 +757,10 @@ void DevMenu::Render() {
         if (ImGui::BeginMenu("Options")) {
             ImGui::MenuItem("Show Search Bar", nullptr, &m_showSearchBar);
             ImGui::MenuItem("Show Reset Buttons", nullptr, &m_showResetButton);
+            bool verboseLoggingEnabled = Logging::IsVerboseEnabled();
+            if (ImGui::MenuItem("Verbose Logging", nullptr, &verboseLoggingEnabled)) {
+                Logging::SetVerbose(verboseLoggingEnabled);
+            }
             ImGui::EndMenu();
         }
         
@@ -666,7 +809,7 @@ void DevMenu::Render() {
 
 void DevMenu::ResetAll() {
     for (auto& folder : m_rootFolders) {
-        folder->Reset();
+        folder->ResetToDefault();
     }
 }
 
@@ -1355,8 +1498,8 @@ void DevMenu::InitializeContentPack() {
 
     // Add all ContentPack tweakables
     auto enableAdvertEventsForContentPacks = CreateSyncedBool(132, "Enable Advert events for content packs", true);
-    auto owned = CreateSyncedBool(133, "Owned", false);
-    auto comingSoon = CreateSyncedBool(134, "Coming Soon", true);
+    auto owned = CreateSyncedBool(133, "Owned", true);
+    auto comingSoon = CreateSyncedBool(134, "Coming Soon", false);
 
     RegisterTweakable(enableAdvertEventsForContentPacks);
     RegisterTweakable(owned);
@@ -4107,7 +4250,7 @@ static std::shared_ptr<TweakableButton> CreateKeybindButton(
     
     button->SetOnClickCallback([button, action, waitingFlag]() {
         *waitingFlag = true;
-        button->SetName("Press any key...");
+        button->SetName("Press any key... (Esc to clear)");
         LOG_VERBOSE("[DevMenu] Waiting for key press to bind " << Keybindings::GetActionName(action) << "...");
         
         // Create thread data
@@ -4135,11 +4278,16 @@ static std::shared_ptr<TweakableButton> CreateKeybindButton(
                             Sleep(10);
                         }
                         
-                        // Set the new key
-                        Keybindings::SetKey(data->action, vk);
-                        std::string keyName = Keybindings::GetKeyName(vk);
+                        // Esc clears the binding instead of assigning a key
+                        int newKey = (vk == VK_ESCAPE) ? 0 : vk;
+                        Keybindings::SetKey(data->action, newKey);
+                        std::string keyName = Keybindings::GetKeyName(newKey);
                         data->button->SetName("Bind " + Keybindings::GetActionName(data->action) + ": " + keyName);
-                        LOG_VERBOSE("[DevMenu] " << Keybindings::GetActionName(data->action) << " bound to: " << keyName);
+                        if (newKey == 0) {
+                            LOG_VERBOSE("[DevMenu] " << Keybindings::GetActionName(data->action) << " cleared");
+                        } else {
+                            LOG_VERBOSE("[DevMenu] " << Keybindings::GetActionName(data->action) << " bound to: " << keyName);
+                        }
                         *data->waitingFlag = false;
                         delete data;
                         return 0;
@@ -4200,6 +4348,7 @@ void DevMenu::InitializeKeybindings() {
     static bool waitingForFullCountdownSequence = false;
     static bool waitingForShowSingleCountdown = false;
     static bool waitingForToggleLoadScreen = false;
+    static bool waitingForToggleOverlay = false;
     
     // Clear the action and default vectors in case of re-initialization
     m_keybindingActions.clear();
@@ -4212,7 +4361,7 @@ void DevMenu::InitializeKeybindings() {
     RegisterTweakable(toggleDevMenuBtn);
     m_keybindingItems.push_back(toggleDevMenuBtn);
     m_keybindingActions.push_back(Keybindings::Action::ToggleDevMenu);
-    m_keybindingDefaults.push_back(VK_HOME);
+    m_keybindingDefaults.push_back(VK_F2);
     
     // Toggle Keybindings Menu
     auto toggleKeybindingsMenuBtn = CreateKeybindButton(10100, Keybindings::Action::ToggleKeybindingsMenu, &waitingForToggleKeybindingsMenu, this);
@@ -4220,21 +4369,31 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(toggleKeybindingsMenuBtn);
     m_keybindingActions.push_back(Keybindings::Action::ToggleKeybindingsMenu);
     m_keybindingDefaults.push_back('K');
+
+    // Toggle Overlay
+    auto toggleOverlayBtn = CreateKeybindButton(10144, Keybindings::Action::ToggleOverlay, &waitingForToggleOverlay, this);
+    RegisterTweakable(toggleOverlayBtn);
+    m_keybindingItems.push_back(toggleOverlayBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ToggleOverlay);
+    m_keybindingDefaults.push_back(VK_F4);
     
+#ifndef RELEASE_AUTOLOAD_MODE
     // Clear Console
     auto clearConsoleBtn = CreateKeybindButton(10102, Keybindings::Action::ClearConsole, &waitingForClearConsole, this);
     RegisterTweakable(clearConsoleBtn);
     m_keybindingItems.push_back(clearConsoleBtn);
     m_keybindingActions.push_back(Keybindings::Action::ClearConsole);
     m_keybindingDefaults.push_back('C');
+#endif
     
     // Toggle Verbose Logging
     auto toggleVerboseBtn = CreateKeybindButton(10103, Keybindings::Action::ToggleVerboseLogging, &waitingForToggleVerbose, this);
     RegisterTweakable(toggleVerboseBtn);
     m_keybindingItems.push_back(toggleVerboseBtn);
     m_keybindingActions.push_back(Keybindings::Action::ToggleVerboseLogging);
-    m_keybindingDefaults.push_back(VK_OEM_PLUS);
+    m_keybindingDefaults.push_back('L');
     
+#ifndef RELEASE_AUTOLOAD_MODE
     // Show Help Text
     auto showHelpBtn = CreateKeybindButton(10104, Keybindings::Action::ShowHelpText, &waitingForShowHelp, this);
     RegisterTweakable(showHelpBtn);
@@ -4248,22 +4407,7 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(dumpTweakablesBtn);
     m_keybindingActions.push_back(Keybindings::Action::DumpTweakables);
     m_keybindingDefaults.push_back('D');
-    
-    // Instant Finish
-    auto instantFinishBtn = CreateKeybindButton(10106, Keybindings::Action::InstantFinish, &waitingForInstantFinish, this);
-    RegisterTweakable(instantFinishBtn);
-    m_keybindingItems.push_back(instantFinishBtn);
-    m_keybindingActions.push_back(Keybindings::Action::InstantFinish);
-    m_keybindingDefaults.push_back('`');
-    
-    // === Camera Controls ===
-    
-    // Cycle HUD Visibility
-    auto CycleHUDBtn = CreateKeybindButton(10107, Keybindings::Action::CycleHUD, &waitingForCycleHUD, this);
-    RegisterTweakable(CycleHUDBtn);
-    m_keybindingItems.push_back(CycleHUDBtn);
-    m_keybindingActions.push_back(Keybindings::Action::CycleHUD);
-    m_keybindingDefaults.push_back('V');
+#endif
     
     // === Respawn Controls ===
     
@@ -4293,30 +4437,16 @@ void DevMenu::InitializeKeybindings() {
     RegisterTweakable(respawnForward5Btn);
     m_keybindingItems.push_back(respawnForward5Btn);
     m_keybindingActions.push_back(Keybindings::Action::RespawnForward5);
-    m_keybindingDefaults.push_back('5');
-    
-    // === Fault Controls ===
-    // Increment Fault
-    auto incrementFaultBtn = CreateKeybindButton(10112, Keybindings::Action::IncrementFault, &waitingForIncrementFault, this);
-    RegisterTweakable(incrementFaultBtn);
-    m_keybindingItems.push_back(incrementFaultBtn);
-    m_keybindingActions.push_back(Keybindings::Action::IncrementFault);
+    m_keybindingDefaults.push_back(0);
+
+    // Instant Finish
+    auto instantFinishBtn = CreateKeybindButton(10106, Keybindings::Action::InstantFinish, &waitingForInstantFinish, this);
+    RegisterTweakable(instantFinishBtn);
+    m_keybindingItems.push_back(instantFinishBtn);
+    m_keybindingActions.push_back(Keybindings::Action::InstantFinish);
     m_keybindingDefaults.push_back('F');
     
-    // Add 100 Faults
-    auto add100FaultsBtn = CreateKeybindButton(10114, Keybindings::Action::Add100Faults, &waitingForAdd100Faults, this);
-    RegisterTweakable(add100FaultsBtn);
-    m_keybindingItems.push_back(add100FaultsBtn);
-    m_keybindingActions.push_back(Keybindings::Action::Add100Faults);
-    m_keybindingDefaults.push_back('J');
-    
-    // Subtract 100 Faults
-    auto subtract100FaultsBtn = CreateKeybindButton(10115, Keybindings::Action::Subtract100Faults, &waitingForSubtract100Faults, this);
-    RegisterTweakable(subtract100FaultsBtn);
-    m_keybindingItems.push_back(subtract100FaultsBtn);
-    m_keybindingActions.push_back(Keybindings::Action::Subtract100Faults);
-    m_keybindingDefaults.push_back('H');
-    
+    // === Fault Controls ===
     // Reset Faults
     auto resetFaultsBtn = CreateKeybindButton(10116, Keybindings::Action::ResetFaults, &waitingForResetFaults, this);
     RegisterTweakable(resetFaultsBtn);
@@ -4346,27 +4476,48 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(debugFaultCounterBtn);
     m_keybindingActions.push_back(Keybindings::Action::DebugFaultCounter);
     m_keybindingDefaults.push_back(VK_OEM_6);
+
+    // Increment Fault
+    auto incrementFaultBtn = CreateKeybindButton(10112, Keybindings::Action::IncrementFault, &waitingForIncrementFault, this);
+    RegisterTweakable(incrementFaultBtn);
+    m_keybindingItems.push_back(incrementFaultBtn);
+    m_keybindingActions.push_back(Keybindings::Action::IncrementFault);
+    m_keybindingDefaults.push_back(0);
+
+    // Add 100 Faults
+    auto add100FaultsBtn = CreateKeybindButton(10114, Keybindings::Action::Add100Faults, &waitingForAdd100Faults, this);
+    RegisterTweakable(add100FaultsBtn);
+    m_keybindingItems.push_back(add100FaultsBtn);
+    m_keybindingActions.push_back(Keybindings::Action::Add100Faults);
+    m_keybindingDefaults.push_back(0);
+
+    // Subtract 100 Faults
+    auto subtract100FaultsBtn = CreateKeybindButton(10115, Keybindings::Action::Subtract100Faults, &waitingForSubtract100Faults, this);
+    RegisterTweakable(subtract100FaultsBtn);
+    m_keybindingItems.push_back(subtract100FaultsBtn);
+    m_keybindingActions.push_back(Keybindings::Action::Subtract100Faults);
+    m_keybindingDefaults.push_back(0);
     
     // Add 10 Seconds
     auto add10SecondsBtn = CreateKeybindButton(10118, Keybindings::Action::Add60Seconds, &waitingForAdd10Seconds, this);
     RegisterTweakable(add10SecondsBtn);
     m_keybindingItems.push_back(add10SecondsBtn);
     m_keybindingActions.push_back(Keybindings::Action::Add60Seconds);
-    m_keybindingDefaults.push_back('U');
+    m_keybindingDefaults.push_back(0);
     
     // Subtract 10 Seconds
     auto subtract10SecondsBtn = CreateKeybindButton(10119, Keybindings::Action::Subtract60Seconds, &waitingForSubtract10Seconds, this);
     RegisterTweakable(subtract10SecondsBtn);
     m_keybindingItems.push_back(subtract10SecondsBtn);
     m_keybindingActions.push_back(Keybindings::Action::Subtract60Seconds);
-    m_keybindingDefaults.push_back('I');
+    m_keybindingDefaults.push_back(0);
     
     // Add 1 Minute
     auto add1MinuteBtn = CreateKeybindButton(10120, Keybindings::Action::Add10Minute, &waitingForAdd1Minute, this);
     RegisterTweakable(add1MinuteBtn);
     m_keybindingItems.push_back(add1MinuteBtn);
     m_keybindingActions.push_back(Keybindings::Action::Add10Minute);
-    m_keybindingDefaults.push_back('Y');
+    m_keybindingDefaults.push_back(0);
     
     // === Limit Controls ===
     // Toggle Limit Validation
@@ -4374,8 +4525,8 @@ void DevMenu::InitializeKeybindings() {
     RegisterTweakable(toggleLimitValidationBtn);
     m_keybindingItems.push_back(toggleLimitValidationBtn);
     m_keybindingActions.push_back(Keybindings::Action::ToggleLimitValidation);
-    m_keybindingDefaults.push_back(VK_F4);
-    
+    m_keybindingDefaults.push_back(VK_F3);
+
     // === Pause Controls ===
     
     // Toggle Pause
@@ -4384,22 +4535,15 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(togglePauseBtn);
     m_keybindingActions.push_back(Keybindings::Action::TogglePause);
     m_keybindingDefaults.push_back('P');
+
+    // === Camera Controls ===
     
-    // === Leaderboard Scanner Controls ===
-    
-    // Scan Leaderboard By ID
-    auto scanLeaderboardByIDBtn = CreateKeybindButton(10127, Keybindings::Action::ScanLeaderboardByID, &waitingForScanLeaderboardByID, this);
-    RegisterTweakable(scanLeaderboardByIDBtn);
-    m_keybindingItems.push_back(scanLeaderboardByIDBtn);
-    m_keybindingActions.push_back(Keybindings::Action::ScanLeaderboardByID);
-    m_keybindingDefaults.push_back(VK_F2);
-    
-    // Scan Current Leaderboard
-    auto scanCurrentLeaderboardBtn = CreateKeybindButton(10128, Keybindings::Action::ScanCurrentLeaderboard, &waitingForScanCurrentLeaderboard, this);
-    RegisterTweakable(scanCurrentLeaderboardBtn);
-    m_keybindingItems.push_back(scanCurrentLeaderboardBtn);
-    m_keybindingActions.push_back(Keybindings::Action::ScanCurrentLeaderboard);
-    m_keybindingDefaults.push_back(VK_F3);
+    // Cycle HUD Visibility
+    auto CycleHUDBtn = CreateKeybindButton(10107, Keybindings::Action::CycleHUD, &waitingForCycleHUD, this);
+    RegisterTweakable(CycleHUDBtn);
+    m_keybindingItems.push_back(CycleHUDBtn);
+    m_keybindingActions.push_back(Keybindings::Action::CycleHUD);
+    m_keybindingDefaults.push_back('V');
     
     // === Track Central Auto-Scroll Controls ===
     
@@ -4438,15 +4582,6 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingActions.push_back(Keybindings::Action::IncreaseScrollDelay);
     m_keybindingDefaults.push_back(VK_DELETE);
     
-    // === Leaderboard Direct Controls ===
-    
-    // Test Fetch Track ID
-    auto testFetchTrackIDBtn = CreateKeybindButton(10134, Keybindings::Action::TestFetchTrackID, &waitingForTestFetchTrackID, this);
-    RegisterTweakable(testFetchTrackIDBtn);
-    m_keybindingItems.push_back(testFetchTrackIDBtn);
-    m_keybindingActions.push_back(Keybindings::Action::TestFetchTrackID);
-    m_keybindingDefaults.push_back(VK_F10);
-    
     // === Multiplayer Monitoring Controls ===
     // Save Multiplayer Logs
     auto saveMultiplayerLogsBtn = CreateKeybindButton(10136, Keybindings::Action::SaveMultiplayerLogs, &waitingForSaveMultiplayerLogs, this);
@@ -4461,6 +4596,29 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(captureSessionStateBtn);
     m_keybindingActions.push_back(Keybindings::Action::CaptureSessionState);
     m_keybindingDefaults.push_back('N');
+
+    // === Leaderboard Scanner Controls ===
+    
+    // Scan Leaderboard By ID
+    auto scanLeaderboardByIDBtn = CreateKeybindButton(10127, Keybindings::Action::ScanLeaderboardByID, &waitingForScanLeaderboardByID, this);
+    RegisterTweakable(scanLeaderboardByIDBtn);
+    m_keybindingItems.push_back(scanLeaderboardByIDBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ScanLeaderboardByID);
+    m_keybindingDefaults.push_back(0);
+    
+    // Scan Current Leaderboard
+    auto scanCurrentLeaderboardBtn = CreateKeybindButton(10128, Keybindings::Action::ScanCurrentLeaderboard, &waitingForScanCurrentLeaderboard, this);
+    RegisterTweakable(scanCurrentLeaderboardBtn);
+    m_keybindingItems.push_back(scanCurrentLeaderboardBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ScanCurrentLeaderboard);
+    m_keybindingDefaults.push_back(0);
+
+    // Test Fetch Track ID
+    auto testFetchTrackIDBtn = CreateKeybindButton(10134, Keybindings::Action::TestFetchTrackID, &waitingForTestFetchTrackID, this);
+    RegisterTweakable(testFetchTrackIDBtn);
+    m_keybindingItems.push_back(testFetchTrackIDBtn);
+    m_keybindingActions.push_back(Keybindings::Action::TestFetchTrackID);
+    m_keybindingDefaults.push_back(0);
     
     // === ActionScript Controls ===
     // Full Countdown Sequence
@@ -4468,22 +4626,22 @@ void DevMenu::InitializeKeybindings() {
     RegisterTweakable(fullCountdownSequenceBtn);
     m_keybindingItems.push_back(fullCountdownSequenceBtn);
     m_keybindingActions.push_back(Keybindings::Action::FullCountdownSequence);
-    m_keybindingDefaults.push_back('Z');
+    m_keybindingDefaults.push_back(0);
     
     // Show Single Countdown
     auto showSingleCountdownBtn = CreateKeybindButton(10142, Keybindings::Action::ShowSingleCountdown, &waitingForShowSingleCountdown, this);
     RegisterTweakable(showSingleCountdownBtn);
     m_keybindingItems.push_back(showSingleCountdownBtn);
     m_keybindingActions.push_back(Keybindings::Action::ShowSingleCountdown);
-    m_keybindingDefaults.push_back(VK_SHIFT);
+    m_keybindingDefaults.push_back(0);
     
     // Toggle Load Screen
     auto ToggleLoadScreenBtn = CreateKeybindButton(10143, Keybindings::Action::ToggleLoadScreen, &waitingForToggleLoadScreen, this);
     RegisterTweakable(ToggleLoadScreenBtn);
     m_keybindingItems.push_back(ToggleLoadScreenBtn);
     m_keybindingActions.push_back(Keybindings::Action::ToggleLoadScreen);
-    m_keybindingDefaults.push_back('L');
-    
+    m_keybindingDefaults.push_back(0);
+
     // Save as Default button - explicitly saves current keybindings to config file
     auto saveKeybindings = std::make_shared<TweakableButton>(
         10198,

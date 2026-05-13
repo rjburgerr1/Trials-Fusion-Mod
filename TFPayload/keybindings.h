@@ -50,6 +50,7 @@ public:
         FullCountdownSequence,
         ShowSingleCountdown,
         ToggleLoadScreen,
+        ToggleOverlay,
         ToggleKeybindingsMenu,
         DebugGameState,
         SwapNextBike,
@@ -64,7 +65,8 @@ public:
     // Get the current key for an action
     static int GetKey(Action action);
     
-    // Set a new key for an action (and save to file)
+    // Set a new key for an action (and save to file).
+    // Pass 0 to unbind the action.
     static void SetKey(Action action, int vkCode);
     
     // Check if a key is currently pressed for an action

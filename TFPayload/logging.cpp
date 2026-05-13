@@ -12,7 +12,7 @@ namespace Logging {
     std::ofstream g_logFile;
     static std::string s_gameDirectory;
 
-    static void WriteToDebugAndConsole(const char* msg) {
+    void WriteToConsole(const char* msg) {
         if (!msg) {
             return;
         }
@@ -103,10 +103,10 @@ namespace Logging {
             g_logFile.flush();
         }
         
-        WriteToDebugAndConsole((std::string("[Logging] System initialized. Verbose logging: ") +
+        WriteToConsole((std::string("[Logging] System initialized. Verbose logging: ") +
             (g_verboseLoggingEnabled ? "ON" : "OFF")).c_str());
-        WriteToDebugAndConsole((std::string("[Logging] Log file: ") + logPath).c_str());
-        WriteToDebugAndConsole("[Logging] Press '=' to toggle verbose logging");
+        WriteToConsole((std::string("[Logging] Log file: ") + logPath).c_str());
+        WriteToConsole("[Logging] Press '=' to toggle verbose logging");
     }
     
     void Shutdown() {
@@ -121,10 +121,6 @@ namespace Logging {
 
     void ToggleVerbose() {
         g_verboseLoggingEnabled = !g_verboseLoggingEnabled;
-        
-        // Print a clean, single message when a console is attached.
-        WriteToDebugAndConsole((std::string("Verbose logging ") +
-            (g_verboseLoggingEnabled ? "ENABLED" : "DISABLED")).c_str());
         
         WriteToFile(std::string("Verbose logging ") + (g_verboseLoggingEnabled ? "ENABLED" : "DISABLED"));
         
@@ -146,6 +142,8 @@ namespace Logging {
             g_logFile << msg << std::endl;
             g_logFile.flush();  // Flush immediately to catch crashes
         }
+
+        WriteToConsole(msg.c_str());
     }
     
     // Pure C immediate write - no C++ objects, no exceptions
@@ -169,7 +167,7 @@ namespace Logging {
             fclose(crashFile);
         }
         
-        WriteToDebugAndConsole(msg);
+        WriteToConsole(msg);
     }
     
     std::string GetConfigPath() {
@@ -182,7 +180,7 @@ namespace Logging {
         
         std::ofstream file(configPath);
         if (!file.is_open()) {
-            WriteToDebugAndConsole((std::string("[Logging] Failed to save config to: ") + configPath).c_str());
+            WriteToConsole((std::string("[Logging] Failed to save config to: ") + configPath).c_str());
             return false;
         }
         
