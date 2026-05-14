@@ -303,6 +303,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClInclude Include="pause.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="payload.h" />
+    <ClInclude Include="pak-runtime-hook.h" />
     <ClInclude Include="prevent-finish.h" />
     <ClInclude Include="rendering.h" />
     <ClInclude Include="respawn.h" />
@@ -340,6 +341,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClCompile Include="multiplayer.cpp" />
     <ClCompile Include="pakViewer.cpp" />
     <ClCompile Include="pause.cpp" />
+    <ClCompile Include="pak-runtime-hook.cpp" />
     <ClCompile Include="prevent-finish.cpp" />
     <ClCompile Include="rendering.cpp" />
     <ClCompile Include="pch.cpp">

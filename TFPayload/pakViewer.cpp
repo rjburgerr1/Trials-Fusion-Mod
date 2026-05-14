@@ -5,6 +5,7 @@
 #include "base-address.h"
 
 #include <Windows.h>
+#include <bcrypt.h>
 #include <MinHook.h>
 #include <algorithm>
 #include <cctype>
@@ -19,6 +20,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#pragma comment(lib, "bcrypt.lib")
 
 namespace {
 
@@ -41,6 +44,8 @@ constexpr size_t kPackageOpen24VtableOffset = 0x24;
 constexpr size_t kPackageMount64VtableOffset = 0x64;
 constexpr size_t kResourceStreamReadAtVtableOffset = 0x1c;
 constexpr size_t kResourceStreamReadCurrentVtableOffset = 0x20;
+constexpr size_t kPakProtectionRsaBlockSize = 128;
+constexpr size_t kPakProtectionAesKeySize = 32;
 
 using PackageOpen24Func = void*(__thiscall*)(void* thisPtr, int pathString, int mode, int reserved);
 using PackageMount64Func = int(__thiscall*)(void* thisPtr, int pakPathString, int packageNameString, int flags);
@@ -184,6 +189,7 @@ uint32_t g_runtimeOverrideCacheEvictions = 0;
 char g_pakPath[512] = "";
 char g_runtimePakPath[512] = "";
 char g_hashPath[512] = "";
+char g_dumpPath[512] = "";
 char g_filter[256] = "";
 char g_objectFilter[256] = "";
 char g_selectedObjectFilter[256] = "";
@@ -1108,6 +1114,15 @@ bool WriteFileBytes(const std::string& path, const std::vector<uint8_t>& bytes) 
     return file.good();
 }
 
+bool WriteTextFile(const std::string& path, const std::string& text) {
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file.is_open()) {
+        return false;
+    }
+    file.write(text.data(), static_cast<std::streamsize>(text.size()));
+    return file.good();
+}
+
 std::string DirectoryOfModule() {
     char path[MAX_PATH] = {};
     HMODULE module = nullptr;
@@ -1141,6 +1156,121 @@ std::string DriveRootOf(const std::string& path) {
 bool FileExists(const std::string& path) {
     DWORD attrs = GetFileAttributesA(path.c_str());
     return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+bool DirectoryExists(const std::string& path) {
+    DWORD attrs = GetFileAttributesA(path.c_str());
+    return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
+std::string TrimTrailingSlashes(std::string path) {
+    while (!path.empty() && (path.back() == '\\' || path.back() == '/')) {
+        path.pop_back();
+    }
+    return path;
+}
+
+std::string JoinPath(const std::string& left, const std::string& right) {
+    if (left.empty()) {
+        return right;
+    }
+    if (right.empty()) {
+        return left;
+    }
+    if (left.back() == '\\' || left.back() == '/') {
+        return left + right;
+    }
+    return left + "\\" + right;
+}
+
+bool EnsureDirectoryRecursive(const std::string& path) {
+    std::string normalized = TrimTrailingSlashes(path);
+    if (normalized.empty() || DirectoryExists(normalized)) {
+        return true;
+    }
+
+    size_t start = 0;
+    if (normalized.size() >= 3 && normalized[1] == ':' && (normalized[2] == '\\' || normalized[2] == '/')) {
+        start = 3;
+    }
+
+    size_t pos = start;
+    while (true) {
+        pos = normalized.find_first_of("\\/", pos);
+        std::string part = pos == std::string::npos ? normalized : normalized.substr(0, pos);
+        if (!part.empty() && !DirectoryExists(part)) {
+            if (!CreateDirectoryA(part.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) {
+                return false;
+            }
+        }
+        if (pos == std::string::npos) {
+            break;
+        }
+        ++pos;
+    }
+    return DirectoryExists(normalized);
+}
+
+std::string FileNameOf(const std::string& path) {
+    size_t slash = path.find_last_of("\\/");
+    return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+std::string BaseNameWithoutExtension(const std::string& path) {
+    std::string name = FileNameOf(path);
+    size_t dot = name.find_last_of('.');
+    return dot == std::string::npos ? name : name.substr(0, dot);
+}
+
+std::string SanitizePathPart(const std::string& value, const std::string& fallback) {
+    std::string out;
+    out.reserve(value.size());
+    for (char c : value) {
+        unsigned char ch = static_cast<unsigned char>(c);
+        if (ch < 32 || c == '<' || c == '>' || c == ':' || c == '"' || c == '|' || c == '?' || c == '*') {
+            out.push_back('_');
+        }
+        else {
+            out.push_back(c);
+        }
+    }
+
+    while (!out.empty() && (out.back() == '.' || out.back() == ' ')) {
+        out.pop_back();
+    }
+    return out.empty() ? fallback : out;
+}
+
+std::string DumpRelativePathForEntry(const PakEntry& entry) {
+    std::string normalized = NormalizePakPath(entry.name);
+    if (normalized.empty() || normalized[0] == '#') {
+        normalized = "entry_" + std::to_string(entry.index) + "_" + Hex32(entry.pathHash) + ".bin";
+    }
+
+    std::vector<std::string> parts = SplitPath(normalized);
+    std::string result;
+    for (size_t i = 0; i < parts.size(); ++i) {
+        std::string fallback = i + 1 == parts.size()
+            ? "entry_" + std::to_string(entry.index) + ".bin"
+            : "dir";
+        std::string safe = SanitizePathPart(parts[i], fallback);
+        result = result.empty() ? safe : JoinPath(result, safe);
+    }
+    return result.empty() ? "entry_" + std::to_string(entry.index) + ".bin" : result;
+}
+
+std::string DefaultDumpRoot() {
+    if (g_dumpPath[0] != '\0') {
+        return TrimTrailingSlashes(g_dumpPath);
+    }
+    std::string moduleDir = DirectoryOfModule();
+    return moduleDir.empty() ? "pak_dump" : JoinPath(moduleDir, "pak_dump");
+}
+
+std::string PakDumpSubdir(const char* suffix) {
+    std::string base = !g_loadedPak.empty() ? BaseNameWithoutExtension(g_loadedPak) : BaseNameWithoutExtension(g_pakPath);
+    base = SanitizePathPart(base, "pak");
+    return JoinPath(DefaultDumpRoot(), base + "_" + suffix);
 }
 
 void AddDefaultDlcPakCandidates(std::vector<std::string>& candidates) {
@@ -1237,6 +1367,12 @@ void SetDefaultPaths() {
                 break;
             }
         }
+    }
+
+    if (g_dumpPath[0] == '\0') {
+        std::string moduleDir = DirectoryOfModule();
+        std::string dumpRoot = moduleDir.empty() ? "pak_dump" : JoinPath(moduleDir, "pak_dump");
+        strncpy_s(g_dumpPath, dumpRoot.c_str(), _TRUNCATE);
     }
 }
 
@@ -1784,29 +1920,402 @@ void RenderDecodedNode(const Node& node, const char* filter = "") {
     }
 }
 
+struct UInt1024 {
+    uint32_t limb[32] = {};
+};
+
+const uint8_t kPakProtectionRsaModulus[kPakProtectionRsaBlockSize] = {
+    0xac, 0x7b, 0xbb, 0xe3, 0x6e, 0xdf, 0x9e, 0xd7, 0x5e, 0x35, 0x13, 0x56, 0x9d, 0xad, 0x2d, 0x89,
+    0x08, 0x1e, 0xb3, 0x3d, 0x9c, 0xfb, 0x02, 0x2e, 0xca, 0xbe, 0x1d, 0x39, 0x44, 0xb5, 0xe2, 0x6d,
+    0x43, 0xe4, 0xd3, 0xa2, 0xb6, 0xc4, 0x66, 0xa5, 0xc7, 0xfc, 0x93, 0x98, 0xf4, 0x79, 0xd7, 0x89,
+    0x47, 0xc5, 0x7f, 0x21, 0xc6, 0x61, 0x39, 0xef, 0x00, 0xd4, 0xbd, 0x9e, 0x8b, 0x65, 0xac, 0xe5,
+    0xf3, 0x15, 0x81, 0x8d, 0x0a, 0x03, 0x06, 0x95, 0x72, 0x5c, 0x5f, 0xf4, 0xd9, 0x89, 0xbb, 0x04,
+    0xd3, 0xde, 0x74, 0xb8, 0xf3, 0x38, 0x23, 0xa6, 0x62, 0x02, 0xac, 0x9c, 0x0d, 0x44, 0xd7, 0x28,
+    0x45, 0x71, 0x3a, 0xb3, 0xa4, 0x0b, 0x9c, 0x14, 0x1a, 0x0d, 0xe3, 0x84, 0x2f, 0x0f, 0x45, 0x25,
+    0x8f, 0xfd, 0x57, 0x17, 0xc3, 0xf9, 0x7b, 0xa5, 0x0e, 0xc1, 0xd2, 0x4a, 0xca, 0xf3, 0xf2, 0x71
+};
+
+UInt1024 UInt1024FromBigEndian(const uint8_t* bytes) {
+    UInt1024 value;
+    for (size_t i = 0; i < 32; ++i) {
+        size_t byteOffset = kPakProtectionRsaBlockSize - ((i + 1) * sizeof(uint32_t));
+        value.limb[i] =
+            static_cast<uint32_t>(bytes[byteOffset]) << 24 |
+            static_cast<uint32_t>(bytes[byteOffset + 1]) << 16 |
+            static_cast<uint32_t>(bytes[byteOffset + 2]) << 8 |
+            static_cast<uint32_t>(bytes[byteOffset + 3]);
+    }
+    return value;
+}
+
+void UInt1024ToBigEndian(const UInt1024& value, uint8_t* bytes) {
+    for (size_t i = 0; i < 32; ++i) {
+        size_t byteOffset = kPakProtectionRsaBlockSize - ((i + 1) * sizeof(uint32_t));
+        uint32_t limb = value.limb[i];
+        bytes[byteOffset] = static_cast<uint8_t>(limb >> 24);
+        bytes[byteOffset + 1] = static_cast<uint8_t>(limb >> 16);
+        bytes[byteOffset + 2] = static_cast<uint8_t>(limb >> 8);
+        bytes[byteOffset + 3] = static_cast<uint8_t>(limb);
+    }
+}
+
+int CompareUInt1024(const UInt1024& a, const UInt1024& b) {
+    for (int i = 31; i >= 0; --i) {
+        if (a.limb[i] < b.limb[i]) {
+            return -1;
+        }
+        if (a.limb[i] > b.limb[i]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void SubtractUInt1024(UInt1024& a, const UInt1024& b) {
+    uint64_t borrow = 0;
+    for (size_t i = 0; i < 32; ++i) {
+        uint64_t sub = static_cast<uint64_t>(b.limb[i]) + borrow;
+        uint64_t ai = a.limb[i];
+        a.limb[i] = static_cast<uint32_t>(ai - sub);
+        borrow = ai < sub ? 1 : 0;
+    }
+}
+
+void AddModUInt1024(UInt1024& a, const UInt1024& b, const UInt1024& modulus) {
+    uint64_t carry = 0;
+    for (size_t i = 0; i < 32; ++i) {
+        uint64_t sum = static_cast<uint64_t>(a.limb[i]) + b.limb[i] + carry;
+        a.limb[i] = static_cast<uint32_t>(sum);
+        carry = sum >> 32;
+    }
+
+    if (carry != 0 || CompareUInt1024(a, modulus) >= 0) {
+        SubtractUInt1024(a, modulus);
+    }
+}
+
+void DoubleModUInt1024(UInt1024& value, const UInt1024& modulus) {
+    uint64_t carry = 0;
+    for (size_t i = 0; i < 32; ++i) {
+        uint64_t doubled = (static_cast<uint64_t>(value.limb[i]) << 1) | carry;
+        value.limb[i] = static_cast<uint32_t>(doubled);
+        carry = doubled >> 32;
+    }
+
+    if (carry != 0 || CompareUInt1024(value, modulus) >= 0) {
+        SubtractUInt1024(value, modulus);
+    }
+}
+
+UInt1024 MulModUInt1024(const UInt1024& a, const UInt1024& b, const UInt1024& modulus) {
+    UInt1024 result;
+    UInt1024 addend = a;
+
+    for (size_t limb = 0; limb < 32; ++limb) {
+        uint32_t bits = b.limb[limb];
+        for (int bit = 0; bit < 32; ++bit) {
+            if ((bits & (1u << bit)) != 0) {
+                AddModUInt1024(result, addend, modulus);
+            }
+            DoubleModUInt1024(addend, modulus);
+        }
+    }
+
+    return result;
+}
+
+bool RsaPublicUnwrapPakKey(const uint8_t* rsaBlock, uint8_t* aesKey, std::string& error) {
+    UInt1024 modulus = UInt1024FromBigEndian(kPakProtectionRsaModulus);
+    UInt1024 base = UInt1024FromBigEndian(rsaBlock);
+    UInt1024 result;
+    result.limb[0] = 1;
+
+    uint32_t exponent = 65537;
+    while (exponent != 0) {
+        if ((exponent & 1) != 0) {
+            result = MulModUInt1024(result, base, modulus);
+        }
+        exponent >>= 1;
+        if (exponent != 0) {
+            base = MulModUInt1024(base, base, modulus);
+        }
+    }
+
+    uint8_t plain[kPakProtectionRsaBlockSize] = {};
+    UInt1024ToBigEndian(result, plain);
+    if (plain[0] != 0x00 || plain[1] != 0x01) {
+        error = "protected RSA block has invalid PKCS#1 type-1 header";
+        return false;
+    }
+
+    size_t delimiter = 2;
+    while (delimiter < kPakProtectionRsaBlockSize && plain[delimiter] == 0xff) {
+        ++delimiter;
+    }
+    if (delimiter >= kPakProtectionRsaBlockSize || plain[delimiter] != 0x00) {
+        error = "protected RSA block has invalid PKCS#1 padding";
+        return false;
+    }
+
+    size_t payloadOffset = delimiter + 1;
+    size_t payloadSize = kPakProtectionRsaBlockSize - payloadOffset;
+    if (payloadSize != kPakProtectionAesKeySize) {
+        error = "protected RSA block did not unwrap to a 32-byte AES key";
+        return false;
+    }
+
+    memcpy(aesKey, plain + payloadOffset, kPakProtectionAesKeySize);
+    return true;
+}
+
+void XorBlock(uint8_t* block, const uint8_t* other) {
+    for (size_t i = 0; i < 16; ++i) {
+        block[i] ^= other[i];
+    }
+}
+
+void ShiftRightOne(uint8_t* block) {
+    uint8_t carry = 0;
+    for (size_t i = 0; i < 16; ++i) {
+        uint8_t nextCarry = block[i] & 1;
+        block[i] = static_cast<uint8_t>((block[i] >> 1) | (carry << 7));
+        carry = nextCarry;
+    }
+}
+
+void GhashMultiply(uint8_t* x, const uint8_t* h) {
+    uint8_t z[16] = {};
+    uint8_t v[16] = {};
+    memcpy(v, h, sizeof(v));
+
+    for (size_t i = 0; i < 128; ++i) {
+        if ((x[i / 8] & (0x80u >> (i % 8))) != 0) {
+            XorBlock(z, v);
+        }
+
+        bool lsb = (v[15] & 1) != 0;
+        ShiftRightOne(v);
+        if (lsb) {
+            v[0] ^= 0xe1;
+        }
+    }
+
+    memcpy(x, z, sizeof(z));
+}
+
+void GhashUpdate(uint8_t* y, const uint8_t* h, const uint8_t* block) {
+    XorBlock(y, block);
+    GhashMultiply(y, h);
+}
+
+void IncrementGcmCounter(uint8_t* counter) {
+    for (int i = 15; i >= 12; --i) {
+        if (++counter[i] != 0) {
+            break;
+        }
+    }
+}
+
+class Aes256EcbEncryptor {
+public:
+    Aes256EcbEncryptor() = default;
+    ~Aes256EcbEncryptor() {
+        if (m_key != nullptr) {
+            BCryptDestroyKey(m_key);
+        }
+        if (m_algorithm != nullptr) {
+            BCryptCloseAlgorithmProvider(m_algorithm, 0);
+        }
+    }
+
+    bool Initialize(const uint8_t* key, std::string& error) {
+        NTSTATUS status = BCryptOpenAlgorithmProvider(&m_algorithm, BCRYPT_AES_ALGORITHM, nullptr, 0);
+        if (!BCRYPT_SUCCESS(status)) {
+            error = "BCryptOpenAlgorithmProvider(AES) failed";
+            return false;
+        }
+
+        status = BCryptSetProperty(
+            m_algorithm,
+            BCRYPT_CHAINING_MODE,
+            reinterpret_cast<PUCHAR>(const_cast<wchar_t*>(BCRYPT_CHAIN_MODE_ECB)),
+            static_cast<ULONG>((wcslen(BCRYPT_CHAIN_MODE_ECB) + 1) * sizeof(wchar_t)),
+            0);
+        if (!BCRYPT_SUCCESS(status)) {
+            error = "BCryptSetProperty(AES ECB) failed";
+            return false;
+        }
+
+        DWORD objectLength = 0;
+        DWORD resultLength = 0;
+        status = BCryptGetProperty(
+            m_algorithm,
+            BCRYPT_OBJECT_LENGTH,
+            reinterpret_cast<PUCHAR>(&objectLength),
+            sizeof(objectLength),
+            &resultLength,
+            0);
+        if (!BCRYPT_SUCCESS(status) || objectLength == 0) {
+            error = "BCryptGetProperty(AES object length) failed";
+            return false;
+        }
+
+        m_keyObject.resize(objectLength);
+        status = BCryptGenerateSymmetricKey(
+            m_algorithm,
+            &m_key,
+            m_keyObject.data(),
+            static_cast<ULONG>(m_keyObject.size()),
+            const_cast<PUCHAR>(key),
+            kPakProtectionAesKeySize,
+            0);
+        if (!BCRYPT_SUCCESS(status)) {
+            error = "BCryptGenerateSymmetricKey(AES-256) failed";
+            return false;
+        }
+
+        return true;
+    }
+
+    bool EncryptBlock(const uint8_t* in, uint8_t* out, std::string& error) {
+        DWORD written = 0;
+        NTSTATUS status = BCryptEncrypt(
+            m_key,
+            const_cast<PUCHAR>(in),
+            16,
+            nullptr,
+            nullptr,
+            0,
+            out,
+            16,
+            &written,
+            0);
+        if (!BCRYPT_SUCCESS(status) || written != 16) {
+            error = "BCryptEncrypt(AES block) failed";
+            return false;
+        }
+        return true;
+    }
+
+private:
+    BCRYPT_ALG_HANDLE m_algorithm = nullptr;
+    BCRYPT_KEY_HANDLE m_key = nullptr;
+    std::vector<uint8_t> m_keyObject;
+};
+
+bool Aes256GcmUpdateOnly(const uint8_t* key, const uint8_t* ciphertext, size_t size, std::vector<uint8_t>& plaintext, std::string& error) {
+    Aes256EcbEncryptor aes;
+    if (!aes.Initialize(key, error)) {
+        return false;
+    }
+
+    uint8_t zero[16] = {};
+    uint8_t h[16] = {};
+    if (!aes.EncryptBlock(zero, h, error)) {
+        return false;
+    }
+
+    const uint8_t iv[] = {
+        '5', '4', '8', '4', '2', '5', '8', '4',
+        '6', '1', '0', '5', '6', '4', '9', '6',
+        '\0'
+    };
+    uint8_t j0[16] = {};
+    GhashUpdate(j0, h, iv);
+
+    uint8_t ivTail[16] = {};
+    ivTail[0] = iv[16];
+    GhashUpdate(j0, h, ivTail);
+
+    uint8_t lengthBlock[16] = {};
+    uint64_t ivBits = static_cast<uint64_t>(sizeof(iv)) * 8;
+    for (size_t i = 0; i < 8; ++i) {
+        lengthBlock[15 - i] = static_cast<uint8_t>(ivBits >> (i * 8));
+    }
+    GhashUpdate(j0, h, lengthBlock);
+
+    plaintext.resize(size);
+    uint8_t counter[16] = {};
+    memcpy(counter, j0, sizeof(counter));
+    size_t offset = 0;
+    while (offset < size) {
+        IncrementGcmCounter(counter);
+        uint8_t streamBlock[16] = {};
+        if (!aes.EncryptBlock(counter, streamBlock, error)) {
+            return false;
+        }
+
+        size_t blockSize = std::min<size_t>(16, size - offset);
+        for (size_t i = 0; i < blockSize; ++i) {
+            plaintext[offset + i] = ciphertext[offset + i] ^ streamBlock[i];
+        }
+        offset += blockSize;
+    }
+
+    return true;
+}
+
+bool UnprotectPakPayload(const uint8_t* data, size_t size, std::vector<uint8_t>& out, std::string& error) {
+    if (size < kPakProtectionRsaBlockSize) {
+        error = "protected payload is smaller than the RSA block";
+        return false;
+    }
+
+    uint8_t aesKey[kPakProtectionAesKeySize] = {};
+    if (!RsaPublicUnwrapPakKey(data, aesKey, error)) {
+        return false;
+    }
+
+    return Aes256GcmUpdateOnly(
+        aesKey,
+        data + kPakProtectionRsaBlockSize,
+        size - kPakProtectionRsaBlockSize,
+        out,
+        error);
+}
+
 bool EntryPayload(const PakEntry& entry, std::vector<uint8_t>& out, std::string& error) {
     if (entry.dataOffset > g_pakBytes.size() || entry.storedSize > g_pakBytes.size() - entry.dataOffset) {
         error = "entry points outside archive";
         return false;
     }
 
-    if (entry.flags == 0x00) {
-        out.assign(g_pakBytes.begin() + entry.dataOffset, g_pakBytes.begin() + entry.dataOffset + entry.storedSize);
+    const uint8_t* stored = g_pakBytes.data() + entry.dataOffset;
+    if ((entry.flags & 0x10) != 0) {
+        std::vector<uint8_t> unprotected;
+        if (!UnprotectPakPayload(stored, entry.storedSize, unprotected, error)) {
+            return false;
+        }
+
+        if ((entry.flags & 0x07) != 0) {
+            return InflateZlibPayload(
+                unprotected.data(),
+                unprotected.size(),
+                entry.unpackedSize,
+                out,
+                error);
+        }
+
+        if (unprotected.size() < entry.unpackedSize) {
+            error = "protected payload decrypted smaller than unpacked size";
+            return false;
+        }
+        out.assign(unprotected.begin(), unprotected.begin() + entry.unpackedSize);
         return true;
     }
 
-    if (entry.flags == 0x01) {
+    if (entry.flags == 0x00) {
+        out.assign(stored, stored + entry.storedSize);
+        return true;
+    }
+
+    if ((entry.flags & 0x07) != 0) {
         return InflateZlibPayload(
-            g_pakBytes.data() + entry.dataOffset,
+            stored,
             entry.storedSize,
             entry.unpackedSize,
             out,
             error);
-    }
-
-    if (entry.flags & 0x10) {
-        error = "protected/encrypted payload";
-        return false;
     }
 
     error = "unsupported flags " + Hex32(entry.flags);
@@ -2567,6 +3076,315 @@ std::string AttrValue(const Attribute& attr) {
     return oss.str();
 }
 
+bool ParseObjectCollectionPayload(const std::vector<uint8_t>& payload, Node& root, std::string& error) {
+    PropReader reader(payload);
+    if (!reader.ReadNode(root, error)) {
+        return false;
+    }
+    if (reader.Offset() != payload.size()) {
+        std::ostringstream oss;
+        oss << "property tree stopped at 0x" << std::hex << reader.Offset()
+            << " of 0x" << payload.size();
+        error = oss.str();
+        return false;
+    }
+    return true;
+}
+
+bool IsXmlName(const std::string& value) {
+    if (value.empty()) {
+        return false;
+    }
+    unsigned char first = static_cast<unsigned char>(value[0]);
+    if (!(std::isalpha(first) || value[0] == '_')) {
+        return false;
+    }
+    for (char c : value) {
+        unsigned char ch = static_cast<unsigned char>(c);
+        if (!(std::isalnum(ch) || c == '_' || c == '-' || c == '.')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string SafeXmlName(const std::string& value, uint32_t hash, bool attr) {
+    if (IsXmlName(value)) {
+        return value;
+    }
+    if (hash != 0) {
+        return std::string(attr ? "attr_" : "tag_") + Hex32(hash).substr(2);
+    }
+
+    std::string cleaned;
+    cleaned.reserve(value.size());
+    for (char c : value) {
+        unsigned char ch = static_cast<unsigned char>(c);
+        cleaned.push_back((std::isalnum(ch) || c == '_' || c == '-' || c == '.') ? c : '_');
+    }
+    while (!cleaned.empty() && !std::isalpha(static_cast<unsigned char>(cleaned[0])) && cleaned[0] != '_') {
+        cleaned.erase(cleaned.begin());
+    }
+    return cleaned.empty() ? (attr ? "attr" : "tag") : cleaned;
+}
+
+std::string XmlEscape(const std::string& value, bool attribute) {
+    std::string out;
+    out.reserve(value.size());
+    for (char c : value) {
+        switch (c) {
+        case '&': out += "&amp;"; break;
+        case '<': out += "&lt;"; break;
+        case '>': out += "&gt;"; break;
+        case '"': out += attribute ? "&quot;" : "\""; break;
+        case '\'': out += attribute ? "&apos;" : "'"; break;
+        default:
+            if (static_cast<unsigned char>(c) >= 32 || c == '\t' || c == '\r' || c == '\n') {
+                out.push_back(c);
+            }
+            break;
+        }
+    }
+    return out;
+}
+
+void AppendIndent(std::string& out, int depth) {
+    for (int i = 0; i < depth; ++i) {
+        out.push_back('\t');
+    }
+}
+
+void AppendDecodedXmlNode(std::string& out, const Node& node, int depth) {
+    AppendIndent(out, depth);
+    out.push_back('<');
+    out += SafeXmlName(node.name, node.nameHash, false);
+    for (const Attribute& attr : node.attrs) {
+        out.push_back(' ');
+        out += SafeXmlName(attr.key, attr.keyHash, true);
+        out += "=\"";
+        out += XmlEscape(AttrValue(attr), true);
+        out.push_back('"');
+    }
+
+    if (node.children.empty()) {
+        out += " />\r\n";
+        return;
+    }
+
+    out += ">\r\n";
+    for (const Node& child : node.children) {
+        AppendDecodedXmlNode(out, child, depth + 1);
+    }
+    AppendIndent(out, depth);
+    out += "</";
+    out += SafeXmlName(node.name, node.nameHash, false);
+    out += ">\r\n";
+}
+
+std::string BuildDecodedXmlText(const Node& root) {
+    std::string out = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n";
+    AppendDecodedXmlNode(out, root, 0);
+    return out;
+}
+
+std::string DecodedXmlPathForEntry(const PakEntry& entry, const std::string& root) {
+    std::string relative = DumpRelativePathForEntry(entry);
+    std::string lower = Lower(relative);
+    if (lower.size() >= 4 && lower.rfind(".xml") == lower.size() - 4) {
+        relative += ".decoded.xml";
+    }
+    else {
+        relative += ".xml";
+    }
+    return JoinPath(root, relative);
+}
+
+bool DumpEntryPayload(const PakEntry& entry, const std::string& root, std::string& error) {
+    std::vector<uint8_t> payload;
+    if (!EntryPayload(entry, payload, error)) {
+        return false;
+    }
+
+    std::string path = JoinPath(root, DumpRelativePathForEntry(entry));
+    std::string parent = ParentDirectory(path);
+    if (!parent.empty() && !EnsureDirectoryRecursive(parent)) {
+        error = "failed to create dump directory";
+        return false;
+    }
+    if (!WriteFileBytes(path, payload)) {
+        error = "failed to write " + path;
+        return false;
+    }
+    return true;
+}
+
+bool DumpEntryObjectCollectionXml(const PakEntry& entry, const std::string& root, std::string& error) {
+    std::vector<uint8_t> payload;
+    if (!EntryPayload(entry, payload, error)) {
+        return false;
+    }
+
+    Node rootNode;
+    if (!ParseObjectCollectionPayload(payload, rootNode, error)) {
+        return false;
+    }
+
+    std::string path = DecodedXmlPathForEntry(entry, root);
+    std::string parent = ParentDirectory(path);
+    if (!parent.empty() && !EnsureDirectoryRecursive(parent)) {
+        error = "failed to create XML dump directory";
+        return false;
+    }
+    if (!WriteTextFile(path, BuildDecodedXmlText(rootNode))) {
+        error = "failed to write " + path;
+        return false;
+    }
+    return true;
+}
+
+bool IsFileEntry(const PakEntry& entry) {
+    return entry.index >= 0 && entry.index + 1 < static_cast<int>(g_entries.size());
+}
+
+bool IsObjectCollectionEntry(const PakEntry& entry) {
+    std::string lower = Lower(entry.name);
+    return IsFileEntry(entry)
+        && lower.find("objectcollection") != std::string::npos
+        && lower.size() >= 4
+        && lower.rfind(".xml") == lower.size() - 4;
+}
+
+void DumpSelectedEntryPayload() {
+    if (g_selectedEntry < 0 || g_selectedEntry >= static_cast<int>(g_entries.size())) {
+        g_status = "No entry selected.";
+        return;
+    }
+
+    const PakEntry& entry = g_entries[g_selectedEntry];
+    std::string root = PakDumpSubdir("selected");
+    if (!EnsureDirectoryRecursive(root)) {
+        g_status = "Failed to create dump directory.";
+        return;
+    }
+
+    std::string error;
+    if (DumpEntryPayload(entry, root, error)) {
+        g_status = "Dumped selected entry to " + root + ".";
+    }
+    else {
+        g_status = "Selected entry dump failed: " + error + ".";
+    }
+}
+
+void DumpAllEntryPayloads() {
+    if (g_entries.empty()) {
+        g_status = "No pak loaded.";
+        return;
+    }
+
+    std::string root = PakDumpSubdir("files");
+    if (!EnsureDirectoryRecursive(root)) {
+        g_status = "Failed to create dump directory.";
+        return;
+    }
+
+    int dumped = 0;
+    int failed = 0;
+    std::string firstError;
+    for (const PakEntry& entry : g_entries) {
+        if (!IsFileEntry(entry)) {
+            continue;
+        }
+
+        std::string error;
+        if (DumpEntryPayload(entry, root, error)) {
+            ++dumped;
+        }
+        else {
+            ++failed;
+            if (firstError.empty()) {
+                firstError = entry.name + ": " + error;
+            }
+        }
+    }
+
+    std::ostringstream oss;
+    oss << "Dumped " << dumped << " pak files to " << root;
+    if (failed != 0) {
+        oss << "; failed " << failed << " (" << firstError << ")";
+    }
+    oss << ".";
+    g_status = oss.str();
+}
+
+void DumpSelectedObjectCollectionXml() {
+    if (g_selectedEntry < 0 || g_selectedEntry >= static_cast<int>(g_entries.size())) {
+        g_status = "No entry selected.";
+        return;
+    }
+
+    const PakEntry& entry = g_entries[g_selectedEntry];
+    if (!IsObjectCollectionEntry(entry)) {
+        g_status = "Selected entry is not an objectcollection XML.";
+        return;
+    }
+
+    std::string root = PakDumpSubdir("objectcollection_xml");
+    if (!EnsureDirectoryRecursive(root)) {
+        g_status = "Failed to create XML dump directory.";
+        return;
+    }
+
+    std::string error;
+    if (DumpEntryObjectCollectionXml(entry, root, error)) {
+        g_status = "Dumped decoded ObjectCollection XML to " + root + ".";
+    }
+    else {
+        g_status = "ObjectCollection XML dump failed: " + error + ".";
+    }
+}
+
+void DumpAllObjectCollectionXml() {
+    if (g_entries.empty()) {
+        g_status = "No pak loaded.";
+        return;
+    }
+
+    std::string root = PakDumpSubdir("objectcollection_xml");
+    if (!EnsureDirectoryRecursive(root)) {
+        g_status = "Failed to create XML dump directory.";
+        return;
+    }
+
+    int dumped = 0;
+    int failed = 0;
+    std::string firstError;
+    for (const PakEntry& entry : g_entries) {
+        if (!IsObjectCollectionEntry(entry)) {
+            continue;
+        }
+
+        std::string error;
+        if (DumpEntryObjectCollectionXml(entry, root, error)) {
+            ++dumped;
+        }
+        else {
+            ++failed;
+            if (firstError.empty()) {
+                firstError = entry.name + ": " + error;
+            }
+        }
+    }
+
+    std::ostringstream oss;
+    oss << "Dumped " << dumped << " decoded ObjectCollection XML files to " << root;
+    if (failed != 0) {
+        oss << "; failed " << failed << " (" << firstError << ")";
+    }
+    oss << ".";
+    g_status = oss.str();
+}
+
 void WriteU32(std::vector<uint8_t>& data, uint32_t value) {
     data.resize(4);
     data[0] = static_cast<uint8_t>(value & 0xFF);
@@ -2789,17 +3607,9 @@ void ParseSelectedObjectCollection() {
     g_serializedObjectCollectionPayload.clear();
     g_decodedEntryIndex = g_selectedEntry;
 
-    PropReader reader(payload);
     Node root;
-    if (!reader.ReadNode(root, error)) {
+    if (!ParseObjectCollectionPayload(payload, root, error)) {
         g_status = "Objectcollection parse failed: " + error + ".";
-        return;
-    }
-    if (reader.Offset() != payload.size()) {
-        std::ostringstream oss;
-        oss << "Objectcollection parse stopped at 0x" << std::hex << reader.Offset()
-            << " of 0x" << payload.size() << ".";
-        g_status = oss.str();
         return;
     }
 
@@ -3684,6 +4494,7 @@ void Render() {
 
     ImGui::InputText("Pak", g_pakPath, sizeof(g_pakPath));
     ImGui::InputText("Hashes", g_hashPath, sizeof(g_hashPath));
+    ImGui::InputText("Dump Dir", g_dumpPath, sizeof(g_dumpPath));
     if (IsBaseDataPakPath(g_pakPath)) {
         ImGui::Checkbox("Allow base data.pak load", &g_allowBasePakLoad);
         ImGui::TextDisabled("Base data.pak is large; load it only when you need to inspect that archive.");
@@ -3696,6 +4507,16 @@ void Render() {
     if (ImGui::Button("Reload Hashes")) {
         LoadHashes();
     }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(g_entries.empty());
+    if (ImGui::Button("Dump All Files")) {
+        DumpAllEntryPayloads();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Dump All ObjectCollections XML")) {
+        DumpAllObjectCollectionXml();
+    }
+    ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::TextUnformatted(g_status.c_str());
 
@@ -3712,10 +4533,19 @@ void Render() {
         ImGui::Text("Hash %s | stored %u | unpacked %u | flags 0x%02X | offset 0x%08X",
             Hex32(entry.pathHash).c_str(), entry.storedSize, entry.unpackedSize, entry.flags, entry.dataOffset);
 
+        if (ImGui::Button("Dump Selected File")) {
+            DumpSelectedEntryPayload();
+        }
+
         bool looksLikeObjectCollection = Lower(entry.name).find("objectcollection") != std::string::npos;
         if (looksLikeObjectCollection) {
+            ImGui::SameLine();
             if (ImGui::Button("Decode ObjectCollection")) {
                 ParseSelectedObjectCollection();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Dump ObjectCollection XML")) {
+                DumpSelectedObjectCollectionXml();
             }
         }
         else {
