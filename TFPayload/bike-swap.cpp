@@ -1067,6 +1067,22 @@ namespace BikeSwap {
         return false;
     }
 
+    bool ReloadCurrentBikeVisuals() {
+        if (!g_initialized) {
+            LOG_ERROR("[BikeSwap] Not initialized");
+            return false;
+        }
+
+        int currentBikeId = GetCurrentBikeId();
+        if (currentBikeId < 0) {
+            LOG_ERROR("[BikeSwap] Could not get current bike ID for visual reload");
+            return false;
+        }
+
+        LOG_INFO("[BikeSwap] Queueing current bike visual reload for bike " << currentBikeId);
+        return QueueBikeSwapForMainThread(currentBikeId);
+    }
+
     bool SwapToNextBike() {
         if (!IsSwapAvailable()) {
             LOG_WARNING("[BikeSwap] Swap unavailable in current game state");

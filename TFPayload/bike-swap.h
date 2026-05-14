@@ -27,6 +27,9 @@ namespace BikeSwap {
     // Returns true if successful, false if bike ID is invalid or swap failed
     bool SwapToBike(int bikeId);
 
+    // Re-run the current bike's mesh/visual reload path without changing bike ID.
+    bool ReloadCurrentBikeVisuals();
+
     // Swap to the next bike in the list (wraps around)
     bool SwapToNextBike();
 

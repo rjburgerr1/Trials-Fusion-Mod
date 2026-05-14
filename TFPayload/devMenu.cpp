@@ -12,6 +12,7 @@
 #include "host-join.h"
 #include "base-address.h"
 #include "prevent-finish.h"
+#include "pakViewer.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -806,6 +807,8 @@ void DevMenu::Render() {
 
     ImGui::EndChild();
     ImGui::End();
+
+    PakViewer::Render();
 }
 
 void DevMenu::ResetAll() {
@@ -3684,6 +3687,16 @@ void DevMenu::DumpTweakablesData() {
 
 void DevMenu::InitializeMod() {
     auto mod = std::make_shared<TweakableFolder>(10000, "Mod");
+
+    auto pakViewerButton = std::make_shared<TweakableButton>(
+        10060,
+        "Toggle Pak Viewer"
+    );
+    pakViewerButton->SetOnClickCallback([]() {
+        PakViewer::Toggle();
+    });
+    RegisterTweakable(pakViewerButton);
+    mod->AddChild(pakViewerButton);
 
     // Fixed width for consistent button sizing
     const float totalButtonsWidth = 316.0f;

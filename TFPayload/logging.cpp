@@ -328,8 +328,11 @@ namespace Logging {
     }
     
     void ClearConsole() {
-        std::lock_guard<std::mutex> lock(g_consoleMutex);
-        g_consoleBuffer.clear();
+        {
+            std::lock_guard<std::mutex> lock(g_consoleMutex);
+            g_consoleBuffer.clear();
+        }
+
         LOG_INFO("Console cleared");
     }
 }

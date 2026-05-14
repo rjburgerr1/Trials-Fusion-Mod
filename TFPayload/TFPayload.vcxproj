@@ -299,6 +299,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClInclude Include="..\vendor\minhook\src\trampoline.h" />
     <ClInclude Include="money.h" />
     <ClInclude Include="multiplayer.h" />
+    <ClInclude Include="pakViewer.h" />
     <ClInclude Include="pause.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="payload.h" />
@@ -337,6 +338,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClCompile Include="..\vendor\minhook\src\trampoline.c" />
     <ClCompile Include="money.cpp" />
     <ClCompile Include="multiplayer.cpp" />
+    <ClCompile Include="pakViewer.cpp" />
     <ClCompile Include="pause.cpp" />
     <ClCompile Include="prevent-finish.cpp" />
     <ClCompile Include="rendering.cpp" />

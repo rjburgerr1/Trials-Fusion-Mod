@@ -34,6 +34,7 @@
 #include "prevent-finish.h"
 #include "gamemode.h"
 #include "bike-swap.h"
+#include "pakViewer.h"
 #include <MinHook.h>
 
 // FORWARD DECLARATIONS
@@ -165,6 +166,7 @@ void ShutdownTFPayload()
     Multiplayer::Shutdown();
     HostJoin::Shutdown();
     BikeSwap::Shutdown();
+    PakViewer::ShutdownRuntimeHooks();
     Keybindings::Shutdown();
 
     LOG_VERBOSE("[Main] All resources cleaned up.");
@@ -535,6 +537,7 @@ void InitializeTFPayload()
     SafeInitCall("PreventFinish", Init_PreventFinish, nullptr);
     SafeInitCall("GameMode", Init_GameMode, &ctx);
     SafeInitCall("BikeSwap", Init_BikeSwap, &ctx);
+    PakViewer::InitializeRuntimeHooks(baseAddress);
     SafeInitCall("Keybindings", Init_Keybindings, nullptr);
 
     // Wait a moment to ensure ProxyDLL has hooked D3D11
