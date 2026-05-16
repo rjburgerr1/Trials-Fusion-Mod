@@ -224,6 +224,24 @@ bool Keybindings::IsActionPressed(Action action) {
     if (vkCode == 0) {
         return false;
     }
+
+    // Treat modifiers as modifiers, not standalone hotkeys. A bare Shift/Ctrl/Alt
+    // press is common gameplay/overlay input and should never fire mod actions.
+    switch (vkCode) {
+        case VK_SHIFT:
+        case VK_LSHIFT:
+        case VK_RSHIFT:
+        case VK_CONTROL:
+        case VK_LCONTROL:
+        case VK_RCONTROL:
+        case VK_MENU:
+        case VK_LMENU:
+        case VK_RMENU:
+            s_keyStates[action] = false;
+            return false;
+        default:
+            break;
+    }
     
     bool currentlyPressed = (GetAsyncKeyState(vkCode) & 0x8000) != 0;
     bool wasPressed = s_keyStates[action];

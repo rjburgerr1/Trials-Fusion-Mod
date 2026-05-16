@@ -1,5 +1,6 @@
 <Project>
-  <PropertyGroup>
-    <CustomDeployPath>C:\MyExternalFolder\Plugins</CustomDeployPath>
-  </PropertyGroup>
+  <ItemGroup>
+    <CustomDeployPaths Include="C:\MyExternalFolder\Plugins" />
+    <CustomDeployPaths Include="D:\AnotherExternalFolder\Plugins" />
+  </ItemGroup>
 </Project>

@@ -18,6 +18,7 @@ enum class TweakableType {
     Int,
     Bool,
     Button,
+    Custom,
     Folder
 };
 
@@ -231,6 +232,28 @@ private:
     ImVec4 m_buttonColor;
     ImVec4 m_buttonHoveredColor;
     ImVec4 m_buttonActiveColor;
+};
+
+// Custom live tire-color control backed by a runtime pointer chain.
+class TweakableTireColor : public TweakableItem {
+public:
+    TweakableTireColor(int id, const std::string& name);
+
+    void Render() override;
+    void Reset() override;
+    void ResetToDefault() override;
+
+private:
+    bool ResolveAddresses(uintptr_t& redAddr, uintptr_t& greenAddr, uintptr_t& blueAddr, uintptr_t& brightnessAddr) const;
+    bool ReadCurrentValues(float outColor[3], float& outBrightness) const;
+    bool WriteColor(const float color[3]) const;
+    bool WriteBrightness(float brightness) const;
+
+    float m_color[3];
+    float m_defaultColor[3];
+    float m_brightness;
+    float m_defaultBrightness;
+    bool m_hasCapturedDefaults;
 };
 
 // Folder tweakable (contains other tweakables)

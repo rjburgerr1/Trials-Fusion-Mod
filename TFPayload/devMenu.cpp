@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <initializer_list>
 #include <Windows.h>
 
 // Global instance
@@ -368,6 +369,260 @@ void TweakableButton::Render() {
     if (m_useCustomColors) {
         ImGui::PopStyleColor(3);
     }
+}
+
+// TweakableTireColor Implementation
+namespace {
+    static constexpr uintptr_t TIRE_COLOR_CHAIN_BASE_RVA_STEAM = 0x01057278;
+    static constexpr uintptr_t TIRE_COLOR_CHAIN_BASE_RVA_UPLAY = 0x01057278 - 0x2000;
+
+    static float ClampFloat(float value, float minValue, float maxValue) {
+        if (value < minValue) {
+            return minValue;
+        }
+        if (value > maxValue) {
+            return maxValue;
+        }
+        return value;
+    }
+
+    static bool ResolvePointerChainWithInitialDeref(uintptr_t baseAddress, std::initializer_list<uintptr_t> offsets, uintptr_t& outAddress) {
+        __try {
+            if (IsBadReadPtr(reinterpret_cast<void*>(baseAddress), sizeof(uintptr_t))) {
+                return false;
+            }
+
+            // Match the usual Cheat Engine-style chain:
+            //   current = *(baseAddress)
+            //   current = *(current + offset[n]) for intermediates
+            //   result  = current + finalOffset
+            uintptr_t current = *reinterpret_cast<uintptr_t*>(baseAddress);
+            if (current == 0) {
+                return false;
+            }
+
+            auto it = offsets.begin();
+            while (it != offsets.end()) {
+                const uintptr_t offset = *it;
+                ++it;
+
+                if (it == offsets.end()) {
+                    outAddress = current + offset;
+                    return !IsBadReadPtr(reinterpret_cast<void*>(outAddress), sizeof(float));
+                }
+
+                uintptr_t pointerAddress = current + offset;
+                if (IsBadReadPtr(reinterpret_cast<void*>(pointerAddress), sizeof(uintptr_t))) {
+                    return false;
+                }
+
+                current = *reinterpret_cast<uintptr_t*>(pointerAddress);
+                if (current == 0) {
+                    return false;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+
+        return false;
+    }
+
+    static bool ResolvePointerChainWithoutInitialDeref(uintptr_t baseAddress, std::initializer_list<uintptr_t> offsets, uintptr_t& outAddress) {
+        __try {
+            uintptr_t current = baseAddress;
+            auto it = offsets.begin();
+            while (it != offsets.end()) {
+                const uintptr_t offset = *it;
+                ++it;
+
+                if (it == offsets.end()) {
+                    outAddress = current + offset;
+                    return !IsBadReadPtr(reinterpret_cast<void*>(outAddress), sizeof(float));
+                }
+
+                uintptr_t pointerAddress = current + offset;
+                if (IsBadReadPtr(reinterpret_cast<void*>(pointerAddress), sizeof(uintptr_t))) {
+                    return false;
+                }
+
+                current = *reinterpret_cast<uintptr_t*>(pointerAddress);
+                if (current == 0) {
+                    return false;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+
+        return false;
+    }
+
+    static bool ResolvePointerChainEitherStyle(uintptr_t baseAddress, std::initializer_list<uintptr_t> offsets, uintptr_t& outAddress) {
+        return ResolvePointerChainWithInitialDeref(baseAddress, offsets, outAddress)
+            || ResolvePointerChainWithoutInitialDeref(baseAddress, offsets, outAddress);
+    }
+}
+
+TweakableTireColor::TweakableTireColor(int id, const std::string& name)
+    : TweakableItem(id, name, TweakableType::Custom)
+    , m_color{ 1.0f, 1.0f, 1.0f }
+    , m_defaultColor{ 1.0f, 1.0f, 1.0f }
+    , m_brightness(1.0f)
+    , m_defaultBrightness(1.0f)
+    , m_hasCapturedDefaults(false) {
+}
+
+bool TweakableTireColor::ResolveAddresses(uintptr_t& redAddr, uintptr_t& greenAddr, uintptr_t& blueAddr, uintptr_t& brightnessAddr) const {
+    uintptr_t moduleBase = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+    if (moduleBase == 0) {
+        return false;
+    }
+
+    const uintptr_t tireColorBaseRva = BaseAddress::IsSteamVersion()
+        ? TIRE_COLOR_CHAIN_BASE_RVA_STEAM
+        : TIRE_COLOR_CHAIN_BASE_RVA_UPLAY;
+    uintptr_t chainBase = moduleBase + tireColorBaseRva;
+    return ResolvePointerChainEitherStyle(chainBase, { 0x18, 0x268, 0x74, 0x94, 0x20, 0x50 }, redAddr)
+        && ResolvePointerChainEitherStyle(chainBase, { 0x18, 0x268, 0x74, 0x94, 0x20, 0x54 }, greenAddr)
+        && ResolvePointerChainEitherStyle(chainBase, { 0x18, 0x268, 0x74, 0x94, 0x20, 0x58 }, blueAddr)
+        && ResolvePointerChainEitherStyle(chainBase, { 0x18, 0x268, 0x74, 0x94, 0x20, 0x74 }, brightnessAddr);
+}
+
+bool TweakableTireColor::ReadCurrentValues(float outColor[3], float& outBrightness) const {
+    uintptr_t redAddr = 0, greenAddr = 0, blueAddr = 0, brightnessAddr = 0;
+    if (!ResolveAddresses(redAddr, greenAddr, blueAddr, brightnessAddr)) {
+        return false;
+    }
+
+    __try {
+        outColor[0] = *reinterpret_cast<float*>(redAddr);
+        outColor[1] = *reinterpret_cast<float*>(greenAddr);
+        outColor[2] = *reinterpret_cast<float*>(blueAddr);
+        outBrightness = *reinterpret_cast<float*>(brightnessAddr);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool TweakableTireColor::WriteColor(const float color[3]) const {
+    uintptr_t redAddr = 0, greenAddr = 0, blueAddr = 0, brightnessAddr = 0;
+    if (!ResolveAddresses(redAddr, greenAddr, blueAddr, brightnessAddr)) {
+        return false;
+    }
+
+    __try {
+        *reinterpret_cast<float*>(redAddr) = color[0];
+        *reinterpret_cast<float*>(greenAddr) = color[1];
+        *reinterpret_cast<float*>(blueAddr) = color[2];
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool TweakableTireColor::WriteBrightness(float brightness) const {
+    uintptr_t redAddr = 0, greenAddr = 0, blueAddr = 0, brightnessAddr = 0;
+    if (!ResolveAddresses(redAddr, greenAddr, blueAddr, brightnessAddr)) {
+        return false;
+    }
+
+    __try {
+        *reinterpret_cast<float*>(brightnessAddr) = brightness;
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void TweakableTireColor::Render() {
+    float liveColor[3] = {};
+    float liveBrightness = 1.0f;
+    const bool isAvailable = ReadCurrentValues(liveColor, liveBrightness);
+
+    if (!isAvailable) {
+        ImGui::TextDisabled("%s unavailable (load into a bike scene first)", m_name.c_str());
+        return;
+    }
+
+    if (!m_hasCapturedDefaults) {
+        for (int i = 0; i < 3; ++i) {
+            m_color[i] = liveColor[i];
+            m_defaultColor[i] = liveColor[i];
+        }
+        m_brightness = liveBrightness;
+        m_defaultBrightness = liveBrightness;
+        m_hasCapturedDefaults = true;
+    }
+
+    float normalizedPickerColor[3] = {
+        ClampFloat(m_color[0] / 6.0f, 0.0f, 1.0f),
+        ClampFloat(m_color[1] / 6.0f, 0.0f, 1.0f),
+        ClampFloat(m_color[2] / 6.0f, 0.0f, 1.0f)
+    };
+
+    ImGui::PushItemWidth(200.0f);
+    std::string colorLabel = "##" + m_name + "Color" + std::to_string(m_id);
+    if (ImGui::ColorEdit3(
+        colorLabel.c_str(),
+        normalizedPickerColor,
+        ImGuiColorEditFlags_Float | ImGuiColorEditFlags_NoInputs
+    )) {
+        for (int i = 0; i < 3; ++i) {
+            m_color[i] = ClampFloat(normalizedPickerColor[i] * 6.0f, 0.0f, 6.0f);
+        }
+        if (!WriteColor(m_color)) {
+            LOG_WARNING("[DevMenu] Failed to write live tire diffuse color");
+        }
+    }
+    ImGui::PopItemWidth();
+    ImGui::SameLine();
+    ImGui::Text("%s", m_name.c_str());
+
+    ImGui::PushItemWidth(200.0f);
+    std::string rgbScalarLabel = "##" + m_name + "RgbScalar" + std::to_string(m_id);
+    if (ImGui::SliderFloat3(rgbScalarLabel.c_str(), m_color, 0.0f, 6.0f, "RGB %.3f")) {
+        for (int i = 0; i < 3; ++i) {
+            m_color[i] = ClampFloat(m_color[i], 0.0f, 6.0f);
+        }
+        if (!WriteColor(m_color)) {
+            LOG_WARNING("[DevMenu] Failed to write live tire diffuse color");
+        }
+    }
+    ImGui::PopItemWidth();
+
+    ImGui::PushItemWidth(200.0f);
+    std::string brightnessLabel = "##" + m_name + "Brightness" + std::to_string(m_id);
+    if (ImGui::SliderFloat(brightnessLabel.c_str(), &m_brightness, 0.0f, 1.0f, "Brightness %.3f")) {
+        m_brightness = ClampFloat(m_brightness, 0.0f, 1.0f);
+        if (!WriteBrightness(m_brightness)) {
+            LOG_WARNING("[DevMenu] Failed to write live tire brightness");
+        }
+    }
+    ImGui::PopItemWidth();
+
+    if (ImGui::SmallButton(("Reset##" + std::to_string(m_id)).c_str())) {
+        ResetToDefault();
+    }
+}
+
+void TweakableTireColor::Reset() {
+    for (int i = 0; i < 3; ++i) {
+        m_color[i] = m_defaultColor[i];
+    }
+    m_brightness = m_defaultBrightness;
+}
+
+void TweakableTireColor::ResetToDefault() {
+    Reset();
+    WriteColor(m_color);
+    WriteBrightness(m_brightness);
 }
 
 // TweakableFolder Implementation
@@ -3689,6 +3944,21 @@ void DevMenu::InitializeMod() {
     const float totalButtonsWidth = 316.0f;
 
     // ============================================================================
+    // Appearance Subcategory
+    // ============================================================================
+    auto appearanceFolder = std::make_shared<TweakableFolder>(10070, "Appearance");
+
+    auto tireColor = std::make_shared<TweakableTireColor>(
+        10071,
+        "Tire Color"
+    );
+    RegisterTweakable(tireColor);
+    appearanceFolder->AddChild(tireColor);
+
+    RegisterTweakable(appearanceFolder);
+    mod->AddChild(appearanceFolder);
+
+    // ============================================================================
     // Checkpoint Subcategory
     // ============================================================================
     auto checkpointFolder = std::make_shared<TweakableFolder>(10040, "Checkpoint");
@@ -4467,6 +4737,7 @@ void DevMenu::InitializeKeybindings() {
     
     // === Time Controls ===
     
+#ifdef DEVELOPMENT_MODE
     // Debug Time Counter
     auto debugTimeCounterBtn = CreateKeybindButton(10117, Keybindings::Action::DebugTimeCounter, &waitingForDebugTimeCounter, this);
     RegisterTweakable(debugTimeCounterBtn);
@@ -4480,6 +4751,7 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(debugFaultCounterBtn);
     m_keybindingActions.push_back(Keybindings::Action::DebugFaultCounter);
     m_keybindingDefaults.push_back(VK_OEM_6);
+#endif
 
     // Increment Fault
     auto incrementFaultBtn = CreateKeybindButton(10112, Keybindings::Action::IncrementFault, &waitingForIncrementFault, this);
@@ -4565,12 +4837,14 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingActions.push_back(Keybindings::Action::SwapPrevBike);
     m_keybindingDefaults.push_back(VK_OEM_COMMA);
 
+#ifdef DEVELOPMENT_MODE
     // Debug Bike Info
     auto debugBikeInfoBtn = CreateKeybindButton(10147, Keybindings::Action::DebugBikeInfo, &waitingForDebugBikeInfo, this);
     RegisterTweakable(debugBikeInfoBtn);
     m_keybindingItems.push_back(debugBikeInfoBtn);
     m_keybindingActions.push_back(Keybindings::Action::DebugBikeInfo);
     m_keybindingDefaults.push_back(VK_F9);
+#endif
     
     // === Track Central Auto-Scroll Controls ===
     

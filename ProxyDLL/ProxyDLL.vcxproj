@@ -127,9 +127,12 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <PropertyGroup>
-    <CustomDeployPath Condition="'$(CustomDeployPath)'==''">$(SolutionDir)LocalDeploy</CustomDeployPath>
-  </PropertyGroup>
+  <ItemGroup Condition="'$(CustomDeployPath)'!=''">
+    <CustomDeployPaths Include="$(CustomDeployPath)" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(CustomDeployPaths)'==''">
+    <CustomDeployPaths Include="$(SolutionDir)LocalDeploy" />
+  </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <TargetName>dbgcore</TargetName>
   </PropertyGroup>
@@ -171,9 +174,6 @@
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>if exist "$(CustomDeployPath)" copy /Y "$(SolutionDir)$(Configuration)\dbgcore.dll" "$(CustomDeployPath)"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -196,9 +196,6 @@
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>if exist "$(CustomDeployPath)" copy /Y "$(SolutionDir)$(Configuration)\dbgcore.dll" "$(CustomDeployPath)"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DEVELOPMENT_MODE|Win32'">
     <ClCompile>
@@ -221,9 +218,6 @@
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>if exist "$(CustomDeployPath)" copy /Y "$(SolutionDir)$(Configuration)\dbgcore.dll" "$(CustomDeployPath)"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RELEASE_AUTOLOAD|Win32'">
     <ClCompile>
@@ -246,9 +240,6 @@
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>if exist "$(CustomDeployPath)" copy /Y "$(SolutionDir)$(Configuration)\dbgcore.dll" "$(CustomDeployPath)"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -370,6 +361,9 @@
     <ResourceCompile Include="..\vendor\minhook\dll_resources\MinHook.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="DeployProxyDll" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="@(CustomDeployPaths->'%(Identity)\$(TargetFileName)')" Condition="Exists('%(CustomDeployPaths.Identity)')" />
+  </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
