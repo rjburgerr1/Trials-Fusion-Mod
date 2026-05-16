@@ -445,21 +445,18 @@ namespace Tracks {
         }
     }
 
+    static void SendKeyEvent(WORD vkCode, DWORD flags) {
+        INPUT input = {};
+        input.type = INPUT_KEYBOARD;
+        input.ki.wVk = vkCode;
+        input.ki.dwFlags = flags;
+        SendInput(1, &input, sizeof(INPUT));
+    }
+
     // Simulate a key press using SendInput
     static void SimulateKeyPress(WORD vkCode) {
-        INPUT inputs[2] = {};
-
-        // Key down
-        inputs[0].type = INPUT_KEYBOARD;
-        inputs[0].ki.wVk = vkCode;
-        inputs[0].ki.dwFlags = 0;
-
-        // Key up
-        inputs[1].type = INPUT_KEYBOARD;
-        inputs[1].ki.wVk = vkCode;
-        inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
-
-        SendInput(2, inputs, sizeof(INPUT));
+        SendKeyEvent(vkCode, 0);
+        SendKeyEvent(vkCode, KEYEVENTF_KEYUP);
     }
 
     // Simulate typing text
@@ -495,9 +492,9 @@ namespace Tracks {
                 continue; // Skip unsupported characters
             }
 
-            // Press shift if needed
+            // Hold shift while pressing characters that require it.
             if (needShift) {
-                SimulateKeyPress(VK_SHIFT);
+                SendKeyEvent(VK_SHIFT, 0);
                 Sleep(10);
             }
 
@@ -512,8 +509,9 @@ namespace Tracks {
 
             SendInput(2, inputs, sizeof(INPUT));
 
-            // Release shift if needed
             if (needShift) {
+                Sleep(10);
+                SendKeyEvent(VK_SHIFT, KEYEVENTF_KEYUP);
                 Sleep(10);
             }
 

@@ -175,7 +175,12 @@ void ShutdownTFPayload()
 // Exported for compatibility with old ProxyDLL
 extern "C" __declspec(dllexport) void ShutdownPayload()
 {
+#ifdef RELEASE_AUTOLOAD_MODE
+    LOG_INFO("[ShutdownPayload] Ignored in release autoload mode.");
+    return;
+#else
     ShutdownTFPayload();
+#endif
 }
 
 // C-style function for safe DevMenuSync call (no C++ objects with destructors)
@@ -576,10 +581,15 @@ extern "C" __declspec(dllexport) void ManualInitialize()
 
 extern "C" __declspec(dllexport) void ManualShutdown()
 {
+#ifdef RELEASE_AUTOLOAD_MODE
+    LOG_INFO("[ManualShutdown] Ignored in release autoload mode.");
+    return;
+#else
     if (g_isInitialized.exchange(false))
     {
         ShutdownTFPayload();
     }
+#endif
 }
 
 extern "C" __declspec(dllexport) bool IsInitialized()
@@ -675,8 +685,10 @@ void PrintHelpText()
     LOG_INFO("\t" << ClearConsoleKey << "\t\t\t- Clear debug console");
     LOG_INFO("\t" << ShowHelpTextKey << "\t\t\t- Show this help text");
     LOG_INFO("\t" << ToggleVerboseLoggingKey << "\t\t\t- Toggle verbose logging (ON/OFF)");
+#ifdef DEVELOPMENT_MODE
     LOG_INFO("\tEND\t\t\t- Shutdown and unload TFPayload.dll");
     LOG_INFO("\tF1\t\t\t- Reload TFPayload.dll (load/unload toggle - dev mode only)");
+#endif
     LOG_INFO("\t" << ToggleDevMenuKey << "\t\t\t- Open DevMenu");
     LOG_INFO("\t" << ToggleOverlayKey << "\t\t\t- Show/Hide overlay");
     LOG_INFO("\tK\t\t\t- Open Keybindings Menu");
@@ -1025,11 +1037,13 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
             continue;
         }
         
+#ifdef DEVELOPMENT_MODE
         if (KeyPress(VK_END)) {
             LOG_INFO("[END] Shutting down TFPayload...");
             ShutdownTFPayload();
             return 0;
         }
+#endif
 
         HandleF5();
         HandleF6();

@@ -99,9 +99,12 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <PropertyGroup>
-    <CustomDeployPath Condition="'$(CustomDeployPath)'==''">$(SolutionDir)LocalDeploy</CustomDeployPath>
-  </PropertyGroup>
+  <ItemGroup Condition="'$(CustomDeployPath)'!=''">
+    <CustomDeployPaths Include="$(CustomDeployPath)" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(CustomDeployPaths)'==''">
+    <CustomDeployPaths Include="$(SolutionDir)LocalDeploy" />
+  </ItemGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -119,9 +122,6 @@
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>if exist "$(CustomDeployPath)" copy /Y "$(TargetPath)" "$(CustomDeployPath)"</Command>
-    </PostBuildEvent>
     <PreBuildEvent>
       <Command>REM 1. Define the path to the project directory.
 set PROJECT_DIR=$(ProjectDir)
@@ -156,9 +156,6 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>if exist "$(CustomDeployPath)" copy /Y "$(TargetPath)" "$(CustomDeployPath)"</Command>
-    </PostBuildEvent>
     <PreBuildEvent>
       <Command>REM 1. Define the path to the project directory.
 set PROJECT_DIR=$(ProjectDir)
@@ -193,9 +190,6 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>if exist "$(CustomDeployPath)" copy /Y "$(TargetPath)" "$(CustomDeployPath)"</Command>
-    </PostBuildEvent>
     <PreBuildEvent>
       <Command>REM 1. Define the path to the project directory.
 set PROJECT_DIR=$(ProjectDir)
@@ -230,9 +224,6 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>if exist "$(CustomDeployPath)" copy /Y "$(TargetPath)" "$(CustomDeployPath)"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -357,6 +348,9 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ResourceCompile Include="..\vendor\minhook\dll_resources\MinHook.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="DeployTfPayload" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="@(CustomDeployPaths->'%(Identity)\$(TargetFileName)')" Condition="Exists('%(CustomDeployPaths.Identity)')" />
+  </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>

@@ -127,6 +127,24 @@ static bool IsKeyPressedOnce(int vkCode, bool& lastState)
         return false;
     }
 
+    // Modifiers are often used by the game and Steam overlay (Shift+Tab).
+    // Do not let a bare modifier binding become an overlay command.
+    switch (vkCode) {
+    case VK_SHIFT:
+    case VK_LSHIFT:
+    case VK_RSHIFT:
+    case VK_CONTROL:
+    case VK_LCONTROL:
+    case VK_RCONTROL:
+    case VK_MENU:
+    case VK_LMENU:
+    case VK_RMENU:
+        lastState = false;
+        return false;
+    default:
+        break;
+    }
+
     bool down = (GetAsyncKeyState(vkCode) & 0x8000) != 0;
     bool pressed = down && !lastState;
     lastState = down;

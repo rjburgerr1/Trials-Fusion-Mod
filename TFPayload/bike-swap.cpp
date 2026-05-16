@@ -53,7 +53,10 @@ namespace BikeSwap {
     static constexpr uintptr_t RESET_BIKE_STATE_RVA_STEAM = 0x205310;
     static constexpr uintptr_t INIT_BIKE_APPEARANCE_SLOTS_RVA_STEAM = 0x229250;
     static constexpr uintptr_t SERIALIZE_BIKE_SCENE_OBJECTS_RVA_STEAM = 0x205090;
-    static constexpr uintptr_t GET_BIKE_APPEARANCE_DATA_RVA_STEAM = 0x304e70; // Estimated from nearby bike-function delta
+    // Verified from uplay-to-steam.csv:
+    // Uplay GetBikeAppearanceData 0x00a055a0 -> Steam 0x00444830
+    // Steam RVA = 0x00444830 - 0x00140000 = 0x00304830
+    static constexpr uintptr_t GET_BIKE_APPEARANCE_DATA_RVA_STEAM = 0x304830;
     static constexpr uintptr_t GET_BIKE_DATA_BY_INDEX_RVA_STEAM = 0x19940;
     static constexpr uintptr_t GET_FIRST_ENTITY_FROM_LIST_RVA_STEAM = 0x25eb20;
     static constexpr uintptr_t HANDLE_GAME_FRAME_UPDATE_RVA_STEAM = 0x3b6140;
