@@ -47,10 +47,4 @@ namespace BikeSwap {
 
     // Debug function to dump bike list info
     void DebugDumpBikeInfo();
-
-    // Manual step-by-step bike swap for debugging (calls each function individually)
-    bool SwapToBikeManual(int bikeId);
-
-    // Compatibility wrapper for the queued, main-thread-safe swap path
-    bool SwapToBikeSimple(int bikeId);
 }

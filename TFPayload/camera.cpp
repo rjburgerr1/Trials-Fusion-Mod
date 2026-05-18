@@ -10,9 +10,6 @@ namespace Camera {
     // g_pGameManager: Ghidra 0x0174b308, RVA = 0x0174b308 - 0x700000 = 0x104b308
     static constexpr uintptr_t GLOBAL_STRUCT_RVA_UPLAY = 0x104b308;
     
-    // SetCameraMode: Ghidra 0x00b4e890, RVA = 0x00b4e890 - 0x700000 = 0x44e890
-    static constexpr uintptr_t SET_CAMERA_MODE_RVA_UPLAY = 0x44e890;
-    
     // CycleCameraMode: Ghidra 0x00b4e8e0, RVA = 0x00b4e8e0 - 0x700000 = 0x44e8e0
     static constexpr uintptr_t CYCLE_CAMERA_MODE_RVA_UPLAY = 0x44e8e0;
     
@@ -21,9 +18,6 @@ namespace Camera {
     
     // g_pGameManager: Ghidra 0x0118d308, RVA = 0x0118d308 - 0x140000 = 0x104d308
     static constexpr uintptr_t GLOBAL_STRUCT_RVA_STEAM = 0x104d308;
-    
-    // SetCameraMode: Ghidra 0x0058e090, RVA = 0x0058e090 - 0x140000 = 0x44e090
-    static constexpr uintptr_t SET_CAMERA_MODE_RVA_STEAM = 0x44e090;
     
     // CycleCameraMode: Ghidra 0x0058e0e0, RVA = 0x0058e0e0 - 0x140000 = 0x44e0e0
     static constexpr uintptr_t CYCLE_CAMERA_MODE_RVA_STEAM = 0x44e0e0;
@@ -39,10 +33,6 @@ namespace Camera {
         return BaseAddress::IsSteamVersion() ? GLOBAL_STRUCT_RVA_STEAM : GLOBAL_STRUCT_RVA_UPLAY;
     }
     
-    static uintptr_t GetSetCameraModeRVA() {
-        return BaseAddress::IsSteamVersion() ? SET_CAMERA_MODE_RVA_STEAM : SET_CAMERA_MODE_RVA_UPLAY;
-    }
-    
     static uintptr_t GetCycleCameraModeRVA() {
         return BaseAddress::IsSteamVersion() ? CYCLE_CAMERA_MODE_RVA_STEAM : CYCLE_CAMERA_MODE_RVA_UPLAY;
     }
@@ -52,16 +42,13 @@ namespace Camera {
     }
     
     // Camera object offsets
-    // There are TWO mode systems:
-    //   - 0x60 with callback at 0x10: Used by SetCameraMode (initialization)
-    //   - 0x64 with callback at 0x28: Used by CycleHUD (gameplay cycling)
+    // There are two mode values; CycleHUD uses 0x64/0x28 for gameplay cycling.
     static constexpr uintptr_t CAMERA_MODE_INIT_OFFSET = 0x60;   // SetCameraMode reads/writes this
     static constexpr uintptr_t CAMERA_MODE_CYCLE_OFFSET = 0x64;  // CycleHUD reads/writes this (100 decimal)
     static constexpr uintptr_t CAMERA_CALLBACK_INIT_OFFSET = 0x10;  // Callback for SetCameraMode
     static constexpr uintptr_t CAMERA_CALLBACK_CYCLE_OFFSET = 0x28; // Callback for CycleHUD
     
     // Function pointer types
-    typedef void(__thiscall* SetCameraModeFunc)(void* thisPtr, int mode);
     typedef void(__fastcall* CycleHUDFunc)(void* thisPtr);
 
     // State tracking
@@ -69,38 +56,15 @@ namespace Camera {
     static uintptr_t g_baseAddress = 0;
     static void** g_globalStructPtr = nullptr;
     static char* g_cameraActiveFlag = nullptr;
-    static SetCameraModeFunc g_setCameraModeFunc = nullptr;
     static CycleHUDFunc g_CycleHUDFunc = nullptr;
 
     // ============================================================================
     // SEH-safe wrapper functions (no C++ objects allowed in these)
     // ============================================================================
 
-    static bool CallSetCameraModeInternal(void* cameraPtr, int mode) {
-        __try {
-            g_setCameraModeFunc(cameraPtr, mode);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
-
     static bool CallCycleHUDInternal(void* cameraPtr) {
         __try {
             g_CycleHUDFunc(cameraPtr);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
-
-    static bool CallModeCallbackInternal(void* funcPtr, int mode) {
-        __try {
-            typedef void(__cdecl* ModeCallbackFunc)(int mode);
-            ModeCallbackFunc callback = reinterpret_cast<ModeCallbackFunc>(funcPtr);
-            callback(mode);
             return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -172,21 +136,6 @@ namespace Camera {
         return *reinterpret_cast<int*>(addr);
     }
 
-    static bool SetCameraValueAtOffset(uintptr_t offset, int value) {
-        void* cameraObj = GetCameraObject();
-        if (!cameraObj) {
-            return false;
-        }
-
-        uintptr_t addr = reinterpret_cast<uintptr_t>(cameraObj) + offset;
-        if (IsBadWritePtr((void*)addr, sizeof(int))) {
-            return false;
-        }
-
-        *reinterpret_cast<int*>(addr) = value;
-        return true;
-    }
-
     static void* GetCameraPointerAtOffset(uintptr_t offset) {
         void* cameraObj = GetCameraObject();
         if (!cameraObj) {
@@ -214,13 +163,11 @@ namespace Camera {
         if (BaseAddress::IsSteamVersion()) {
             LOG_VERBOSE("[Camera] Steam version detected - using Steam addresses");
             LOG_VERBOSE("[Camera]   GlobalStruct RVA: 0x" << std::hex << GLOBAL_STRUCT_RVA_STEAM);
-            LOG_VERBOSE("[Camera]   SetCameraMode RVA: 0x" << std::hex << SET_CAMERA_MODE_RVA_STEAM);
             LOG_VERBOSE("[Camera]   CycleCameraMode RVA: 0x" << std::hex << CYCLE_CAMERA_MODE_RVA_STEAM);
             LOG_VERBOSE("[Camera]   CameraActiveFlag RVA: 0x" << std::hex << CAMERA_ACTIVE_FLAG_RVA_STEAM);
         } else {
             LOG_VERBOSE("[Camera] Uplay version detected - using Uplay addresses");
             LOG_VERBOSE("[Camera]   GlobalStruct RVA: 0x" << std::hex << GLOBAL_STRUCT_RVA_UPLAY);
-            LOG_VERBOSE("[Camera]   SetCameraMode RVA: 0x" << std::hex << SET_CAMERA_MODE_RVA_UPLAY);
             LOG_VERBOSE("[Camera]   CycleCameraMode RVA: 0x" << std::hex << CYCLE_CAMERA_MODE_RVA_UPLAY);
             LOG_VERBOSE("[Camera]   CameraActiveFlag RVA: 0x" << std::hex << CAMERA_ACTIVE_FLAG_RVA_UPLAY);
         }
@@ -234,12 +181,6 @@ namespace Camera {
         g_globalStructPtr = reinterpret_cast<void**>(baseAddress + GetGlobalStructRVA());
         if (IsBadReadPtr(g_globalStructPtr, sizeof(void*))) {
             LOG_ERROR("[Camera] Invalid global structure pointer");
-            return false;
-        }
-
-        g_setCameraModeFunc = reinterpret_cast<SetCameraModeFunc>(baseAddress + GetSetCameraModeRVA());
-        if (IsBadReadPtr(g_setCameraModeFunc, 1)) {
-            LOG_ERROR("[Camera] Invalid SetCameraMode function pointer");
             return false;
         }
 
@@ -277,94 +218,7 @@ namespace Camera {
         g_baseAddress = 0;
         g_globalStructPtr = nullptr;
         g_cameraActiveFlag = nullptr;
-        g_setCameraModeFunc = nullptr;
         g_CycleHUDFunc = nullptr;
-    }
-
-    bool SetMode(int mode) {
-        if (!g_initialized) {
-            LOG_ERROR("[Camera] Not initialized");
-            return false;
-        }
-
-        if (!g_cameraActiveFlag || IsBadReadPtr(g_cameraActiveFlag, sizeof(char))) {
-            LOG_ERROR("[Camera] Camera active flag is invalid");
-            return false;
-        }
-
-        if (*g_cameraActiveFlag == 0) {
-            LOG_WARNING("[Camera] Camera system is not active (not in gameplay?)");
-            return false;
-        }
-
-        if (mode < 0 || mode > 2) {
-            LOG_ERROR("[Camera] Invalid camera mode: " << mode << " (valid: 0-2)");
-            return false;
-        }
-
-        void* cameraObj = GetCameraObject();
-        if (!cameraObj) {
-            LOG_ERROR("[Camera] Failed to get camera object");
-            return false;
-        }
-
-        // Check the CYCLE callback (0x28) - this is what the in-game keybind uses
-        void* cycleCallbackPtr = GetCameraPointerAtOffset(CAMERA_CALLBACK_CYCLE_OFFSET);
-        int beforeCycleMode = GetCameraValueAtOffset(CAMERA_MODE_CYCLE_OFFSET);
-        int beforeInitMode = GetCameraValueAtOffset(CAMERA_MODE_INIT_OFFSET);
-
-        LOG_VERBOSE("[Camera] Attempting to set mode to " << mode);
-        LOG_VERBOSE("[Camera]   Before: cycleMode(0x64)=" << beforeCycleMode << ", initMode(0x60)=" << beforeInitMode);
-        LOG_VERBOSE("[Camera]   Cycle callback (0x28): 0x" << std::hex << reinterpret_cast<uintptr_t>(cycleCallbackPtr));
-
-        if (cycleCallbackPtr == nullptr) {
-            LOG_ERROR("[Camera] Cannot switch mode - cycle callback pointer (0x28) is NULL!");
-            LOG_ERROR("[Camera] This means the camera mode switch handler is not registered.");
-            return false;
-        }
-
-        // Get the callback function pointer
-        uintptr_t callbackObjAddr = reinterpret_cast<uintptr_t>(cycleCallbackPtr);
-        if (IsBadReadPtr((void*)callbackObjAddr, sizeof(void*))) {
-            LOG_ERROR("[Camera] Cannot read callback object");
-            return false;
-        }
-
-        void* vtablePtr = *reinterpret_cast<void**>(callbackObjAddr);
-        if (!vtablePtr || IsBadReadPtr(vtablePtr, 8)) {
-            LOG_ERROR("[Camera] Invalid callback vtable");
-            return false;
-        }
-
-        // Get the function at vtable+4 (the actual mode switch function)
-        uintptr_t vtableAddr = reinterpret_cast<uintptr_t>(vtablePtr);
-        void* switchFunc = *reinterpret_cast<void**>(vtableAddr + 4);
-        if (!switchFunc || IsBadReadPtr(switchFunc, 1)) {
-            LOG_ERROR("[Camera] Invalid switch function pointer");
-            return false;
-        }
-
-        LOG_VERBOSE("[Camera]   Switch function: 0x" << std::hex << reinterpret_cast<uintptr_t>(switchFunc));
-
-        // Set the mode value at 0x64
-        if (!SetCameraValueAtOffset(CAMERA_MODE_CYCLE_OFFSET, mode)) {
-            LOG_ERROR("[Camera] Failed to set mode value at 0x64");
-            return false;
-        }
-
-        // Call the callback function with the mode
-        if (!CallModeCallbackInternal(switchFunc, mode)) {
-            LOG_ERROR("[Camera] Exception calling mode switch callback");
-            return false;
-        }
-
-        int afterCycleMode = GetCameraValueAtOffset(CAMERA_MODE_CYCLE_OFFSET);
-        int afterInitMode = GetCameraValueAtOffset(CAMERA_MODE_INIT_OFFSET);
-        
-        const char* modeNames[] = { "Follow Camera", "Automatic Camera", "Free Camera" };
-        LOG_VERBOSE("[Camera]   After: cycleMode(0x64)=" << std::dec << afterCycleMode << " (" << modeNames[afterCycleMode] << "), initMode(0x60)=" << afterInitMode);
-        
-        return true;
     }
 
     bool CycleMode() {

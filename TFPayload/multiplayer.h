@@ -75,23 +75,4 @@ namespace Multiplayer {
     // Hotkey handling for manual logging
     void CheckHotkey();
     
-    // Phase 2+ Functions (Stubs for now - will be implemented later)
-    // These are called by devMenu.cpp but not yet implemented
-    void SendVoteTrack(uint32_t trackId = 0);
-    void SendSelectBike(uint32_t bikeId = 0);
-    void SendContinueToNextHeat();
-    void SendContinueToVote();
-    void SendReplayMultiplayer();
-    void SendInitLive();
-    void SendUninitLive();
-    void SendStartLiveQuickGame();
-    void SendStartLiveMotocross();
-    void SendStartLiveSupercross();
-    void SendStartLiveTrials();
-    void SendStartPrivateRace();
-    void SendCancelPrivateRace();
-    void SendStartLocalRace();
-    void SendJoinLocalMultiplayer();
-    void SendLeaveLocalMultiplayer();
-    void SendExitToLobby();
 }
