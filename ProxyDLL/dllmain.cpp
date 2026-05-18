@@ -6,6 +6,10 @@
 #include "logging.h"
 #include <TlHelp32.h>
 #include <stdio.h>
+#include <cstring>
+#include <string>
+
+extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 // Debug Console
 void AllocateConsole()
@@ -119,7 +123,11 @@ DWORD_PTR GetModuleBaseAddress(DWORD processID, const wchar_t* moduleName) {
 
 static bool isLoaded = false;
 HMODULE hPayload = nullptr;
-static constexpr DWORD AUTOLOAD_DELAY_MS = 14000;
+static constexpr const char* DEV_UNLOAD_TRIGGER = "tfpayload_dev_unload.trigger";
+static constexpr const char* DEV_LOAD_TRIGGER = "tfpayload_dev_load.trigger";
+#ifdef DEVELOPMENT_MODE
+static bool pendingDevelopmentLoad = false;
+#endif
 
 void LoadTFPayload()
 {
@@ -151,6 +159,38 @@ void LoadTFPayload()
 #ifdef DEVELOPMENT_MODE
 // Development mode - manual unload with F1
 
+static std::string GetProxyDirectory()
+{
+    char modulePath[MAX_PATH] = {};
+    DWORD length = GetModuleFileNameA(reinterpret_cast<HMODULE>(&__ImageBase), modulePath, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+        return "";
+    }
+
+    char* lastSlash = strrchr(modulePath, '\\');
+    if (lastSlash == nullptr) {
+        return "";
+    }
+
+    *(lastSlash + 1) = '\0';
+    return modulePath;
+}
+
+static bool ConsumeTriggerFile(const char* fileName)
+{
+    std::string path = GetProxyDirectory() + fileName;
+    DWORD attributes = GetFileAttributesA(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+        return false;
+    }
+
+    if (!DeleteFileA(path.c_str())) {
+        LOG_ERROR("Failed to delete dev trigger " << path << ": " << GetLastError());
+    }
+
+    return true;
+}
+
 void UnloadTFPayload()
 {
     if (hPayload != nullptr)
@@ -165,6 +205,43 @@ void UnloadTFPayload()
         hPayload = nullptr;
         isLoaded = false;
         LOG_INFO("TFPayload unloaded");
+    }
+}
+
+void CheckDevelopmentReloadTriggers()
+{
+    if (ConsumeTriggerFile(DEV_UNLOAD_TRIGGER)) {
+        LOG_INFO("Development reload: unload requested by build trigger");
+        pendingDevelopmentLoad = false;
+        if (isLoaded) {
+            UnloadTFPayload();
+        }
+    }
+
+    if (ConsumeTriggerFile(DEV_LOAD_TRIGGER)) {
+        pendingDevelopmentLoad = true;
+        LOG_INFO("Development reload: load requested by build trigger; waiting for game render readiness");
+    }
+
+    if (pendingDevelopmentLoad && !isLoaded && IsGameRenderReady()) {
+        pendingDevelopmentLoad = false;
+        LOG_INFO("Development reload: game render ready; loading payload");
+        LoadTFPayload();
+    }
+    else if (pendingDevelopmentLoad && isLoaded) {
+        pendingDevelopmentLoad = false;
+    }
+}
+
+void CheckDevelopmentStartupAutoload(bool& autoLoadTriggered)
+{
+    if (!autoLoadTriggered && !isLoaded && IsGameRenderReady()) {
+        autoLoadTriggered = true;
+        if (ConsumeTriggerFile(DEV_LOAD_TRIGGER)) {
+            LOG_INFO("Development mode: game render ready; auto-triggering payload load from build trigger.");
+            LoadTFPayload();
+            LOG_INFO(isLoaded ? "Development mode: TFPayload loaded automatically." : "Development mode: TFPayload auto-load failed.");
+        }
     }
 }
 
@@ -210,11 +287,13 @@ DWORD WINAPI PayloadManagerThread()
 #endif
     
     LOG_VERBOSE("Entering loop...");
-    DWORD loopStartTick = GetTickCount();
     bool autoLoadTriggered = false;
     
     while (true) {
 #ifdef DEVELOPMENT_MODE
+        CheckDevelopmentReloadTriggers();
+        CheckDevelopmentStartupAutoload(autoLoadTriggered);
+
         // F1 to toggle TFPayload.dll (development mode only)
         if (GetAsyncKeyState(VK_F1) & 0x1) {
             if (isLoaded) {
@@ -231,9 +310,9 @@ DWORD WINAPI PayloadManagerThread()
             }
         }
 #elif defined(RELEASE_AUTOLOAD_MODE)
-        if (!autoLoadTriggered && !isLoaded && GetTickCount() - loopStartTick >= AUTOLOAD_DELAY_MS) {
+        if (!autoLoadTriggered && !isLoaded && IsGameRenderReady()) {
             autoLoadTriggered = true;
-            LOG_INFO("Release mode: Auto-triggering normal payload load.");
+            LOG_INFO("Release mode: game render ready; auto-triggering normal payload load.");
             LoadTFPayload();
             LOG_INFO(isLoaded ? "Release mode: TFPayload loaded automatically." : "Release mode: TFPayload auto-load failed.");
         }

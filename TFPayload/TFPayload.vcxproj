@@ -292,7 +292,6 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClInclude Include="multiplayer.h" />
     <ClInclude Include="pause.h" />
     <ClInclude Include="pch.h" />
-    <ClInclude Include="payload.h" />
     <ClInclude Include="prevent-finish.h" />
     <ClInclude Include="rendering.h" />
     <ClInclude Include="respawn.h" />
@@ -311,7 +310,6 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClCompile Include="..\vendor\imgui\backends\imgui_impl_dx11.cpp" />
     <ClCompile Include="..\vendor\imgui\backends\imgui_impl_win32.cpp" />
     <ClCompile Include="..\vendor\imgui\imgui.cpp" />
-    <ClCompile Include="..\vendor\imgui\imgui_demo.cpp" />
     <ClCompile Include="..\vendor\imgui\imgui_draw.cpp" />
     <ClCompile Include="..\vendor\imgui\imgui_tables.cpp" />
     <ClCompile Include="..\vendor\imgui\imgui_widgets.cpp" />
@@ -348,8 +346,14 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ResourceCompile Include="..\vendor\minhook\dll_resources\MinHook.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="RequestLiveTfPayloadUnload" BeforeTargets="PreBuildEvent" Condition="'$(Configuration)|$(Platform)'=='DEVELOPMENT_MODE|Win32'">
+    <Message Importance="High" Text="Requesting live TFPayload unload before DEVELOPMENT_MODE build..." />
+    <Touch Files="@(CustomDeployPaths->'%(Identity)\tfpayload_dev_unload.trigger')" AlwaysCreate="true" Condition="Exists('%(CustomDeployPaths.Identity)')" />
+    <Exec Command="ping -n 2 127.0.0.1 &gt;nul" />
+  </Target>
   <Target Name="DeployTfPayload" AfterTargets="Build">
     <Copy SourceFiles="$(TargetPath)" DestinationFiles="@(CustomDeployPaths->'%(Identity)\$(TargetFileName)')" Condition="Exists('%(CustomDeployPaths.Identity)')" />
+    <Touch Files="@(CustomDeployPaths->'%(Identity)\tfpayload_dev_load.trigger')" AlwaysCreate="true" Condition="'$(Configuration)|$(Platform)'=='DEVELOPMENT_MODE|Win32' And Exists('%(CustomDeployPaths.Identity)')" />
   </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

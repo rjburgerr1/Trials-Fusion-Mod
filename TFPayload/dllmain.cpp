@@ -13,7 +13,6 @@
 #undef max
 #endif
 #include "tracks.h"
-#include "payload.h"
 #include "leaderboard_scanner.h"
 #include "leaderboard_direct.h"
 #include "pause.h"
@@ -42,20 +41,12 @@ static bool StartKeyMonitorThread(DWORD_PTR baseAddress);
 
 // GLOBAL STATE
 std::atomic<bool> g_isInitialized(false);
-std::atomic<HMODULE> g_moduleHandle(nullptr);
 bool isRunning = false;
 bool isShuttingDown = false; // Prevent re-entry during shutdown
 HANDLE g_hKeyMonitorThread = NULL;
-int g_monitorCount = 0;
-HMONITOR g_monitors[3] = { NULL };
-bool g_consolePositioned = false;
 
 // MACROS
 #define KeyPress(...) (GetAsyncKeyState(__VA_ARGS__) & 0x1)
-
-struct DumpStruct {
-    char data[0x200];
-};
 
 // UTILITY FUNCTIONS
 DWORD GetProcessID(LPCTSTR ProcessName)
@@ -100,16 +91,6 @@ DWORD_PTR GetModuleBaseAddress(DWORD processID, const wchar_t* moduleName)
 
     return baseAddress;
 }
-
-// MONITOR POSITIONING
-BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
-{
-    if (g_monitorCount < 3) {
-        g_monitors[g_monitorCount++] = hMonitor;
-    }
-    return TRUE;
-}
-
 
 // CALLBACKS
 void OnTrackUpdate(const Tracks::TrackInfo& trackInfo)
@@ -203,10 +184,6 @@ static bool TryForceContentPackAvailability() {
     }
 }
 
-// Global crash tracking
-static volatile bool g_inCriticalSection = false;
-static volatile const char* g_lastModule = nullptr;
-
 // SEH wrapper for initialization calls - Pure C version to avoid C2712
 typedef bool (*InitFunc)(void* userData);
 
@@ -240,21 +217,16 @@ static bool SafeInitCall(const char* moduleName, InitFunc func, void* userData) 
     // Log BEFORE attempting init - this will be the last line if we crash
     LogInitStart(moduleName);
     
-    g_lastModule = moduleName;
-    g_inCriticalSection = true;
-    
     bool result = false;
     bool crashed = false;
     DWORD exceptionCode = 0;
     
     __try {
         result = func(userData);
-        g_inCriticalSection = false;
     }
     __except(EXCEPTION_EXECUTE_HANDLER) {
         exceptionCode = GetExceptionCode();
         crashed = true;
-        g_inCriticalSection = false;
     }
     
     // Log AFTER __try block using pure C functions
@@ -596,34 +568,6 @@ extern "C" __declspec(dllexport) bool IsInitialized()
 {
     return g_isInitialized.load();
 }
-
-// HOTKEY STATE TRACKING
-struct HotkeyState {
-    bool f5 = false;
-    bool f6 = false;
-    bool f7 = false;
-    bool f8 = false;
-    bool f9 = false;
-    bool f10 = false;
-    bool f11 = false;
-    bool f12 = false;
-    bool insert = false;
-    bool del = false;
-    bool t = false;
-    bool l = false;
-    bool k = false;
-    bool y = false;
-    bool p = false;
-    bool o = false;
-    bool equals = false;
-    bool hyphen = false;
-    bool clearConsole = false;
-    bool semicolon = false;
-};
-
-
-
-
 
 // HELP TEXT
 void PrintHelpText()
@@ -1022,13 +966,7 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         return 1;
     }
 
-    DumpStruct dummyObj{};
-    auto disableMusic = (void(__cdecl*)())(baseAddress + 0x526D10);
-    auto disableReverb = (void(__fastcall*)(DumpStruct obj))(baseAddress + 0xBD1FC0);
-
     PrintHelpText();
-
-    HotkeyState hotkeyState;
 
     while (isRunning) {
         // Only process keypresses when the game window is focused
@@ -1086,7 +1024,6 @@ BOOL APIENTRY DllMain(HMODULE hModule,
     switch (ul_reason_for_call) {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hModule);
-        g_moduleHandle.store(hModule);
         
         // Check if we're being loaded standalone (not by proxy DLL)
         // The proxy DLL sets an environment variable before calling LoadLibrary

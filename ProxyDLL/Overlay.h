@@ -7,6 +7,7 @@ struct ImGuiContext; // Forward declare
 void InitImGuiForSwapChain(IDXGISwapChain* swap);
 void RenderOverlay();
 bool InitializeD3D11Hook();
+bool IsGameRenderReady();
 
 // Export functions for TFPayload
 typedef void (*RenderCallback)();

@@ -19,6 +19,7 @@
 
 // Globals
 static bool g_ImGuiInit = false;
+static bool g_GameRenderReady = false;
 static ID3D11Device* g_Device = nullptr;
 static ID3D11DeviceContext* g_Context = nullptr;
 static ID3D11RenderTargetView* g_MainRenderTargetView = nullptr;
@@ -57,6 +58,11 @@ static void* g_OtherModPresentHook = nullptr;
 
 // Minimal overlay visibility (always on, no toggle)
 static bool g_ShowOverlay = true;
+
+bool IsGameRenderReady()
+{
+    return g_GameRenderReady && g_ImGuiInit && g_MainRenderTargetView != nullptr;
+}
 
 static std::string GetGameDirectoryFromModule()
 {
@@ -360,6 +366,10 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
     }
 
     if (g_ImGuiInit && g_MainRenderTargetView) {
+        g_GameRenderReady = true;
+    }
+
+    if (g_ImGuiInit && g_MainRenderTargetView) {
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
@@ -415,6 +425,10 @@ HRESULT __stdcall hkPresent1(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UIN
     
     if (!g_ImGuiInit) {
         InitImGuiForSwapChain(pSwapChainBase);
+    }
+
+    if (g_ImGuiInit && g_MainRenderTargetView) {
+        g_GameRenderReady = true;
     }
 
     if (g_ImGuiInit && g_MainRenderTargetView) {
@@ -996,8 +1010,11 @@ void RenderOverlay()
         ImGuiWindowFlags_NoFocusOnAppearing;
 
     ImGui::Begin("RJHUD", nullptr, flags);
-    ImGui::Text("RJ's Trials Mod v0.1");
+    ImGui::Text("RJ and Hook's Trials Mod v0.3");
     ImGui::Separator();
+#ifdef DEVELOPMENT_MODE
+    ImGui::Text("Press F1 to Unload Mod");
+#endif
     ImGui::Text("Press %s to Show Mod Menu", devMenuKeyName.c_str());
     ImGui::Text("Press %s to Show/Hide this overlay", overlayKeyName.c_str());
     if (g_PresentWasAlreadyHooked) {

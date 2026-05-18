@@ -17,6 +17,7 @@ LocalConfig.props
 TFPayload/uplay-to-steam.csv
 ADDRESS_MAPPING_PROMPT.txt
 uplay-to-steam.csv
+reverse_engineering_docs/uplay-to-steam-function-map.csv
 # Mono auto generated files
 mono_crash.*
 

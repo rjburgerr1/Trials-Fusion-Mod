@@ -54,34 +54,22 @@ namespace Respawn {
     static constexpr uintptr_t GAME_MANAGER_TIME_OFFSET = 0x14;
 
     // Checkpoint patch locations - Uplay
-    static constexpr uintptr_t PROCESS_CHECKPOINT_FINISH_CHECK_RVA_UPLAY = 0x228db2;
     static constexpr uintptr_t PROCESS_CHECKPOINT_EARLY_CHECK_RVA_UPLAY = 0x228d88;
     static constexpr uintptr_t UPDATE_CHECKPOINTS_CALL_RVA_UPLAY = 0x2297ac;
-    static constexpr uintptr_t UPDATE_CHECKPOINTS_FIRST_CALL_RVA_UPLAY = 0x229529;
     static constexpr uintptr_t PROCESS_CHECKPOINT_REACHED_RVA_UPLAY = 0x228b60;
 
     // Checkpoint patch locations - Steam
-    static constexpr uintptr_t PROCESS_CHECKPOINT_FINISH_CHECK_RVA_STEAM = 0x228682;
     static constexpr uintptr_t PROCESS_CHECKPOINT_EARLY_CHECK_RVA_STEAM = 0x228658;
     static constexpr uintptr_t UPDATE_CHECKPOINTS_CALL_RVA_STEAM = 0x22907c;
-    static constexpr uintptr_t UPDATE_CHECKPOINTS_FIRST_CALL_RVA_STEAM = 0x228df9;
     static constexpr uintptr_t PROCESS_CHECKPOINT_REACHED_RVA_STEAM = 0x228430;
 
     // Helper functions for checkpoint patch RVAs
-    static uintptr_t GetProcessCheckpointFinishCheckRVA() {
-        return BaseAddress::IsSteamVersion() ? PROCESS_CHECKPOINT_FINISH_CHECK_RVA_STEAM : PROCESS_CHECKPOINT_FINISH_CHECK_RVA_UPLAY;
-    }
-
     static uintptr_t GetProcessCheckpointEarlyCheckRVA() {
         return BaseAddress::IsSteamVersion() ? PROCESS_CHECKPOINT_EARLY_CHECK_RVA_STEAM : PROCESS_CHECKPOINT_EARLY_CHECK_RVA_UPLAY;
     }
 
     static uintptr_t GetUpdateCheckpointsCallRVA() {
         return BaseAddress::IsSteamVersion() ? UPDATE_CHECKPOINTS_CALL_RVA_STEAM : UPDATE_CHECKPOINTS_CALL_RVA_UPLAY;
-    }
-
-    static uintptr_t GetUpdateCheckpointsFirstCallRVA() {
-        return BaseAddress::IsSteamVersion() ? UPDATE_CHECKPOINTS_FIRST_CALL_RVA_STEAM : UPDATE_CHECKPOINTS_FIRST_CALL_RVA_UPLAY;
     }
 
     static uintptr_t GetProcessCheckpointReachedRVA() {
@@ -1240,117 +1228,6 @@ namespace Respawn {
         return true;
     }
 
-    bool PatchUpdateCheckpointsFirstCall() {
-        if (!g_initialized) {
-            LOG_ERROR("[UpdateCheckpointsFirstPatch] Not initialized");
-            return false;
-        }
-
-        uintptr_t patchAddr = g_baseAddress + GetUpdateCheckpointsFirstCallRVA();
-
-        LOG_VERBOSE("[UpdateCheckpointsFirstPatch] Patching first checkpoint call at 0x" << std::hex << patchAddr);
-
-        if (IsBadReadPtr((void*)patchAddr, 23)) {
-            LOG_ERROR("[UpdateCheckpointsFirstPatch] Cannot read patch address");
-            return false;
-        }
-
-        uint8_t* bytes = reinterpret_cast<uint8_t*>(patchAddr);
-
-        if (bytes[0] == 0xEB) {
-            LOG_VERBOSE("[UpdateCheckpointsFirstPatch] Already patched");
-            return true;
-        }
-
-        if (bytes[0] != 0x0F || bytes[1] != 0x57 || bytes[2] != 0xC0) {
-            LOG_ERROR("[UpdateCheckpointsFirstPatch] Expected XORPS (0F 57 C0), found 0x"
-                << std::hex << (int)bytes[0] << " 0x" << (int)bytes[1] << " 0x" << (int)bytes[2]);
-            return false;
-        }
-
-        DWORD oldProtect;
-        if (!VirtualProtect((void*)patchAddr, 23, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-            LOG_ERROR("[UpdateCheckpointsFirstPatch] Failed to change memory protection");
-            return false;
-        }
-
-        bytes[0] = 0xEB;
-        bytes[1] = 0x15;
-
-        for (int i = 2; i < 23; i++) {
-            bytes[i] = 0x90;
-        }
-
-        VirtualProtect((void*)patchAddr, 23, oldProtect, &oldProtect);
-
-        LOG_VERBOSE("[UpdateCheckpointsFirstPatch] SUCCESS! Added JMP to skip first checkpoint call!");
-        return true;
-    }
-
-    bool UnpatchUpdateCheckpointsFirstCall() {
-        if (!g_initialized) {
-            LOG_ERROR("[UpdateCheckpointsFirstUnpatch] Not initialized");
-            return false;
-        }
-
-        uintptr_t patchAddr = g_baseAddress + GetUpdateCheckpointsFirstCallRVA();
-
-        LOG_VERBOSE("[UpdateCheckpointsFirstUnpatch] Restoring first checkpoint call at 0x" << std::hex << patchAddr);
-
-        if (IsBadReadPtr((void*)patchAddr, 23)) {
-            LOG_ERROR("[UpdateCheckpointsFirstUnpatch] Cannot read patch address");
-            return false;
-        }
-
-        uint8_t* bytes = reinterpret_cast<uint8_t*>(patchAddr);
-
-        if (bytes[0] == 0x0F && bytes[1] == 0x57) {
-            LOG_VERBOSE("[UpdateCheckpointsFirstUnpatch] Already restored");
-            return true;
-        }
-
-        if (bytes[0] != 0xEB) {
-            LOG_ERROR("[UpdateCheckpointsFirstUnpatch] Unexpected bytes: 0x" << std::hex << (int)bytes[0]);
-            return false;
-        }
-
-        DWORD oldProtect;
-        if (!VirtualProtect((void*)patchAddr, 23, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-            LOG_ERROR("[UpdateCheckpointsFirstUnpatch] Failed to change memory protection");
-            return false;
-        }
-
-        bytes[0] = 0x0F;
-        bytes[1] = 0x57;
-        bytes[2] = 0xC0;
-        bytes[3] = 0x51;
-        bytes[4] = 0x8B;
-        bytes[5] = 0x8E;
-        bytes[6] = 0xDC;
-        bytes[7] = 0x01;
-        bytes[8] = 0x00;
-        bytes[9] = 0x00;
-        bytes[10] = 0xF3;
-        bytes[11] = 0x0F;
-        bytes[12] = 0x11;
-        bytes[13] = 0x04;
-        bytes[14] = 0x24;
-        bytes[15] = 0x51;
-        bytes[16] = 0x8B;
-        bytes[17] = 0xCE;
-
-        uintptr_t callInstructionAddr = patchAddr + 18;
-        uintptr_t callTarget = g_baseAddress + GetProcessCheckpointReachedRVA();
-        int32_t callOffset = static_cast<int32_t>(callTarget - (callInstructionAddr + 5));
-        bytes[18] = 0xE8;
-        *reinterpret_cast<int32_t*>(&bytes[19]) = callOffset;
-
-        VirtualProtect((void*)patchAddr, 23, oldProtect, &oldProtect);
-
-        LOG_VERBOSE("[UpdateCheckpointsFirstUnpatch] SUCCESS! Restored first checkpoint call!");
-        return true;
-    }
-
     bool PatchCheckpointEarlyReturn() {
         if (!g_initialized) {
             LOG_ERROR("[CheckpointEarlyReturn] Not initialized");
@@ -1453,103 +1330,6 @@ namespace Respawn {
         VirtualProtect((void*)patchAddr, 13, oldProtect, &oldProtect);
 
         LOG_VERBOSE("[CheckpointEarlyReturnRestore] SUCCESS! Restored original checkpoint processing!");
-        return true;
-    }
-
-    bool PatchFinishLineCheck() {
-        if (!g_initialized) {
-            LOG_ERROR("[FinishLinePatch] Not initialized");
-            return false;
-        }
-
-        uintptr_t jnzAddr = g_baseAddress + GetProcessCheckpointFinishCheckRVA();
-
-        LOG_VERBOSE("[FinishLinePatch] Patching finish line check at 0x" << std::hex << jnzAddr);
-
-        if (IsBadReadPtr((void*)jnzAddr, 6)) {
-            LOG_ERROR("[FinishLinePatch] Cannot read JNZ address");
-            return false;
-        }
-
-        uint8_t* bytes = reinterpret_cast<uint8_t*>(jnzAddr);
-
-        if (bytes[0] == 0xEB) {
-            LOG_VERBOSE("[FinishLinePatch] Already patched (found JMP)");
-            return true;
-        }
-
-        if (bytes[0] == 0x75 || (bytes[0] == 0x0F && bytes[1] == 0x85)) {
-            DWORD oldProtect;
-            int patchSize = (bytes[0] == 0x75) ? 2 : 6;
-
-            if (!VirtualProtect((void*)jnzAddr, patchSize, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-                LOG_ERROR("[FinishLinePatch] Failed to change memory protection");
-                return false;
-            }
-
-            if (patchSize == 2) {
-                bytes[0] = 0xEB;
-            }
-            else {
-                bytes[0] = 0xE9;
-            }
-
-            VirtualProtect((void*)jnzAddr, patchSize, oldProtect, &oldProtect);
-
-            LOG_VERBOSE("[FinishLinePatch] SUCCESS! Converted JNZ to JMP - finish line won't trigger finish logic!");
-            return true;
-        }
-
-        LOG_ERROR("[FinishLinePatch] Unexpected instruction: 0x" << std::hex << (int)bytes[0]);
-        return false;
-    }
-
-    bool UnpatchFinishLineCheck() {
-        if (!g_initialized) {
-            LOG_ERROR("[FinishLineUnpatch] Not initialized");
-            return false;
-        }
-
-        uintptr_t jmpAddr = g_baseAddress + GetProcessCheckpointFinishCheckRVA();
-
-        LOG_VERBOSE("[FinishLineUnpatch] Restoring finish line check at 0x" << std::hex << jmpAddr);
-
-        if (IsBadReadPtr((void*)jmpAddr, 6)) {
-            LOG_ERROR("[FinishLineUnpatch] Cannot read JMP address");
-            return false;
-        }
-
-        uint8_t* bytes = reinterpret_cast<uint8_t*>(jmpAddr);
-
-        if (bytes[0] == 0x75 || (bytes[0] == 0x0F && bytes[1] == 0x85)) {
-            LOG_VERBOSE("[FinishLineUnpatch] Already restored (found JNZ)");
-            return true;
-        }
-
-        if (bytes[0] != 0xEB && bytes[0] != 0xE9) {
-            LOG_ERROR("[FinishLineUnpatch] Unexpected instruction: 0x" << std::hex << (int)bytes[0]);
-            return false;
-        }
-
-        DWORD oldProtect;
-        int patchSize = (bytes[0] == 0xEB) ? 2 : 6;
-
-        if (!VirtualProtect((void*)jmpAddr, patchSize, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-            LOG_ERROR("[FinishLineUnpatch] Failed to change memory protection");
-            return false;
-        }
-
-        if (patchSize == 2) {
-            bytes[0] = 0x75;
-        }
-        else {
-            bytes[0] = 0x0F;
-            bytes[1] = 0x85;
-        }
-
-        VirtualProtect((void*)jmpAddr, patchSize, oldProtect, &oldProtect);
-
-        LOG_VERBOSE("[FinishLineUnpatch] SUCCESS! Restored JNZ - finish line will trigger finish logic normally!");
         return true;
     }
 

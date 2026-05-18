@@ -1230,38 +1230,6 @@ namespace BikeSwap {
         }
     }
 
-    // Simple bike swap - kept as a compatibility wrapper for the safer queued path.
-    bool SwapToBikeSimple(int bikeId) {
-        return SwapToBike(bikeId);
-    }
-
-    // Manual step-by-step bike swap for debugging
-    // NOTE: This crashes due to threading issues - kept for reference only
-    bool SwapToBikeManual(int bikeId) {
-        if (!g_initialized) {
-            LOG_ERROR("[BikeSwap] Not initialized");
-            return false;
-        }
-
-        if (bikeId < 0 || bikeId >= GetTotalBikeCount()) {
-            LOG_ERROR("[BikeSwap] Invalid bike ID: " << bikeId);
-            return false;
-        }
-
-        void* bikeEntity = GetCurrentBikeEntity();
-        if (!bikeEntity) {
-            LOG_ERROR("[BikeSwap] Could not get current bike entity");
-            return false;
-        }
-
-        LOG_INFO("[BikeSwap] === MANUAL SWAP (reference only - crashes due to threading) ===");
-        LOG_INFO("[BikeSwap] Bike entity: 0x" << std::hex << reinterpret_cast<uintptr_t>(bikeEntity));
-        LOG_INFO("[BikeSwap] Target bike ID: " << std::dec << bikeId);
-        LOG_INFO("[BikeSwap] This function is disabled - use hook-based swap instead");
-
-        return false;
-    }
-
     void DebugDumpBikeInfo() {
         LOG_INFO("[BikeSwap] === DEBUG BIKE INFO ===");
 
