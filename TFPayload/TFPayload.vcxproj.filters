@@ -111,6 +111,9 @@
     <ClInclude Include="bike-swap.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="sound.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\vendor\minhook\include\MinHook.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -225,6 +228,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="bike-swap.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="sound.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\vendor\minhook\src\hde\hde32.c">

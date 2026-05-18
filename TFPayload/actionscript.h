@@ -116,6 +116,10 @@ namespace ActionScript {
     
     // Call HandleRaceFinish directly (tries both state 6->finish and direct finish)
     bool CallHandleRaceFinish();
+
+    // Direct ActionScript native callbacks registered as "disableMusic" / "enableMusic"
+    bool DisableMusic();
+    bool EnableMusic();
     
     // Get the message handler pointer
     void* GetMessageHandler();

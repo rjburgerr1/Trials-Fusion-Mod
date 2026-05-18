@@ -12,6 +12,7 @@
 #include "host-join.h"
 #include "base-address.h"
 #include "prevent-finish.h"
+#include "sound.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -4148,6 +4149,70 @@ void DevMenu::InitializeMod() {
     
     RegisterTweakable(hostJoinFolder);
     mod->AddChild(hostJoinFolder);
+
+    // ============================================================================
+    // Music Controls
+    // ============================================================================
+    auto musicFolder = std::make_shared<TweakableFolder>(10070, "Music");
+    const float musicButtonWidth = (totalButtonsWidth - 8.0f) / 2.0f;
+
+    auto disableMusicButton = std::make_shared<TweakableButton>(
+        10071,
+        "Disable Music"
+    );
+    disableMusicButton->SetFixedWidth(musicButtonWidth);
+    disableMusicButton->SetRenderInline(false);
+    disableMusicButton->SetOnClickCallback([]() {
+        LOG_INFO("[DevMenu] Calling ActionScript disableMusic native callback");
+        if (!ActionScript::DisableMusic()) {
+            LOG_ERROR("[DevMenu] disableMusic failed");
+        }
+    });
+    RegisterTweakable(disableMusicButton);
+    musicFolder->AddChild(disableMusicButton);
+
+    auto enableMusicButton = std::make_shared<TweakableButton>(
+        10072,
+        "Enable Music"
+    );
+    enableMusicButton->SetFixedWidth(musicButtonWidth);
+    enableMusicButton->SetRenderInline(true);
+    enableMusicButton->SetOnClickCallback([]() {
+        LOG_INFO("[DevMenu] Calling ActionScript enableMusic native callback");
+        if (!ActionScript::EnableMusic()) {
+            LOG_ERROR("[DevMenu] enableMusic failed");
+        }
+    });
+    RegisterTweakable(enableMusicButton);
+    musicFolder->AddChild(enableMusicButton);
+
+    auto toggleFmodEventsButton = std::make_shared<TweakableButton>(
+        10073,
+        "Toggle FMOD Events"
+    );
+    toggleFmodEventsButton->SetFixedWidth(totalButtonsWidth);
+    toggleFmodEventsButton->SetRenderInline(false);
+    toggleFmodEventsButton->SetOnClickCallback([]() {
+        LOG_INFO("[DevMenu] Toggling FMOD event system mute");
+        Sound::ToggleEventSystemMute();
+    });
+    RegisterTweakable(toggleFmodEventsButton);
+    musicFolder->AddChild(toggleFmodEventsButton);
+
+    auto toggleFmodLoggingButton = std::make_shared<TweakableButton>(
+        10074,
+        "Toggle FMOD Event Log"
+    );
+    toggleFmodLoggingButton->SetFixedWidth(totalButtonsWidth);
+    toggleFmodLoggingButton->SetRenderInline(false);
+    toggleFmodLoggingButton->SetOnClickCallback([]() {
+        Sound::SetEventLoggingEnabled(!Sound::IsEventLoggingEnabled());
+    });
+    RegisterTweakable(toggleFmodLoggingButton);
+    musicFolder->AddChild(toggleFmodLoggingButton);
+
+    RegisterTweakable(musicFolder);
+    mod->AddChild(musicFolder);
 
     // ============================================================================
     // Currency Subcategory

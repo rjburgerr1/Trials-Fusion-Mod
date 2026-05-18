@@ -81,6 +81,49 @@ namespace ActionScript {
         return true;
     }
 
+    static bool CallNoParamNative(const char* name, uintptr_t steamRva) {
+        if (g_BaseAddress == 0) {
+            LOG_ERROR("[ActionScript] " << name << " - Not initialized");
+            return false;
+        }
+
+        if (!g_IsSteamVersion) {
+            LOG_ERROR("[ActionScript] " << name << " - Uplay RVA is not mapped yet");
+            return false;
+        }
+
+        using NoParamNative_t = void(__cdecl*)();
+        NoParamNative_t nativeFunc = reinterpret_cast<NoParamNative_t>(g_BaseAddress + steamRva);
+
+        LOG_VERBOSE("[ActionScript] Calling " << name << " at 0x" << std::hex << (g_BaseAddress + steamRva) << std::dec);
+
+        bool success = false;
+
+        nativeFunc();
+        success = true;
+        
+
+        if (!success) {
+            LOG_ERROR("[ActionScript] " << name << " crashed or failed");
+            return false;
+        }
+
+        LOG_VERBOSE("[ActionScript] " << name << " complete");
+        return true;
+    }
+
+    bool DisableMusic() {
+        // Registered from ActionScript string "disableMusic" in FUN_00679240.
+        // Steam Ghidra target: LAB_00666350, RVA 0x526350.
+        return CallNoParamNative("DisableMusic", 0x526350);
+    }
+
+    bool EnableMusic() {
+        // Registered from ActionScript string "enableMusic" in FUN_00679240.
+        // Steam Ghidra target: LAB_00666360, RVA 0x526360.
+        return CallNoParamNative("EnableMusic", 0x526360);
+    }
+
     void* GetMessageHandler() {
         if (g_BaseAddress == 0) return nullptr;
 

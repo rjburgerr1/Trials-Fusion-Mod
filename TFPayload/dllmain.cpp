@@ -34,6 +34,7 @@
 #include "prevent-finish.h"
 #include "gamemode.h"
 #include "bike-swap.h"
+#include "sound.h"
 #include <MinHook.h>
 
 // FORWARD DECLARATIONS
@@ -361,6 +362,11 @@ static bool Init_BikeSwap(void* userData) {
     return BikeSwap::Initialize(ctx->baseAddress);
 }
 
+static bool Init_Sound(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return Sound::Initialize(ctx->baseAddress);
+}
+
 static bool Init_Logging(void* userData) {
     Logging::Initialize();
     return true;
@@ -535,6 +541,7 @@ void InitializeTFPayload()
     SafeInitCall("PreventFinish", Init_PreventFinish, nullptr);
     SafeInitCall("GameMode", Init_GameMode, &ctx);
     SafeInitCall("BikeSwap", Init_BikeSwap, &ctx);
+    SafeInitCall("Sound", Init_Sound, &ctx);
     SafeInitCall("Keybindings", Init_Keybindings, nullptr);
 
     // Wait a moment to ensure ProxyDLL has hooked D3D11
