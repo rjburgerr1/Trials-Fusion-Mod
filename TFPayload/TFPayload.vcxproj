@@ -296,6 +296,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClInclude Include="prevent-finish.h" />
     <ClInclude Include="rendering.h" />
     <ClInclude Include="respawn.h" />
+    <ClInclude Include="rider-recolor.h" />
     <ClInclude Include="tracks.h" />
     <ClInclude Include="acorns.h" />
   </ItemGroup>
@@ -338,6 +339,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="respawn.cpp" />
+    <ClCompile Include="rider-recolor.cpp" />
     <ClCompile Include="tracks.cpp" />
     <ClCompile Include="acorns.cpp" />
   </ItemGroup>

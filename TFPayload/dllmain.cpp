@@ -23,6 +23,7 @@
 #include "actionscript.h"
 #include "logging.h"
 #include "respawn.h"
+#include "rider-recolor.h"
 #include "limits.h"
 #include "camera.h"
 #include "multiplayer.h"
@@ -161,6 +162,7 @@ void ShutdownTFPayload()
     LeaderboardDirect::Shutdown();
     Pause::Shutdown();
     Respawn::Shutdown();
+    RiderRecolor::Shutdown();
     Camera::Shutdown();
     Multiplayer::Shutdown();
     HostJoin::Shutdown();
@@ -366,6 +368,11 @@ static bool Init_BikeSwap(void* userData) {
     return BikeSwap::Initialize(ctx->baseAddress);
 }
 
+static bool Init_RiderRecolor(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return RiderRecolor::Initialize(ctx->baseAddress);
+}
+
 static bool Init_Logging(void* userData) {
     Logging::Initialize();
     return true;
@@ -540,6 +547,7 @@ void InitializeTFPayload()
     SafeInitCall("PreventFinish", Init_PreventFinish, nullptr);
     SafeInitCall("GameMode", Init_GameMode, &ctx);
     SafeInitCall("BikeSwap", Init_BikeSwap, &ctx);
+    SafeInitCall("RiderRecolor", Init_RiderRecolor, &ctx);
     SafeInitCall("Keybindings", Init_Keybindings, nullptr);
 
     // Wait a moment to ensure ProxyDLL has hooked D3D11

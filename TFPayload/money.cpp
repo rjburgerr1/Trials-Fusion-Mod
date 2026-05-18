@@ -22,13 +22,11 @@ namespace Money {
 
     // ============================================================================
     // STEAM VERSION ADDRESSES (Ghidra base 0x140000)
-    // Need to map from Uplay - these are estimates based on relative offset patterns
-    // TODO: Verify these addresses in Steam Ghidra
     // ============================================================================
     
-    // AwardMoneyToPlayer Steam: estimated based on similar function offsets
-    // Steam functions are typically at similar relative offsets
-    static constexpr uintptr_t AWARD_MONEY_TO_PLAYER_RVA_STEAM = 0x308600;  // TODO: Verify
+    // AwardMoneyToPlayer: Ghidra 0x00448DC0, RVA = 0x00448DC0 - 0x140000 = 0x308DC0
+    // Verified by the Uplay -> Steam symbol map.
+    static constexpr uintptr_t AWARD_MONEY_TO_PLAYER_RVA_STEAM = 0x308DC0;
     
     // g_pGameManager Steam: Ghidra 0x0118D308, RVA = 0x0118D308 - 0x140000 = 0x104D308
     static constexpr uintptr_t GAME_MANAGER_PTR_RVA_STEAM = 0x104D308;
@@ -218,7 +216,7 @@ namespace Money {
         
         // Log version detection
         if (BaseAddress::IsSteamVersion()) {
-            LOG_WARNING("[Money] Steam version detected - AwardMoneyToPlayer address is ESTIMATED and may not work!");
+            LOG_VERBOSE("[Money] Steam version detected - using Steam addresses");
             LOG_VERBOSE("[Money]   AwardMoneyToPlayer RVA: 0x" << std::hex << AWARD_MONEY_TO_PLAYER_RVA_STEAM);
             LOG_VERBOSE("[Money]   g_pGameManager RVA: 0x" << std::hex << GAME_MANAGER_PTR_RVA_STEAM);
         } else {

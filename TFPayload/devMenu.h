@@ -6,6 +6,7 @@
 #include <functional>
 #include <unordered_map>
 #include "keybindings.h"
+#include "rider-recolor.h"
 #include "imgui/imgui.h"  // For ImVec4 and other ImGui types
 
 // Forward declarations
@@ -253,6 +254,22 @@ private:
     float m_defaultColor[3];
     float m_brightness;
     float m_defaultBrightness;
+    bool m_hasCapturedDefaults;
+};
+
+// Custom rider-region color control backed by RiderRecolor.
+class TweakableRiderColor : public TweakableItem {
+public:
+    TweakableRiderColor(int id, const std::string& name, RiderRecolor::Region region);
+
+    void Render() override;
+    void Reset() override;
+    void ResetToDefault() override;
+
+private:
+    RiderRecolor::Region m_region;
+    float m_color[3];
+    float m_defaultColor[3];
     bool m_hasCapturedDefaults;
 };
 

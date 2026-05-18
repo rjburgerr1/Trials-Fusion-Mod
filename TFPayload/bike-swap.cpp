@@ -5,6 +5,7 @@
 #include "base-address.h"
 #include "respawn.h"
 #include "gamemode.h"
+#include "rider-recolor.h"
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <cstring>
@@ -694,6 +695,11 @@ namespace BikeSwap {
         if (g_OriginalHandleGameFrameUpdate) {
             g_OriginalHandleGameFrameUpdate(thisPtr, edx_unused, param2, param3);
         }
+
+        // Safe rider recolor follow-up: append a game-owned rebuild queue node
+        // from the game thread. The actual rebuild is still drained by the
+        // game's own ProcessPendingRiderGearRebuilds path.
+        RiderRecolor::ProcessQueuedRebuildOnGameThread();
 
         if (g_swapStage == SwapStage::None && g_settleValidationFrames > 0) {
             IsPostSwapSettleComplete();

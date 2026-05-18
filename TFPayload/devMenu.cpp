@@ -4,6 +4,7 @@
 #include "imgui/imgui.h"
 #include "logging.h"
 #include "respawn.h"
+#include "rider-recolor.h"
 #include "limits.h"
 #include "actionscript.h"
 #include "keybindings.h"
@@ -623,6 +624,59 @@ void TweakableTireColor::ResetToDefault() {
     Reset();
     WriteColor(m_color);
     WriteBrightness(m_brightness);
+}
+
+// TweakableRiderColor Implementation
+TweakableRiderColor::TweakableRiderColor(int id, const std::string& name, RiderRecolor::Region region)
+    : TweakableItem(id, name, TweakableType::Custom)
+    , m_region(region)
+    , m_color{ 1.0f, 1.0f, 1.0f }
+    , m_defaultColor{ 1.0f, 1.0f, 1.0f }
+    , m_hasCapturedDefaults(false) {
+}
+
+void TweakableRiderColor::Render() {
+    RiderRecolor::Color3 liveColor{};
+    const bool isAvailable = RiderRecolor::GetCurrentRegionColor(m_region, liveColor);
+    if (!isAvailable) {
+        ImGui::TextDisabled("%s unavailable", m_name.c_str());
+        return;
+    }
+
+    if (!m_hasCapturedDefaults) {
+        m_color[0] = liveColor.r;
+        m_color[1] = liveColor.g;
+        m_color[2] = liveColor.b;
+        m_defaultColor[0] = liveColor.r;
+        m_defaultColor[1] = liveColor.g;
+        m_defaultColor[2] = liveColor.b;
+        m_hasCapturedDefaults = true;
+    }
+
+    if (ImGui::ColorEdit3(m_name.c_str(), m_color)) {
+        RiderRecolor::SetRegionColor(m_region, { m_color[0], m_color[1], m_color[2] });
+    }
+
+    if (m_color[0] != m_defaultColor[0]
+        || m_color[1] != m_defaultColor[1]
+        || m_color[2] != m_defaultColor[2]) {
+        ImGui::SameLine();
+        std::string resetLabel = "Reset##" + std::to_string(m_id);
+        if (ImGui::SmallButton(resetLabel.c_str())) {
+            ResetToDefault();
+        }
+    }
+}
+
+void TweakableRiderColor::Reset() {
+    for (int i = 0; i < 3; ++i) {
+        m_color[i] = m_defaultColor[i];
+    }
+}
+
+void TweakableRiderColor::ResetToDefault() {
+    Reset();
+    RiderRecolor::SetRegionColor(m_region, { m_color[0], m_color[1], m_color[2] });
 }
 
 // TweakableFolder Implementation
@@ -3954,6 +4008,54 @@ void DevMenu::InitializeMod() {
     );
     RegisterTweakable(tireColor);
     appearanceFolder->AddChild(tireColor);
+
+    auto torsoColor = std::make_shared<TweakableRiderColor>(
+        10073,
+        "Torso Color",
+        RiderRecolor::Region::Torso
+    );
+    RegisterTweakable(torsoColor);
+    appearanceFolder->AddChild(torsoColor);
+
+    auto dumpRiderState = std::make_shared<TweakableButton>(
+        10072,
+        "Dump Rider State"
+    );
+    dumpRiderState->SetOnClickCallback([]() {
+        RiderRecolor::DebugDumpCurrentRiderState();
+    });
+    RegisterTweakable(dumpRiderState);
+    appearanceFolder->AddChild(dumpRiderState);
+
+    auto captureTorsoBaseline = std::make_shared<TweakableButton>(
+        10074,
+        "Capture Torso Baseline"
+    );
+    captureTorsoBaseline->SetOnClickCallback([]() {
+        RiderRecolor::CaptureTorsoProbeBaseline();
+    });
+    RegisterTweakable(captureTorsoBaseline);
+    appearanceFolder->AddChild(captureTorsoBaseline);
+
+    auto diffTorsoBaseline = std::make_shared<TweakableButton>(
+        10075,
+        "Diff Torso Baseline"
+    );
+    diffTorsoBaseline->SetOnClickCallback([]() {
+        RiderRecolor::DiffTorsoProbeAgainstBaseline();
+    });
+    RegisterTweakable(diffTorsoBaseline);
+    appearanceFolder->AddChild(diffTorsoBaseline);
+
+    auto clearTorsoBaseline = std::make_shared<TweakableButton>(
+        10076,
+        "Clear Torso Baseline"
+    );
+    clearTorsoBaseline->SetOnClickCallback([]() {
+        RiderRecolor::ClearTorsoProbeBaseline();
+    });
+    RegisterTweakable(clearTorsoBaseline);
+    appearanceFolder->AddChild(clearTorsoBaseline);
 
     RegisterTweakable(appearanceFolder);
     mod->AddChild(appearanceFolder);
