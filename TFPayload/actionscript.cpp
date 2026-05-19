@@ -2,10 +2,12 @@
 #include "actionscript.h"
 #include "base-address.h"
 #include "logging.h"
+#include "MinHook.h"
 #include <string>
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
+#include <vector>
 
 namespace ActionScript {
     static uintptr_t g_BaseAddress = 0;
@@ -23,6 +25,206 @@ namespace ActionScript {
     static SetGameState_t SetGameState = nullptr;
     static HandleRaceFinish_t HandleRaceFinish = nullptr;
     static GetFirstEntity_t GetFirstEntity = nullptr;
+
+#ifdef DEVELOPMENT_MODE
+    typedef void (__fastcall* SendMessageHook_t)(void* thisPtr, void* edx, int messagePtr, int channel, int param3);
+    static SendMessage_t OriginalSendMessage = nullptr;
+    static bool g_MessageLoggerHooked = false;
+
+    bool IsReadableAddress(uintptr_t address, size_t size = sizeof(uintptr_t)) {
+        if (address < 0x10000) {
+            return false;
+        }
+
+        MEMORY_BASIC_INFORMATION mbi = {};
+        if (VirtualQuery(reinterpret_cast<void*>(address), &mbi, sizeof(mbi)) == 0) {
+            return false;
+        }
+
+        if (mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD) || (mbi.Protect & PAGE_NOACCESS)) {
+            return false;
+        }
+
+        uintptr_t regionStart = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+        uintptr_t regionEnd = regionStart + mbi.RegionSize;
+        return address >= regionStart && address + size <= regionEnd;
+    }
+
+    bool SafeReadPointer(uintptr_t address, uintptr_t* outValue) {
+        if (!outValue || !IsReadableAddress(address, sizeof(uintptr_t))) {
+            return false;
+        }
+
+        __try {
+            *outValue = *reinterpret_cast<uintptr_t*>(address);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    bool SafeReadChar(uintptr_t address, char* outValue) {
+        if (!outValue || !IsReadableAddress(address, sizeof(char))) {
+            return false;
+        }
+
+        __try {
+            *outValue = *reinterpret_cast<char*>(address);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    bool SafeReadMessageBytes(uintptr_t address, unsigned char* outBytes, size_t size) {
+        if (!outBytes || !IsReadableAddress(address, size)) {
+            return false;
+        }
+
+        __try {
+            memcpy(outBytes, reinterpret_cast<void*>(address), size);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            memset(outBytes, 0, size);
+            return false;
+        }
+    }
+
+    bool TryReadAsciiString(uintptr_t address, std::string& outValue) {
+        if (!IsReadableAddress(address, 4)) {
+            return false;
+        }
+
+        char buffer[160] = {};
+        size_t count = 0;
+        for (; count < sizeof(buffer) - 1; ++count) {
+            char ch = 0;
+            if (!SafeReadChar(address + count, &ch)) {
+                return false;
+            }
+            if (ch == '\0') {
+                break;
+            }
+            if (!isprint(static_cast<unsigned char>(ch))) {
+                return false;
+            }
+            buffer[count] = ch;
+        }
+
+        if (count < 4) {
+            return false;
+        }
+
+        outValue.assign(buffer, count);
+        return true;
+    }
+
+    bool LooksLikeMethodString(const std::string& value) {
+        return value.find('.') != std::string::npos
+            || value.find("trials") != std::string::npos
+            || value.find("Track") != std::string::npos
+            || value.find("track") != std::string::npos
+            || value.find("Menu") != std::string::npos
+            || value.find("menu") != std::string::npos
+            || value.find("Central") != std::string::npos
+            || value.find("central") != std::string::npos;
+    }
+
+    void AddUniqueString(std::vector<std::string>& strings, const std::string& value) {
+        if (strings.size() >= 16 || value.size() > 150 || !LooksLikeMethodString(value)) {
+            return;
+        }
+        if (std::find(strings.begin(), strings.end(), value) == strings.end()) {
+            strings.push_back(value);
+        }
+    }
+
+    std::vector<std::string> ExtractMessageStrings(uintptr_t messagePtr) {
+        std::vector<std::string> strings;
+        if (!IsReadableAddress(messagePtr, MESSAGE_SIZE)) {
+            return strings;
+        }
+
+        std::string text;
+        for (uintptr_t offset = 0; offset < MESSAGE_SIZE; offset += sizeof(uintptr_t)) {
+            uintptr_t value = 0;
+            if (!SafeReadPointer(messagePtr + offset, &value)) {
+                continue;
+            }
+            if (TryReadAsciiString(value, text)) {
+                AddUniqueString(strings, text);
+            }
+        }
+
+        unsigned char bytes[MESSAGE_SIZE] = {};
+        if (SafeReadMessageBytes(messagePtr, bytes, sizeof(bytes))) {
+            for (size_t i = 0; i < sizeof(bytes); ++i) {
+                if (!isprint(bytes[i])) {
+                    continue;
+                }
+
+                size_t start = i;
+                while (i < sizeof(bytes) && isprint(bytes[i])) {
+                    ++i;
+                }
+
+                if (i - start >= 4) {
+                    text.assign(reinterpret_cast<char*>(bytes + start), i - start);
+                    AddUniqueString(strings, text);
+                }
+            }
+        }
+
+        return strings;
+    }
+
+    void __fastcall HookedSendMessage(void* thisPtr, void* edx, int messagePtr, int channel, int param3) {
+        if (channel == UI_CHANNEL && messagePtr != 0) {
+            std::vector<std::string> strings = ExtractMessageStrings(static_cast<uintptr_t>(messagePtr));
+            if (!strings.empty()) {
+                std::ostringstream oss;
+                oss << "[ActionScriptMessage] channel=" << channel
+                    << " message=" << std::hex << "0x" << messagePtr
+                    << " handler=" << thisPtr
+                    << " strings:";
+                for (const std::string& value : strings) {
+                    oss << " [" << value << "]";
+                }
+                LOG_INFO(oss.str());
+            }
+        }
+
+        OriginalSendMessage(thisPtr, messagePtr, channel, param3);
+    }
+
+    void InstallMessageLoggerHook() {
+        if (g_MessageLoggerHooked || !SendMessage) {
+            return;
+        }
+
+        MH_STATUS createStatus = MH_CreateHook(
+            reinterpret_cast<LPVOID>(SendMessage),
+            reinterpret_cast<LPVOID>(&HookedSendMessage),
+            reinterpret_cast<LPVOID*>(&OriginalSendMessage)
+        );
+        if (createStatus != MH_OK && createStatus != MH_ERROR_ALREADY_CREATED) {
+            LOG_WARNING("[ActionScriptMessage] Failed to create SendMessage hook: " << createStatus);
+            return;
+        }
+
+        MH_STATUS enableStatus = MH_EnableHook(reinterpret_cast<LPVOID>(SendMessage));
+        if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED) {
+            LOG_WARNING("[ActionScriptMessage] Failed to enable SendMessage hook: " << enableStatus);
+            return;
+        }
+
+        g_MessageLoggerHooked = true;
+        LOG_INFO("[ActionScriptMessage] SendMessage logger installed");
+    }
+#endif
 
     bool Initialize(uintptr_t baseAddress) {
         if (baseAddress == 0) {
@@ -77,6 +279,10 @@ namespace ActionScript {
 
         LOG_VERBOSE("[ActionScript] Initialize - Successfully initialized");
         LOG_VERBOSE("  Base: 0x" << std::hex << baseAddress << std::dec);
+
+#ifdef DEVELOPMENT_MODE
+        InstallMessageLoggerHook();
+#endif
 
         return true;
     }

@@ -475,16 +475,7 @@ HRESULT __stdcall hkResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCount, 
 
 ULONG __stdcall hkRelease(IUnknown* This)
 {
-    static int releaseCount = 0;
-    releaseCount++;
-    
-    LOG_VERBOSE("[Overlay] SwapChain Release called (call #" << releaseCount << ")");
-    LOG_VERBOSE("[Overlay] Releasing swapchain: 0x" << std::hex << (uintptr_t)This);
-    
     ULONG refCount = oRelease(This);
-    
-    LOG_VERBOSE("[Overlay] New ref count: " << refCount);
-    
     if (refCount == 0) {
         LOG_VERBOSE("[Overlay] *** SWAPCHAIN DESTROYED ***");
     }

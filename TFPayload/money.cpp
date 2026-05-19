@@ -9,6 +9,8 @@ namespace Money {
     // Function pointer type for AwardMoneyToPlayer
     // void __thiscall AwardMoneyToPlayer(void *this, uint amount, uint rewardType, uint param_3)
     typedef void(__thiscall* AwardMoneyToPlayer_t)(void* thisPtr, uint32_t amount, uint32_t rewardType, uint32_t param_3);
+    typedef void(__thiscall* SaveMoneyStatistics_t)(void* thisPtr);
+    typedef void(__thiscall* BuildCareerStatsSnapshot_t)(void* thisPtr, char useSecondarySnapshot);
     
     // ============================================================================
     // UPLAY VERSION ADDRESSES (Ghidra base 0x700000)
@@ -16,19 +18,29 @@ namespace Money {
     
     // AwardMoneyToPlayer: Ghidra 0x00A09B30, RVA = 0x00A09B30 - 0x700000 = 0x309B30
     static constexpr uintptr_t AWARD_MONEY_TO_PLAYER_RVA_UPLAY = 0x309B30;
+
+    // SaveMoneyStatistics: Ghidra 0x00A09530, RVA = 0x00A09530 - 0x700000 = 0x309530
+    static constexpr uintptr_t SAVE_MONEY_STATISTICS_RVA_UPLAY = 0x309530;
+
+    // BuildCareerStatsSnapshot: Ghidra 0x00A70910, RVA = 0x00A70910 - 0x700000 = 0x370910
+    static constexpr uintptr_t BUILD_CAREER_STATS_SNAPSHOT_RVA_UPLAY = 0x370910;
     
     // g_pGameManager: Ghidra 0x0174B308, RVA = 0x0174B308 - 0x700000 = 0x104B308
     static constexpr uintptr_t GAME_MANAGER_PTR_RVA_UPLAY = 0x104B308;
 
     // ============================================================================
     // STEAM VERSION ADDRESSES (Ghidra base 0x140000)
-    // Need to map from Uplay - these are estimates based on relative offset patterns
-    // TODO: Verify these addresses in Steam Ghidra
     // ============================================================================
     
-    // AwardMoneyToPlayer Steam: estimated based on similar function offsets
-    // Steam functions are typically at similar relative offsets
-    static constexpr uintptr_t AWARD_MONEY_TO_PLAYER_RVA_STEAM = 0x308600;  // TODO: Verify
+    // AwardMoneyToPlayer Steam: mapped from reverse_engineering_docs/uplay-to-steam-function-map.csv
+    // Uplay 0x00A09B30 -> Steam 0x00448DC0, RVA = 0x00448DC0 - 0x00140000 = 0x00308DC0
+    static constexpr uintptr_t AWARD_MONEY_TO_PLAYER_RVA_STEAM = 0x308DC0;
+
+    // SaveMoneyStatistics: exact function match, Steam 0x004487C0 - 0x00140000 = 0x003087C0
+    static constexpr uintptr_t SAVE_MONEY_STATISTICS_RVA_STEAM = 0x3087C0;
+
+    // BuildCareerStatsSnapshot: implied match, Steam 0x004B0260 - 0x00140000 = 0x00370260
+    static constexpr uintptr_t BUILD_CAREER_STATS_SNAPSHOT_RVA_STEAM = 0x370260;
     
     // g_pGameManager Steam: Ghidra 0x0118D308, RVA = 0x0118D308 - 0x140000 = 0x104D308
     static constexpr uintptr_t GAME_MANAGER_PTR_RVA_STEAM = 0x104D308;
@@ -43,6 +55,14 @@ namespace Money {
     
     static uintptr_t GetGameManagerPtrRVA() {
         return BaseAddress::IsSteamVersion() ? GAME_MANAGER_PTR_RVA_STEAM : GAME_MANAGER_PTR_RVA_UPLAY;
+    }
+
+    static uintptr_t GetSaveMoneyStatisticsRVA() {
+        return BaseAddress::IsSteamVersion() ? SAVE_MONEY_STATISTICS_RVA_STEAM : SAVE_MONEY_STATISTICS_RVA_UPLAY;
+    }
+
+    static uintptr_t GetBuildCareerStatsSnapshotRVA() {
+        return BaseAddress::IsSteamVersion() ? BUILD_CAREER_STATS_SNAPSHOT_RVA_STEAM : BUILD_CAREER_STATS_SNAPSHOT_RVA_UPLAY;
     }
     
     // ============================================================================
@@ -60,6 +80,9 @@ namespace Money {
     static constexpr uintptr_t MONEY_BALANCE_OFFSET = 0x98;       // Current balance (64-bit)
     static constexpr uintptr_t MONEY_TOTAL_EARNED_OFFSET = 0x88;  // Total earned (64-bit)
     static constexpr uintptr_t MONEY_TOTAL_SPENT_OFFSET = 0x90;   // Total spent (64-bit)
+
+    // GameManager + 0x178 = career stats/snapshot owner used by AwardMoneyToPlayer
+    static constexpr uintptr_t CAREER_STATS_OWNER_OFFSET = 0x178;
 
     // ============================================================================
     // SEH-safe memory access helpers
@@ -98,6 +121,55 @@ namespace Money {
         }
     }
 
+    static bool CallSaveMoneyStatisticsInternal(void* moneyStatsPtr, uintptr_t funcAddress) {
+        __try {
+            SaveMoneyStatistics_t saveMoneyStatistics = (SaveMoneyStatistics_t)funcAddress;
+            saveMoneyStatistics(moneyStatsPtr);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool CallBuildCareerStatsSnapshotInternal(void* careerStatsOwnerPtr, uintptr_t funcAddress) {
+        __try {
+            BuildCareerStatsSnapshot_t buildCareerStatsSnapshot = (BuildCareerStatsSnapshot_t)funcAddress;
+            buildCareerStatsSnapshot(careerStatsOwnerPtr, 0);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static void RefreshSteamMoneyUiInternal(uintptr_t gameManager, void* moneyStatsPtr) {
+        if (!BaseAddress::IsSteamVersion()) {
+            return;
+        }
+
+        uintptr_t saveMoneyFunc = g_BaseAddress + GetSaveMoneyStatisticsRVA();
+        if (CallSaveMoneyStatisticsInternal(moneyStatsPtr, saveMoneyFunc)) {
+            LOG_VERBOSE("[Money] Steam refresh: SaveMoneyStatistics called at 0x" << std::hex << saveMoneyFunc);
+        } else {
+            LOG_WARNING("[Money] Steam refresh: SaveMoneyStatistics call failed");
+        }
+
+        bool success = false;
+        void* careerStatsOwner = SafeReadVoidPtr((void**)(gameManager + CAREER_STATS_OWNER_OFFSET), &success);
+        if (!success || careerStatsOwner == nullptr) {
+            LOG_WARNING("[Money] Steam refresh: career stats owner unavailable");
+            return;
+        }
+
+        uintptr_t snapshotFunc = g_BaseAddress + GetBuildCareerStatsSnapshotRVA();
+        if (CallBuildCareerStatsSnapshotInternal(careerStatsOwner, snapshotFunc)) {
+            LOG_VERBOSE("[Money] Steam refresh: BuildCareerStatsSnapshot called at 0x" << std::hex << snapshotFunc);
+        } else {
+            LOG_WARNING("[Money] Steam refresh: BuildCareerStatsSnapshot call failed");
+        }
+    }
+
     static bool ReadBalanceInternal(void* moneyStatsPtr, int* outBalance) {
         __try {
             // Money balance is stored as 64-bit value at offset 0x98
@@ -116,6 +188,20 @@ namespace Money {
             // Write to the 64-bit balance (sign-extend the int32)
             int64_t* pBalance = (int64_t*)((uintptr_t)moneyStatsPtr + MONEY_BALANCE_OFFSET);
             *pBalance = (int64_t)newBalance;
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool AddBalanceFieldsInternal(void* moneyStatsPtr, int amount) {
+        __try {
+            int64_t* pBalance = (int64_t*)((uintptr_t)moneyStatsPtr + MONEY_BALANCE_OFFSET);
+            int64_t* pTotalEarned = (int64_t*)((uintptr_t)moneyStatsPtr + MONEY_TOTAL_EARNED_OFFSET);
+
+            *pBalance += amount;
+            *pTotalEarned += amount;
             return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -218,7 +304,7 @@ namespace Money {
         
         // Log version detection
         if (BaseAddress::IsSteamVersion()) {
-            LOG_WARNING("[Money] Steam version detected - AwardMoneyToPlayer address is ESTIMATED and may not work!");
+            LOG_VERBOSE("[Money] Steam version detected - using mapped Steam addresses");
             LOG_VERBOSE("[Money]   AwardMoneyToPlayer RVA: 0x" << std::hex << AWARD_MONEY_TO_PLAYER_RVA_STEAM);
             LOG_VERBOSE("[Money]   g_pGameManager RVA: 0x" << std::hex << GAME_MANAGER_PTR_RVA_STEAM);
         } else {
@@ -264,17 +350,67 @@ namespace Money {
         LOG_VERBOSE("[Money] Adding " << amount << " money (rewardType=" << rewardType << ")...");
         LOG_VERBOSE("[Money] Calling function at 0x" << std::hex << funcAddress);
 
-        if (CallAwardMoneyInternal(moneyStatsPtr, (uint32_t)amount, (uint32_t)rewardType, funcAddress)) {
+        // The Steam CSV maps AwardMoneyToPlayer as an implied match, but this function has
+        // many duplicate instruction matches and has proven unreliable in practice. Prefer
+        // the already-resolved money stats object on Steam so the dev button actually moves
+        // the balance instead of depending on a fragile call target.
+        if (BaseAddress::IsSteamVersion()) {
+            LOG_WARNING("[Money] Steam path: using direct balance update because AwardMoneyToPlayer mapping is unreliable");
+
+            if (!AddBalanceFieldsInternal(moneyStatsPtr, amount)) {
+                LOG_ERROR("[Money] Steam direct balance update failed!");
+                return false;
+            }
+
+            RefreshSteamMoneyUiInternal(gameManager, moneyStatsPtr);
+
+            int balanceAfter = -1;
+            ReadBalanceInternal(moneyStatsPtr, &balanceAfter);
+            LOG_VERBOSE("[Money] Balance AFTER: " << std::dec << balanceAfter);
+            LOG_VERBOSE("[Money] Difference: " << (balanceAfter - balanceBefore));
+            return balanceBefore < 0 || balanceAfter == balanceBefore + amount;
+        }
+
+        bool callSucceeded = CallAwardMoneyInternal(moneyStatsPtr, (uint32_t)amount, (uint32_t)rewardType, funcAddress);
+        if (callSucceeded) {
             // Debug: Read balance after
             int balanceAfter = -1;
             ReadBalanceInternal(moneyStatsPtr, &balanceAfter);
             
             LOG_VERBOSE("[Money] Balance AFTER: " << std::dec << balanceAfter);
             LOG_VERBOSE("[Money] Difference: " << (balanceAfter - balanceBefore));
+
+            if (balanceBefore >= 0 && balanceAfter == balanceBefore) {
+                LOG_WARNING("[Money] AwardMoneyToPlayer returned but balance did not change; applying direct balance fallback");
+
+                if (!AddBalanceFieldsInternal(moneyStatsPtr, amount)) {
+                    LOG_ERROR("[Money] Direct balance fallback failed!");
+                    return false;
+                }
+
+                int fallbackBalance = -1;
+                ReadBalanceInternal(moneyStatsPtr, &fallbackBalance);
+                LOG_VERBOSE("[Money] Fallback balance AFTER: " << std::dec << fallbackBalance);
+            }
+
             return true;
         } else {
-            LOG_ERROR("[Money] Exception occurred while adding money!");
-            return false;
+            LOG_ERROR("[Money] Exception occurred while calling AwardMoneyToPlayer!");
+
+            if (!BaseAddress::IsSteamVersion()) {
+                return false;
+            }
+
+            LOG_WARNING("[Money] Steam fallback: applying direct balance update after mapped function call failed");
+            if (!AddBalanceFieldsInternal(moneyStatsPtr, amount)) {
+                LOG_ERROR("[Money] Steam direct balance fallback failed!");
+                return false;
+            }
+
+            int fallbackBalance = -1;
+            ReadBalanceInternal(moneyStatsPtr, &fallbackBalance);
+            LOG_VERBOSE("[Money] Steam fallback balance AFTER: " << std::dec << fallbackBalance);
+            return true;
         }
     }
     

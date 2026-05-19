@@ -256,6 +256,67 @@ private:
     bool m_hasCapturedDefaults;
 };
 
+// Experimental editor for the live 32-byte rider/bike appearance block.
+class TweakableAppearanceReload : public TweakableItem {
+public:
+    TweakableAppearanceReload(int id, const std::string& name);
+
+    void Render() override;
+    void Reset() override;
+    void ResetToDefault() override;
+
+private:
+    struct BikePartEditorState {
+        uint16_t targetItemId;
+        uint16_t currentSourceItemId;
+        std::string nodeName;
+        std::string bikeKey;
+        std::string partKey;
+        std::vector<uint16_t> candidateItemIds;
+        int selectedIndex;
+        float colors[3][3];
+        bool hasColorOverrides[3];
+    };
+
+    bool LoadLiveAppearance();
+    void DecodeColorsFromAppearance();
+    void EncodeColorsIntoAppearance();
+    void DecodeGearFromAppearance();
+    void EncodeGearIntoAppearance();
+    void RefreshBikePartEditors();
+
+    uint16_t m_appearance[16];
+    uint16_t m_defaultAppearance[16];
+    int m_riderGearIds[3];
+    int m_bikeGearIds[2];
+    std::vector<BikePartEditorState> m_bikePartEditors;
+    float m_riderColors[3][3];
+    float m_bikeColors[2][3];
+    bool m_hasAppearance;
+    bool m_hasCapturedDefaults;
+    bool m_dirty;
+};
+
+class TweakableUIViewExplorer : public TweakableItem {
+public:
+    TweakableUIViewExplorer(int id, const std::string& name)
+        : TweakableItem(id, name, TweakableType::Custom) {}
+
+    void Render() override;
+    void Reset() override {}
+    void ResetToDefault() override {}
+};
+
+class TweakableFmodControls : public TweakableItem {
+public:
+    TweakableFmodControls(int id, const std::string& name)
+        : TweakableItem(id, name, TweakableType::Custom) {}
+
+    void Render() override;
+    void Reset() override {}
+    void ResetToDefault() override {}
+};
+
 // Folder tweakable (contains other tweakables)
 class TweakableFolder : public TweakableItem {
 public:

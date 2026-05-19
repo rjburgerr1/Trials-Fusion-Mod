@@ -127,6 +127,7 @@ static constexpr const char* DEV_UNLOAD_TRIGGER = "tfpayload_dev_unload.trigger"
 static constexpr const char* DEV_LOAD_TRIGGER = "tfpayload_dev_load.trigger";
 #ifdef DEVELOPMENT_MODE
 static bool pendingDevelopmentLoad = false;
+static bool developmentReloadCycleActive = false;
 #endif
 
 void LoadTFPayload()
@@ -212,6 +213,7 @@ void CheckDevelopmentReloadTriggers()
 {
     if (ConsumeTriggerFile(DEV_UNLOAD_TRIGGER)) {
         LOG_INFO("Development reload: unload requested by build trigger");
+        developmentReloadCycleActive = true;
         pendingDevelopmentLoad = false;
         if (isLoaded) {
             UnloadTFPayload();
@@ -225,6 +227,7 @@ void CheckDevelopmentReloadTriggers()
 
     if (pendingDevelopmentLoad && !isLoaded && IsGameRenderReady()) {
         pendingDevelopmentLoad = false;
+        developmentReloadCycleActive = false;
         LOG_INFO("Development reload: game render ready; loading payload");
         LoadTFPayload();
     }
@@ -235,13 +238,16 @@ void CheckDevelopmentReloadTriggers()
 
 void CheckDevelopmentStartupAutoload(bool& autoLoadTriggered)
 {
+    if (developmentReloadCycleActive) {
+        return;
+    }
+
     if (!autoLoadTriggered && !isLoaded && IsGameRenderReady()) {
         autoLoadTriggered = true;
-        if (ConsumeTriggerFile(DEV_LOAD_TRIGGER)) {
-            LOG_INFO("Development mode: game render ready; auto-triggering payload load from build trigger.");
-            LoadTFPayload();
-            LOG_INFO(isLoaded ? "Development mode: TFPayload loaded automatically." : "Development mode: TFPayload auto-load failed.");
-        }
+        ConsumeTriggerFile(DEV_LOAD_TRIGGER);
+        LOG_INFO("Development mode: game render ready; auto-triggering payload load.");
+        LoadTFPayload();
+        LOG_INFO(isLoaded ? "Development mode: TFPayload loaded automatically." : "Development mode: TFPayload auto-load failed.");
     }
 }
 
@@ -263,14 +269,12 @@ DWORD WINAPI PayloadManagerThread()
     AllocateConsole();
     LOG_VERBOSE("Console done");
 
-    // TODO: SkipIntro needs Steam addresses - currently only has Uplay addresses
-    // LOG_VERBOSE("SkipIntro::Initialize...");
-    // if (SkipIntro::Initialize()) {
-    //     LOG_INFO("SkipIntro OK");
-    // } else {
-    //     LOG_ERROR("SkipIntro FAIL");
-    // }
-    LOG_INFO("SkipIntro DISABLED (needs Steam address translation)");
+    LOG_VERBOSE("SkipIntro::Initialize...");
+    if (SkipIntro::Initialize()) {
+        LOG_INFO("SkipIntro OK");
+    } else {
+        LOG_ERROR("SkipIntro FAIL");
+    }
 
     LOG_VERBOSE("InitializeD3D11Hook...");
     if (InitializeD3D11Hook()) {
@@ -281,7 +285,7 @@ DWORD WINAPI PayloadManagerThread()
     }
 
 #ifdef DEVELOPMENT_MODE
-    LOG_INFO("Development mode: Press F1 to load/unload TFPayload");
+    LOG_INFO("Development mode: Will auto-trigger payload load when game render is ready. Press F1 to load/unload TFPayload");
 #elif defined(RELEASE_AUTOLOAD_MODE)
     LOG_INFO("Release mode: Will auto-trigger normal payload load from manager loop.");
 #endif

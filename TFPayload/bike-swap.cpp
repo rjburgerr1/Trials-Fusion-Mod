@@ -5,9 +5,12 @@
 #include "base-address.h"
 #include "respawn.h"
 #include "gamemode.h"
+#include "fmod.h"
+#include "gear-customization.h"
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <cstring>
+#include <mutex>
 #include <vector>
 #include <MinHook.h>
 
@@ -138,6 +141,7 @@ namespace BikeSwap {
         return BaseAddress::IsSteamVersion() ? HANDLE_GAME_FRAME_UPDATE_RVA_STEAM : HANDLE_GAME_FRAME_UPDATE_RVA_UPLAY;
     }
 
+
     static uintptr_t GetReloadBikeFromSettingsRVA() {
         return BaseAddress::IsSteamVersion() ? RELOAD_BIKE_FROM_SETTINGS_RVA_STEAM : RELOAD_BIKE_FROM_SETTINGS_RVA_UPLAY;
     }
@@ -182,6 +186,8 @@ namespace BikeSwap {
     // void __fastcall ReloadBikeFromSettings(void* editorManager)
     typedef void(__fastcall* ReloadBikeFromSettingsFunc)(void* editorManager);
 
+
+
     // HandleGameFrameUpdate is __thiscall with 2 stack params:
     //   MOV ECX, [0x0174d8f4]   ; this in ECX
     //   PUSH ptr                ; param2 (pointer to local)
@@ -216,6 +222,13 @@ namespace BikeSwap {
 
     // Hook-based swap state (must be declared before Initialize uses them)
     static volatile LONG g_pendingBikeId = -1;      // -1 = no pending swap (atomic via InterlockedExchange)
+    static volatile LONG g_pendingAppearanceTintRefresh = 0;
+    static uint16_t g_pendingAppearanceTintData[16] = {};
+    static volatile LONG g_pendingAppearanceReload = 0;
+    static uint16_t g_pendingAppearanceData[16] = {};
+    static volatile LONG g_pendingVisualOnlyReload = 0;
+    static uint16_t g_pendingVisualOnlyData[16] = {};
+    static std::mutex g_pendingAppearanceMutex;
     static bool g_hookInstalled = false;
     static volatile bool g_swapInProgress = false;   // Guard against overlapping swaps
     static DWORD g_lastSwapTick = 0;                 // Cooldown timer
@@ -228,6 +241,9 @@ namespace BikeSwap {
 
     static volatile int g_stageDelayFrames = -1;       // Countdown frames before the next swap stage
     static volatile LONG g_activeSwapBikeId = -1;      // Target bike while staged swap is running
+    static bool g_activeAppearanceReload = false;
+    static bool g_activeVisualOnlyReload = false;
+    static uint16_t g_activeAppearanceData[16] = {};
     static volatile LONG g_lastCompletedBikeId = -1;   // Last bike applied by a completed direct reload
     static volatile int g_settleValidationFrames = 0;  // Frames left before another swap is allowed
     static SwapStage g_swapStage = SwapStage::None;
@@ -237,6 +253,28 @@ namespace BikeSwap {
 
     // Original function pointer for HandleGameFrameUpdate
     static HandleGameFrameUpdateFunc g_OriginalHandleGameFrameUpdate = nullptr;
+
+    static void LogRelativeCallTargets(const char* label, uintptr_t functionAddress, size_t byteCount) {
+        if (!label || functionAddress == 0 || byteCount < 5
+            || IsBadReadPtr(reinterpret_cast<void*>(functionAddress), byteCount)) {
+            return;
+        }
+
+        LOG_INFO("[BikeSwap] Steam probe " << label << " @ 0x" << std::hex << functionAddress);
+        const uint8_t* bytes = reinterpret_cast<const uint8_t*>(functionAddress);
+        for (size_t i = 0; i + 5 <= byteCount; ++i) {
+            if (bytes[i] != 0xe8) {
+                continue;
+            }
+
+            const int32_t relative = *reinterpret_cast<const int32_t*>(bytes + i + 1);
+            const uintptr_t target = functionAddress + i + 5 + relative;
+            LOG_INFO("[BikeSwap]   call +0x" << std::hex << i
+                << " -> abs=0x" << target
+                << " rva=0x" << (target - g_baseAddress));
+        }
+        LOG_INFO(std::dec);
+    }
 
     // Forward declarations for hook and queue functions
     static void __fastcall Hook_HandleGameFrameUpdate(void* thisPtr, void* edx_unused, void* param2, int param3);
@@ -260,6 +298,8 @@ namespace BikeSwap {
         g_swapStage = SwapStage::None;
         g_stageDelayFrames = -1;
         InterlockedExchange(&g_activeSwapBikeId, -1);
+        g_activeAppearanceReload = false;
+        g_activeVisualOnlyReload = false;
         g_swapInProgress = false;
     }
 
@@ -280,6 +320,7 @@ namespace BikeSwap {
 
         g_settleValidationFrames--;
         if (g_settleValidationFrames == 0) {
+            GearCustomization::RestoreActiveHiddenObjectPayloadPatches();
             LOG_INFO("[BikeSwap] Post-swap settle validation complete");
         }
 
@@ -413,9 +454,41 @@ namespace BikeSwap {
         return appearanceManager;
     }
 
+    static void* GetBikeVisualCatalog() {
+        void* gameManager = GetGameManagerStruct();
+        if (!gameManager) return nullptr;
+
+        uintptr_t addr = reinterpret_cast<uintptr_t>(gameManager) + 0x114;
+        if (IsBadReadPtr((void*)addr, sizeof(void*))) return nullptr;
+
+        void* catalog = *reinterpret_cast<void**>(addr);
+        if (!catalog || IsBadReadPtr(catalog, 0x40)) return nullptr;
+        return catalog;
+    }
+
+
     static void* GetCurrentBikeEntity() {
         // Use the GetBikePointer from Respawn module since it does the same thing
         return Respawn::GetBikePointer();
+    }
+
+    static bool WriteAppearanceDataToBike(void* bikeEntity, const uint16_t appearanceData[16]) {
+        if (!bikeEntity || !appearanceData) {
+            return false;
+        }
+
+        uintptr_t appearanceDataAddr = reinterpret_cast<uintptr_t>(bikeEntity) + 0x9ec;
+        if (IsBadWritePtr(reinterpret_cast<void*>(appearanceDataAddr), sizeof(uint16_t) * 16)) {
+            return false;
+        }
+
+        __try {
+            memcpy(reinterpret_cast<void*>(appearanceDataAddr), appearanceData, sizeof(uint16_t) * 16);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
     }
 
     // ============================================================================
@@ -750,34 +823,165 @@ namespace BikeSwap {
                     }
 
                     uint16_t appearanceData[16] = {};
-                    if (!BuildBikeAppearanceData(static_cast<uint8_t>(targetBike), appearanceData)) {
+                    if (g_activeAppearanceReload || g_activeVisualOnlyReload) {
+                        memcpy(appearanceData, g_activeAppearanceData, sizeof(appearanceData));
+                    }
+                    else if (!BuildBikeAppearanceData(static_cast<uint8_t>(targetBike), appearanceData)) {
                         ClearActiveSwap();
                         return;
                     }
 
-                    LOG_INFO("[BikeSwap] Applying direct bike reload for bike " << std::dec << targetBike);
-                    if (!CallChangeBikeWithMeshReload(bikeEntity, static_cast<uint8_t>(targetBike), appearanceData)) {
+                    if (!GearCustomization::ApplyPendingHiddenObjectPayloadPatches()) {
+                        LOG_WARNING("[BikeSwap] Deferred gear customization payload patch failed; aborting reload");
                         ClearActiveSwap();
                         return;
                     }
 
+                    Fmod::InvalidateCachedPointers(5000);
+                    LOG_INFO("[BikeSwap] Applying direct "
+                        << (g_activeVisualOnlyReload ? "visual-only" : (g_activeAppearanceReload ? "appearance" : "bike"))
+                        << " reload for bike " << std::dec << targetBike);
+                    bool reloadSucceeded = false;
+                    if (g_activeVisualOnlyReload) {
+                        reloadSucceeded = WriteAppearanceDataToBike(bikeEntity, appearanceData)
+                            && CallCleanupSceneGeometry(bikeEntity, 1)
+                            && CallLoadBikeMeshAndVisuals(bikeEntity)
+                            && CallInitBikeAppearanceSlots(bikeEntity, 0)
+                            && CallSerializeBikeSceneObjects(bikeEntity);
+                        if (!reloadSucceeded) {
+                            Fmod::InvalidateCachedPointers(5000);
+                            GearCustomization::RestoreActiveHiddenObjectPayloadPatches();
+                            ClearActiveSwap();
+                            return;
+                        }
+                    }
+                    else {
+                        reloadSucceeded = CallChangeBikeWithMeshReload(bikeEntity, static_cast<uint8_t>(targetBike), appearanceData);
+                        if (!reloadSucceeded) {
+                            Fmod::InvalidateCachedPointers(5000);
+                            GearCustomization::RestoreActiveHiddenObjectPayloadPatches();
+                            ClearActiveSwap();
+                            return;
+                        }
+                    }
+
+                    Fmod::InvalidateCachedPointers(5000);
                     LOG_INFO("[BikeSwap] Direct bike reload completed; current bike ID is "
                         << std::dec << GetCurrentBikeId());
 
-                    LOG_INFO("[BikeSwap] Immediate post-reload respawn executing...");
-                    if (!Respawn::RespawnAtCheckpoint()) {
-                        LOG_ERROR("[BikeSwap] Immediate post-reload respawn failed");
-                        ClearActiveSwap();
-                        return;
+                    const bool completedAppearanceReload = g_activeAppearanceReload;
+                    const bool completedVisualOnlyReload = g_activeVisualOnlyReload;
+                    GearCustomization::RestoreActiveHiddenObjectPayloadPatches();
+
+                    if (!completedVisualOnlyReload) {
+                        LOG_INFO("[BikeSwap] Immediate post-reload respawn executing...");
+                        if (!Respawn::RespawnAtCheckpoint()) {
+                            LOG_ERROR("[BikeSwap] Immediate post-reload respawn failed");
+                            Fmod::InvalidateCachedPointers(5000);
+                            ClearActiveSwap();
+                            return;
+                        }
+                        Fmod::InvalidateCachedPointers(5000);
                     }
 
                     InterlockedExchange(&g_lastCompletedBikeId, targetBike);
                     g_settleValidationFrames = POST_SWAP_SETTLE_FRAMES;
                     ClearActiveSwap();
-                    LOG_INFO("[BikeSwap] Bike swap + respawn complete");
+                    LOG_INFO("[BikeSwap] "
+                        << (completedVisualOnlyReload ? "Visual-only reload" : (completedAppearanceReload ? "Appearance reload" : "Bike swap"))
+                        << (completedVisualOnlyReload ? " complete" : " + respawn complete"));
                     return;
                 }
             }
+        }
+
+        GearCustomization::ProcessPendingMainThread();
+
+        if (InterlockedExchange(&g_pendingAppearanceTintRefresh, 0) != 0) {
+            uint16_t appearanceData[16] = {};
+            {
+                std::lock_guard<std::mutex> lock(g_pendingAppearanceMutex);
+                memcpy(appearanceData, g_pendingAppearanceTintData, sizeof(appearanceData));
+            }
+
+            void* bikeEntity = GetCurrentBikeEntity();
+            if (!bikeEntity || IsBadReadPtr(bikeEntity, 0xb20)) {
+                LOG_ERROR("[BikeSwap] Tint refresh skipped because the current bike is unavailable");
+                return;
+            }
+
+            if (!WriteAppearanceDataToBike(bikeEntity, appearanceData)) {
+                LOG_ERROR("[BikeSwap] Tint refresh could not write live appearance data");
+                return;
+            }
+
+            LOG_INFO("[BikeSwap] Reapplying live appearance tint slots without full reload");
+            if (!CallInitBikeAppearanceSlots(bikeEntity, 0)) {
+                return;
+            }
+
+            LOG_INFO("[BikeSwap] Tint-slot refresh complete");
+            return;
+        }
+
+        GearCustomization::ProcessPendingMainThread();
+
+        if (InterlockedExchange(&g_pendingAppearanceReload, 0) != 0) {
+            g_swapInProgress = true;
+
+            if (!IsGameStateSafeForSwap()) {
+                LOG_WARNING("[BikeSwap] Pending appearance reload skipped because game state is no longer safe");
+                ClearActiveSwap();
+                return;
+            }
+
+            int currentBikeId = GetCurrentBikeId();
+            if (currentBikeId < 0 || currentBikeId >= GetTotalBikeCount()) {
+                LOG_ERROR("[BikeSwap] Pending appearance reload has invalid current bike ID");
+                ClearActiveSwap();
+                return;
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(g_pendingAppearanceMutex);
+                memcpy(g_activeAppearanceData, g_pendingAppearanceData, sizeof(g_activeAppearanceData));
+            }
+            g_activeAppearanceReload = true;
+            InterlockedExchange(&g_activeSwapBikeId, currentBikeId);
+            g_swapStage = SwapStage::RespawnBeforeReload;
+            g_stageDelayFrames = RESPAWN_DELAY_FRAMES;
+            LOG_INFO("[BikeSwap] Same-bike appearance reload scheduled for bike " << currentBikeId
+                << " with pre-reload respawn");
+            return;
+        }
+
+        if (InterlockedExchange(&g_pendingVisualOnlyReload, 0) != 0) {
+            g_swapInProgress = true;
+
+            if (!IsGameStateSafeForSwap()) {
+                LOG_WARNING("[BikeSwap] Pending visual-only reload skipped because game state is no longer safe");
+                ClearActiveSwap();
+                return;
+            }
+
+            int currentBikeId = GetCurrentBikeId();
+            if (currentBikeId < 0 || currentBikeId >= GetTotalBikeCount()) {
+                LOG_ERROR("[BikeSwap] Pending visual-only reload has invalid current bike ID");
+                ClearActiveSwap();
+                return;
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(g_pendingAppearanceMutex);
+                memcpy(g_activeAppearanceData, g_pendingVisualOnlyData, sizeof(g_activeAppearanceData));
+            }
+            g_activeVisualOnlyReload = true;
+            InterlockedExchange(&g_activeSwapBikeId, currentBikeId);
+            g_swapStage = SwapStage::ReloadBike;
+            g_stageDelayFrames = 1;
+            LOG_INFO("[BikeSwap] Same-bike visual-only reload scheduled for bike " << currentBikeId
+                << " without pre-reload respawn");
+            return;
         }
 
         // Check if we have a pending bike swap
@@ -885,6 +1089,16 @@ namespace BikeSwap {
         else {
             LOG_INFO("[BikeSwap] Uplay version detected - using Uplay addresses");
         }
+        LOG_INFO("[BikeSwap] Appearance RVAs: frame=0x" << std::hex << GetHandleGameFrameUpdateRVA()
+            << " initTints=0x" << GetInitBikeAppearanceSlotsRVA()
+            << " loadVisuals=0x" << GetLoadBikeMeshAndVisualsRVA()
+            << " cleanup=0x" << GetCleanupSceneGeometryRVA()
+            << " serialize=0x" << GetSerializeBikeSceneObjectsRVA()
+            << std::dec);
+        if (BaseAddress::IsSteamVersion()) {
+            LOG_INFO("[BikeSwap] Steam mapping evidence: tintChild 0x221fc0 <- Uplay 0x2226d0, hideChild 0x2cbca0 <- Uplay 0x2cc660");
+            LOG_WARNING("[BikeSwap] Steam catalog accessor RVAs are duplicate-wrapper matches; treat gearSlot/hiddenObject reads as lower-confidence than the live child helpers");
+        }
 
         g_baseAddress = baseAddress;
         g_globalStructPtr = reinterpret_cast<void**>(baseAddress + GetGlobalStructRVA());
@@ -914,7 +1128,6 @@ namespace BikeSwap {
             baseAddress + GetFirstEntityFromListRVA());
         g_reloadBikeFromSettings = reinterpret_cast<ReloadBikeFromSettingsFunc>(
             baseAddress + GetReloadBikeFromSettingsRVA());
-
         if (IsBadReadPtr(g_globalStructPtr, sizeof(void*))) {
             LOG_ERROR("[BikeSwap] Invalid global struct pointer");
             return false;
@@ -948,6 +1161,8 @@ namespace BikeSwap {
             LOG_WARNING("[BikeSwap] ReloadBikeFromSettings RVA is 0 - hook-based swap unavailable");
         }
 
+        GearCustomization::Initialize(baseAddress);
+
         LOG_INFO("[BikeSwap] Initialized successfully (hook: " << (g_hookInstalled ? "active" : "inactive") << ")");
 
         return true;
@@ -957,6 +1172,8 @@ namespace BikeSwap {
         if (!g_initialized) {
             return;
         }
+
+        GearCustomization::Shutdown();
 
         // Disable the frame update hook
         if (g_hookInstalled) {
@@ -983,6 +1200,9 @@ namespace BikeSwap {
         g_getFirstEntityFromList = nullptr;
         g_reloadBikeFromSettings = nullptr;
         g_pendingBikeId = -1;
+        g_pendingAppearanceTintRefresh = 0;
+        g_pendingAppearanceReload = 0;
+        g_pendingVisualOnlyReload = 0;
         g_lastCompletedBikeId = -1;
         g_settleValidationFrames = 0;
         ClearActiveSwap();
@@ -1130,6 +1350,160 @@ namespace BikeSwap {
     std::string GetCurrentBikeName() {
         int currentId = GetCurrentBikeId();
         return GetBikeName(currentId);
+    }
+
+    bool GetCurrentAppearanceData(uint16_t outAppearance[16]) {
+        if (!outAppearance) {
+            return false;
+        }
+
+        void* bikeEntity = GetCurrentBikeEntity();
+        if (!bikeEntity) {
+            return false;
+        }
+
+        uintptr_t appearanceDataAddr = reinterpret_cast<uintptr_t>(bikeEntity) + 0x9ec;
+        if (IsBadReadPtr(reinterpret_cast<void*>(appearanceDataAddr), sizeof(uint16_t) * 16)) {
+            return false;
+        }
+
+        __try {
+            memcpy(outAppearance, reinterpret_cast<void*>(appearanceDataAddr), sizeof(uint16_t) * 16);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    bool WriteCurrentAppearanceData(const uint16_t appearanceData[16]) {
+        void* bikeEntity = GetCurrentBikeEntity();
+        if (!bikeEntity) {
+            return false;
+        }
+
+        return WriteAppearanceDataToBike(bikeEntity, appearanceData);
+    }
+
+    bool QueueCurrentAppearanceTintRefresh(const uint16_t appearanceData[16]) {
+        if (!appearanceData) {
+            return false;
+        }
+
+        if (!g_initialized || !g_hookInstalled) {
+            LOG_ERROR("[BikeSwap] Tint refresh unavailable because BikeSwap is not ready");
+            return false;
+        }
+
+        if (!IsGameStateSafeForSwap()) {
+            LOG_WARNING("[BikeSwap] Tint refresh unavailable in current game state");
+            return false;
+        }
+
+        if (g_swapInProgress || InterlockedCompareExchange(&g_pendingAppearanceReload, 0, 0) != 0) {
+            LOG_WARNING("[BikeSwap] Reload already in progress, ignoring tint refresh request");
+            return false;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(g_pendingAppearanceMutex);
+            memcpy(g_pendingAppearanceTintData, appearanceData, sizeof(g_pendingAppearanceTintData));
+        }
+        const LONG alreadyPending = InterlockedExchange(&g_pendingAppearanceTintRefresh, 1);
+        if (alreadyPending != 0) {
+            LOG_VERBOSE("[BikeSwap] Replaced pending tint-slot refresh");
+        }
+        else {
+            LOG_INFO("[BikeSwap] Queued tint-slot refresh");
+        }
+        return true;
+    }
+
+    bool QueueCurrentAppearanceReload(const uint16_t appearanceData[16]) {
+        Logging::WriteImmediate("[AppearanceQueue] QueueCurrentAppearanceReload entered");
+        if (!appearanceData) {
+            Logging::WriteImmediate("[AppearanceQueue] rejected null appearance data");
+            return false;
+        }
+
+        if (!g_initialized || !g_hookInstalled) {
+            Logging::WriteImmediate("[AppearanceQueue] rejected because BikeSwap is not ready");
+            LOG_ERROR("[BikeSwap] Appearance reload unavailable because BikeSwap is not ready");
+            return false;
+        }
+
+        if (!IsGameStateSafeForSwap()) {
+            Logging::WriteImmediate("[AppearanceQueue] rejected because game state is unsafe");
+            LOG_WARNING("[BikeSwap] Appearance reload unavailable in current game state");
+            return false;
+        }
+
+        if (!IsPostSwapSettleComplete()) {
+            Logging::WriteImmediate("[AppearanceQueue] rejected because previous reload is settling");
+            LOG_WARNING("[BikeSwap] Previous reload is still settling, ignoring appearance request");
+            return false;
+        }
+
+        if (g_swapInProgress || InterlockedCompareExchange(&g_pendingAppearanceReload, 0, 0) != 0) {
+            Logging::WriteImmediate("[AppearanceQueue] rejected because reload is already in progress");
+            LOG_WARNING("[BikeSwap] Reload already in progress, ignoring appearance request");
+            return false;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(g_pendingAppearanceMutex);
+            memcpy(g_pendingAppearanceData, appearanceData, sizeof(g_pendingAppearanceData));
+        }
+        InterlockedExchange(&g_pendingAppearanceReload, 1);
+        Logging::WriteImmediate("[AppearanceQueue] pending same-bike appearance reload set");
+        LOG_INFO("[BikeSwap] Queued same-bike appearance reload");
+        return true;
+    }
+
+    bool QueueCurrentVisualOnlyReload(const uint16_t appearanceData[16]) {
+        if (!appearanceData) {
+            return false;
+        }
+
+        // Visual-only reload is safe for tint/appearance refreshes, but live hidden-
+        // object payload swaps can change the backing mesh payload as well.  The
+        // narrow cleanup/load path has proven unsafe when restoring some real mesh
+        // variants (for example CHEETAH_BACKSWING_1_1 after 1_2/1_4), so promote
+        // those cases to the broader same-bike reload path.
+        if (GearCustomization::HasPendingReloadMutation()) {
+            LOG_INFO("[BikeSwap] Promoting visual-only reload to full appearance reload after hidden-object payload patch");
+            return QueueCurrentAppearanceReload(appearanceData);
+        }
+
+        if (!g_initialized || !g_hookInstalled) {
+            LOG_ERROR("[BikeSwap] Visual-only reload unavailable because BikeSwap is not ready");
+            return false;
+        }
+
+        if (!IsGameStateSafeForSwap()) {
+            LOG_WARNING("[BikeSwap] Visual-only reload unavailable in current game state");
+            return false;
+        }
+
+        if (!IsPostSwapSettleComplete()) {
+            LOG_WARNING("[BikeSwap] Previous reload is still settling, ignoring visual-only request");
+            return false;
+        }
+
+        if (g_swapInProgress
+            || InterlockedCompareExchange(&g_pendingAppearanceReload, 0, 0) != 0
+            || InterlockedCompareExchange(&g_pendingVisualOnlyReload, 0, 0) != 0) {
+            LOG_WARNING("[BikeSwap] Reload already in progress, ignoring visual-only request");
+            return false;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(g_pendingAppearanceMutex);
+            memcpy(g_pendingVisualOnlyData, appearanceData, sizeof(g_pendingVisualOnlyData));
+        }
+        InterlockedExchange(&g_pendingVisualOnlyReload, 1);
+        LOG_INFO("[BikeSwap] Queued same-bike visual-only reload");
+        return true;
     }
 
     bool GetCooldownStatus(float* secondsRemaining, float* progress01, std::string* statusText) {
@@ -1289,6 +1663,7 @@ namespace BikeSwap {
         LOG_INFO("[BikeSwap] Swap stage: " << static_cast<int>(g_swapStage));
         LOG_INFO("[BikeSwap] Stage delay frames: " << g_stageDelayFrames);
         LOG_INFO("[BikeSwap] Active swap bike ID: " << g_activeSwapBikeId);
+        LOG_INFO("[BikeSwap] Active appearance reload: " << (g_activeAppearanceReload ? "yes" : "no"));
         LOG_INFO("[BikeSwap] Last completed bike ID: " << g_lastCompletedBikeId);
         LOG_INFO("[BikeSwap] Settle validation frames: " << g_settleValidationFrames);
 

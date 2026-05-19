@@ -118,8 +118,10 @@ void Keybindings::Initialize() {
     s_keybindings[Action::SwapPrevBike] = VK_OEM_COMMA;   // , key
     s_keybindings[Action::DebugBikeInfo] = VK_F9;         // F9 key
     
+#ifdef DEVELOPMENT_MODE
     // Console
     s_keybindings[Action::ToggleConsole] = VK_F11;  // F11 key
+#endif
     
     // Initialize key states
     s_keyStates[Action::InstantFinish] = false;
@@ -166,7 +168,9 @@ void Keybindings::Initialize() {
     s_keyStates[Action::SwapNextBike] = false;
     s_keyStates[Action::SwapPrevBike] = false;
     s_keyStates[Action::DebugBikeInfo] = false;
+#ifdef DEVELOPMENT_MODE
     s_keyStates[Action::ToggleConsole] = false;
+#endif
     
     // Try to load from file
     if (!LoadFromFile()) {
@@ -591,8 +595,10 @@ bool Keybindings::LoadFromFile() {
                 s_keybindings[Action::SwapPrevBike] = vkCode;
             } else if (actionName == "Debug Bike Info") {
                 s_keybindings[Action::DebugBikeInfo] = vkCode;
+#ifdef DEVELOPMENT_MODE
             } else if (actionName == "Toggle Console") {
                 s_keybindings[Action::ToggleConsole] = vkCode;
+#endif
             }
         } catch (const std::exception& e) {
             LOG_WARNING("[Keybindings] Failed to parse line: " << line << ": " << e.what());

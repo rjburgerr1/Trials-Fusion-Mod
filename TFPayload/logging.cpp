@@ -5,12 +5,39 @@
 #include <iomanip>
 #include <fstream>
 #include <sstream>
+#include <functional>
+#include <algorithm>
 #include <Windows.h>
 
 namespace Logging {
     bool g_verboseLoggingEnabled = false;
     std::ofstream g_logFile;
     static std::string s_gameDirectory;
+
+    static bool HasNonWhitespace(const std::string& msg) {
+        return msg.find_first_not_of(" \t\r\n") != std::string::npos;
+    }
+
+    static void ForEachNonEmptyLogLine(const std::string& msg, const std::function<void(const std::string&)>& writeLine) {
+        size_t lineStart = 0;
+        while (lineStart <= msg.size()) {
+            size_t lineEnd = msg.find_first_of("\r\n", lineStart);
+            std::string line = msg.substr(lineStart, lineEnd == std::string::npos ? std::string::npos : lineEnd - lineStart);
+
+            if (HasNonWhitespace(line)) {
+                writeLine(line);
+            }
+
+            if (lineEnd == std::string::npos) {
+                break;
+            }
+
+            lineStart = lineEnd + 1;
+            if (msg[lineEnd] == '\r' && lineStart < msg.size() && msg[lineStart] == '\n') {
+                ++lineStart;
+            }
+        }
+    }
 
     void WriteToConsole(const char* msg) {
         if (!msg) {
@@ -41,6 +68,44 @@ namespace Logging {
     bool g_autoScroll = true;
     bool g_showVerbose = true;
     static const size_t MAX_CONSOLE_ENTRIES = 1000;  // Limit buffer size
+
+    static bool WriteTextToClipboard(const std::string& text) {
+        if (text.empty()) {
+            return false;
+        }
+
+        if (!OpenClipboard(NULL)) {
+            return false;
+        }
+
+        bool success = false;
+        if (EmptyClipboard()) {
+            HGLOBAL clipboardMemory = GlobalAlloc(GMEM_MOVEABLE, text.size() + 1);
+            if (clipboardMemory) {
+                void* clipboardData = GlobalLock(clipboardMemory);
+                if (clipboardData) {
+                    memcpy(clipboardData, text.c_str(), text.size() + 1);
+                    GlobalUnlock(clipboardMemory);
+
+                    if (SetClipboardData(CF_TEXT, clipboardMemory)) {
+                        clipboardMemory = NULL;
+                        success = true;
+                    }
+                }
+
+                if (clipboardMemory) {
+                    GlobalFree(clipboardMemory);
+                }
+            }
+        }
+
+        CloseClipboard();
+        return success;
+    }
+
+    static bool ShouldIncludeConsoleEntry(const ConsoleEntry& entry) {
+        return g_showVerbose || entry.type != ConsoleEntry::Type::Verbose;
+    }
 
     // Get the directory where the game executable is located
     static std::string GetGameDirectory() {
@@ -138,18 +203,24 @@ namespace Logging {
     }
     
     void WriteToFile(const std::string& msg) {
-        if (g_logFile.is_open()) {
-            g_logFile << msg << std::endl;
-            g_logFile.flush();  // Flush immediately to catch crashes
-        }
+        ForEachNonEmptyLogLine(msg, [](const std::string& line) {
+            if (g_logFile.is_open()) {
+                g_logFile << line << std::endl;
+                g_logFile.flush();  // Flush immediately to catch crashes
+            }
 
-        WriteToConsole(msg.c_str());
+            WriteToConsole(line.c_str());
+        });
     }
     
     // Pure C immediate write - no C++ objects, no exceptions
     // Opens file, writes, flushes, closes - guaranteed to persist before crash
     // Works even BEFORE Logging::Initialize() is called
     void WriteImmediate(const char* msg) {
+        if (!msg || !HasNonWhitespace(msg)) {
+            return;
+        }
+
         // Write to the existing log file stream if open
         if (g_logFile.is_open()) {
             g_logFile << msg << std::endl;
@@ -232,17 +303,28 @@ namespace Logging {
     
     // ImGui console functions
     void AddConsoleEntry(ConsoleEntry::Type type, const std::string& msg) {
+#ifndef DEVELOPMENT_MODE
+        (void)type;
+        (void)msg;
+        return;
+#else
         std::lock_guard<std::mutex> lock(g_consoleMutex);
-        
-        g_consoleBuffer.emplace_back(type, msg);
-        
-        // Limit buffer size
-        if (g_consoleBuffer.size() > MAX_CONSOLE_ENTRIES) {
-            g_consoleBuffer.erase(g_consoleBuffer.begin());
-        }
+
+        ForEachNonEmptyLogLine(msg, [type](const std::string& line) {
+            g_consoleBuffer.emplace_back(type, line);
+
+            // Limit buffer size
+            if (g_consoleBuffer.size() > MAX_CONSOLE_ENTRIES) {
+                g_consoleBuffer.erase(g_consoleBuffer.begin());
+            }
+        });
+#endif
     }
     
     void RenderConsole() {
+#ifndef DEVELOPMENT_MODE
+        return;
+#else
         if (!g_consoleVisible) {
             return;
         }
@@ -260,6 +342,26 @@ namespace Logging {
             // Console controls
             if (ImGui::Button("Clear")) {
                 ClearConsole();
+            }
+            ImGui::SameLine();
+
+            if (ImGui::Button("Copy 10")) {
+                CopyLastConsoleLines(10);
+            }
+            ImGui::SameLine();
+
+            if (ImGui::Button("Copy 100")) {
+                CopyLastConsoleLines(100);
+            }
+            ImGui::SameLine();
+
+            if (ImGui::Button("Copy 500")) {
+                CopyLastConsoleLines(500);
+            }
+            ImGui::SameLine();
+
+            if (ImGui::Button("Copy 1000")) {
+                CopyLastConsoleLines(1000);
             }
             ImGui::SameLine();
             
@@ -281,7 +383,7 @@ namespace Logging {
             // Render each entry with appropriate color
             for (const auto& entry : g_consoleBuffer) {
                 // Skip verbose entries if not showing them
-                if (entry.type == ConsoleEntry::Type::Verbose && !g_showVerbose) {
+                if (!ShouldIncludeConsoleEntry(entry)) {
                     continue;
                 }
                 
@@ -316,11 +418,14 @@ namespace Logging {
             ImGui::EndChild();
         }
         ImGui::End();
+#endif
     }
     
     void ToggleConsole() {
+#ifdef DEVELOPMENT_MODE
         g_consoleVisible = !g_consoleVisible;
         LOG_INFO("ImGui Console " << (g_consoleVisible ? "OPENED" : "CLOSED"));
+#endif
     }
     
     bool IsConsoleVisible() {
@@ -328,8 +433,56 @@ namespace Logging {
     }
     
     void ClearConsole() {
-        std::lock_guard<std::mutex> lock(g_consoleMutex);
-        g_consoleBuffer.clear();
+        {
+            std::lock_guard<std::mutex> lock(g_consoleMutex);
+            g_consoleBuffer.clear();
+        }
+
         LOG_INFO("Console cleared");
+    }
+
+    bool CopyLastConsoleLines(size_t lineCount) {
+#ifndef DEVELOPMENT_MODE
+        (void)lineCount;
+        return false;
+#else
+        if (lineCount == 0) {
+            return false;
+        }
+
+        std::vector<std::string> lines;
+        {
+            std::lock_guard<std::mutex> lock(g_consoleMutex);
+            const size_t reserveCount = lineCount < g_consoleBuffer.size() ? lineCount : g_consoleBuffer.size();
+            lines.reserve(reserveCount);
+
+            for (auto it = g_consoleBuffer.rbegin(); it != g_consoleBuffer.rend() && lines.size() < lineCount; ++it) {
+                if (ShouldIncludeConsoleEntry(*it)) {
+                    lines.push_back(it->message);
+                }
+            }
+        }
+
+        if (lines.empty()) {
+            LOG_WARNING("[Console] No log lines available to copy");
+            return false;
+        }
+
+        std::ostringstream clipboardText;
+        for (auto it = lines.rbegin(); it != lines.rend(); ++it) {
+            clipboardText << *it;
+            if (it + 1 != lines.rend()) {
+                clipboardText << "\r\n";
+            }
+        }
+
+        if (!WriteTextToClipboard(clipboardText.str())) {
+            LOG_ERROR("[Console] Failed to copy log lines to clipboard");
+            return false;
+        }
+
+        LOG_INFO("[Console] Copied last " << lines.size() << " log line(s) to clipboard");
+        return true;
+#endif
     }
 }

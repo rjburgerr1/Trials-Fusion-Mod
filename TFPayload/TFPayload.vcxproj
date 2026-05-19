@@ -103,7 +103,7 @@
     <CustomDeployPaths Include="$(CustomDeployPath)" />
   </ItemGroup>
   <ItemGroup Condition="'@(CustomDeployPaths)'==''">
-    <CustomDeployPaths Include="$(SolutionDir)LocalDeploy" />
+    <CustomDeployPaths Include="$(MSBuildProjectDirectory)\..\LocalDeploy" />
   </ItemGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -114,7 +114,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(SolutionDir)vendor\minhook\include;$(SolutionDir)vendor;$(SolutionDir)vendor\imgui;$(SolutionDir)vendor\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\vendor\minhook\include;$(MSBuildProjectDirectory)\..\vendor;$(MSBuildProjectDirectory)\..\vendor\imgui;$(MSBuildProjectDirectory)\..\vendor\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -148,7 +148,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(SolutionDir)vendor\minhook\include;$(SolutionDir)vendor;$(SolutionDir)vendor\imgui;$(SolutionDir)vendor\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\vendor\minhook\include;$(MSBuildProjectDirectory)\..\vendor;$(MSBuildProjectDirectory)\..\vendor\imgui;$(MSBuildProjectDirectory)\..\vendor\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -182,7 +182,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(SolutionDir)vendor\minhook\include;$(SolutionDir)vendor;$(SolutionDir)vendor\imgui;$(SolutionDir)vendor\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\vendor\minhook\include;$(MSBuildProjectDirectory)\..\vendor;$(MSBuildProjectDirectory)\..\vendor\imgui;$(MSBuildProjectDirectory)\..\vendor\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -216,7 +216,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(SolutionDir)vendor\minhook\include;$(SolutionDir)vendor;$(SolutionDir)vendor\imgui;$(SolutionDir)vendor\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\vendor\minhook\include;$(MSBuildProjectDirectory)\..\vendor;$(MSBuildProjectDirectory)\..\vendor\imgui;$(MSBuildProjectDirectory)\..\vendor\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -264,6 +264,10 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClInclude Include="camera.h" />
     <ClInclude Include="devMenu.h" />
     <ClInclude Include="devMenuSync.h" />
+    <ClInclude Include="fmod.h" />
+    <ClInclude Include="gear-customization.h" />
+    <ClInclude Include="bike-item-catalog.generated.h" />
+    <ClInclude Include="gear-set-catalog.generated.h" />
     <ClInclude Include="gamemode.h" />
     <ClInclude Include="host-join.h" />
     <ClInclude Include="..\vendor\imgui\backends\imgui_impl_dx11.h" />
@@ -297,6 +301,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClInclude Include="respawn.h" />
     <ClInclude Include="tracks.h" />
     <ClInclude Include="acorns.h" />
+    <ClInclude Include="ui-view-explorer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="actionscript.cpp" />
@@ -305,6 +310,8 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClCompile Include="camera.cpp" />
     <ClCompile Include="devMenu.cpp" />
     <ClCompile Include="devMenuSync.cpp" />
+    <ClCompile Include="fmod.cpp" />
+    <ClCompile Include="gear-customization.cpp" />
     <ClCompile Include="gamemode.cpp" />
     <ClCompile Include="host-join.cpp" />
     <ClCompile Include="..\vendor\imgui\backends\imgui_impl_dx11.cpp" />
@@ -338,6 +345,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClCompile Include="respawn.cpp" />
     <ClCompile Include="tracks.cpp" />
     <ClCompile Include="acorns.cpp" />
+    <ClCompile Include="ui-view-explorer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\vendor\minhook\dll_resources\MinHook.def" />
@@ -348,12 +356,12 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="RequestLiveTfPayloadUnload" BeforeTargets="PreBuildEvent" Condition="'$(Configuration)|$(Platform)'=='DEVELOPMENT_MODE|Win32'">
     <Message Importance="High" Text="Requesting live TFPayload unload before DEVELOPMENT_MODE build..." />
-    <Touch Files="@(CustomDeployPaths->'%(Identity)\tfpayload_dev_unload.trigger')" AlwaysCreate="true" Condition="Exists('%(CustomDeployPaths.Identity)')" />
+    <Exec Command="type NUL &gt; &quot;%(CustomDeployPaths.Identity)\tfpayload_dev_unload.trigger&quot;" Condition="Exists('%(CustomDeployPaths.Identity)')" />
     <Exec Command="ping -n 2 127.0.0.1 &gt;nul" />
   </Target>
   <Target Name="DeployTfPayload" AfterTargets="Build">
     <Copy SourceFiles="$(TargetPath)" DestinationFiles="@(CustomDeployPaths->'%(Identity)\$(TargetFileName)')" Condition="Exists('%(CustomDeployPaths.Identity)')" />
-    <Touch Files="@(CustomDeployPaths->'%(Identity)\tfpayload_dev_load.trigger')" AlwaysCreate="true" Condition="'$(Configuration)|$(Platform)'=='DEVELOPMENT_MODE|Win32' And Exists('%(CustomDeployPaths.Identity)')" />
+    <Exec Command="type NUL &gt; &quot;%(CustomDeployPaths.Identity)\tfpayload_dev_load.trigger&quot;" Condition="'$(Configuration)|$(Platform)'=='DEVELOPMENT_MODE|Win32' And Exists('%(CustomDeployPaths.Identity)')" />
   </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

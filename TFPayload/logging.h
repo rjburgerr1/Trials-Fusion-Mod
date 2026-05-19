@@ -70,6 +70,7 @@ namespace Logging {
     void ToggleConsole();
     bool IsConsoleVisible();
     void ClearConsole();
+    bool CopyLastConsoleLines(size_t lineCount);
 
     // Logging macros for different levels
     #define LOG_INFO(...) \

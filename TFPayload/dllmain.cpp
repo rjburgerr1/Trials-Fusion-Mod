@@ -6,6 +6,7 @@
 #include <vector>
 #include <fstream>
 #include <atomic>
+#include <cstdio>
 #ifdef min
 #undef min
 #endif
@@ -33,6 +34,7 @@
 #include "prevent-finish.h"
 #include "gamemode.h"
 #include "bike-swap.h"
+#include "fmod.h"
 #include <MinHook.h>
 
 // FORWARD DECLARATIONS
@@ -44,6 +46,8 @@ std::atomic<bool> g_isInitialized(false);
 bool isRunning = false;
 bool isShuttingDown = false; // Prevent re-entry during shutdown
 HANDLE g_hKeyMonitorThread = NULL;
+static PVOID g_vectoredCrashHandler = nullptr;
+static volatile LONG g_crashHandlerCount = 0;
 
 // MACROS
 #define KeyPress(...) (GetAsyncKeyState(__VA_ARGS__) & 0x1)
@@ -92,6 +96,127 @@ DWORD_PTR GetModuleBaseAddress(DWORD processID, const wchar_t* moduleName)
     return baseAddress;
 }
 
+static void FormatAddressModule(char* out, size_t outSize, void* address)
+{
+    if (!out || outSize == 0) {
+        return;
+    }
+
+    out[0] = '\0';
+    MEMORY_BASIC_INFORMATION mbi = {};
+    if (!address || VirtualQuery(address, &mbi, sizeof(mbi)) == 0) {
+        sprintf_s(out, outSize, "addr=%p module=<unknown>", address);
+        return;
+    }
+
+    char modulePath[MAX_PATH] = {};
+    HMODULE module = reinterpret_cast<HMODULE>(mbi.AllocationBase);
+    if (GetModuleFileNameA(module, modulePath, MAX_PATH) == 0) {
+        sprintf_s(out, outSize, "addr=%p moduleBase=%p module=<unknown>", address, module);
+        return;
+    }
+
+    const uintptr_t offset = reinterpret_cast<uintptr_t>(address) - reinterpret_cast<uintptr_t>(module);
+    sprintf_s(out, outSize, "addr=%p moduleBase=%p offset=0x%Ix module=%s", address, module, offset, modulePath);
+}
+
+static LONG CALLBACK TFPayloadVectoredExceptionHandler(PEXCEPTION_POINTERS exceptionInfo)
+{
+    if (!exceptionInfo || !exceptionInfo->ExceptionRecord || !exceptionInfo->ContextRecord) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    const DWORD code = exceptionInfo->ExceptionRecord->ExceptionCode;
+    // OutputDebugString raises DBG_PRINTEXCEPTION_* first-chance exceptions.
+    // Ignore them or the crash logger will consume its one shot during normal logging.
+    if (code == EXCEPTION_BREAKPOINT
+        || code == EXCEPTION_SINGLE_STEP
+        || code == 0x406D1388
+        || code == 0x40010005
+        || code == 0x40010006) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    const LONG loggedExceptionCount = InterlockedIncrement(&g_crashHandlerCount);
+    if (loggedExceptionCount > 32) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    char line[1024] = {};
+    sprintf_s(line, sizeof(line), "[VEH] exception=0x%08X flags=0x%08X thread=%lu",
+        code,
+        exceptionInfo->ExceptionRecord->ExceptionFlags,
+        GetCurrentThreadId());
+    Logging::WriteImmediate(line);
+
+    if (code == EXCEPTION_ACCESS_VIOLATION
+        && exceptionInfo->ExceptionRecord->NumberParameters >= 2) {
+        sprintf_s(line, sizeof(line), "[VEH] accessViolation type=%s address=%p",
+            exceptionInfo->ExceptionRecord->ExceptionInformation[0] == 0 ? "read" :
+            (exceptionInfo->ExceptionRecord->ExceptionInformation[0] == 1 ? "write" : "execute"),
+            reinterpret_cast<void*>(exceptionInfo->ExceptionRecord->ExceptionInformation[1]));
+        Logging::WriteImmediate(line);
+    }
+
+    char moduleInfo[768] = {};
+    FormatAddressModule(moduleInfo, sizeof(moduleInfo), exceptionInfo->ExceptionRecord->ExceptionAddress);
+    sprintf_s(line, sizeof(line), "[VEH] exceptionAddress %s", moduleInfo);
+    Logging::WriteImmediate(line);
+
+#if defined(_M_IX86)
+    CONTEXT* context = exceptionInfo->ContextRecord;
+    FormatAddressModule(moduleInfo, sizeof(moduleInfo), reinterpret_cast<void*>(context->Eip));
+    sprintf_s(line, sizeof(line),
+        "[VEH] eip=0x%08lX esp=0x%08lX ebp=0x%08lX eax=0x%08lX ebx=0x%08lX ecx=0x%08lX edx=0x%08lX esi=0x%08lX edi=0x%08lX",
+        context->Eip, context->Esp, context->Ebp, context->Eax, context->Ebx,
+        context->Ecx, context->Edx, context->Esi, context->Edi);
+    Logging::WriteImmediate(line);
+    sprintf_s(line, sizeof(line), "[VEH] eipModule %s", moduleInfo);
+    Logging::WriteImmediate(line);
+
+    __try {
+        DWORD* stack = reinterpret_cast<DWORD*>(context->Esp);
+        if (stack && !IsBadReadPtr(stack, sizeof(DWORD) * 32)) {
+            for (int i = 0; i < 32; ++i) {
+                void* candidate = reinterpret_cast<void*>(stack[i]);
+                MEMORY_BASIC_INFORMATION mbi = {};
+                if (VirtualQuery(candidate, &mbi, sizeof(mbi)) != 0
+                    && mbi.State == MEM_COMMIT
+                    && (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0) {
+                    FormatAddressModule(moduleInfo, sizeof(moduleInfo), candidate);
+                    sprintf_s(line, sizeof(line), "[VEH] stack[%02d] %s", i, moduleInfo);
+                    Logging::WriteImmediate(line);
+                }
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        Logging::WriteImmediate("[VEH] stack scan failed");
+    }
+#endif
+
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void InstallCrashHandler()
+{
+    if (!g_vectoredCrashHandler) {
+        InterlockedExchange(&g_crashHandlerCount, 0);
+        g_vectoredCrashHandler = AddVectoredExceptionHandler(1, TFPayloadVectoredExceptionHandler);
+        Logging::WriteImmediate(g_vectoredCrashHandler
+            ? "[VEH] TFPayload crash handler installed"
+            : "[VEH] Failed to install TFPayload crash handler");
+    }
+}
+
+static void RemoveCrashHandler()
+{
+    if (g_vectoredCrashHandler) {
+        RemoveVectoredExceptionHandler(g_vectoredCrashHandler);
+        g_vectoredCrashHandler = nullptr;
+    }
+}
+
 // CALLBACKS
 void OnTrackUpdate(const Tracks::TrackInfo& trackInfo)
 {
@@ -117,6 +242,7 @@ void ShutdownTFPayload()
     LOG_VERBOSE("\n[TFPayload] Shutting down...");
 
     isRunning = false;
+    RemoveCrashHandler();
 
     if (g_hKeyMonitorThread != NULL) {
         LOG_VERBOSE("[TFPayload] Waiting for monitor thread to exit...");
@@ -146,6 +272,7 @@ void ShutdownTFPayload()
     Multiplayer::Shutdown();
     HostJoin::Shutdown();
     BikeSwap::Shutdown();
+    Fmod::Shutdown();
     Keybindings::Shutdown();
 
     LOG_VERBOSE("[Main] All resources cleaned up.");
@@ -338,6 +465,11 @@ static bool Init_BikeSwap(void* userData) {
     return BikeSwap::Initialize(ctx->baseAddress);
 }
 
+static bool Init_Fmod(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return Fmod::Initialize(ctx->baseAddress);
+}
+
 static bool Init_Logging(void* userData) {
     Logging::Initialize();
     return true;
@@ -493,6 +625,7 @@ void InitializeTFPayload()
     SafeInitCall("Logging", Init_Logging, nullptr);
     
     LOG_VERBOSE("[TFPayload] Beginning module initialization with crash protection...");
+    InstallCrashHandler();
     
     // Create context for passing baseAddress to init functions
     InitContext ctx;
@@ -511,12 +644,9 @@ void InitializeTFPayload()
     SafeInitCall("Money", Init_Money, &ctx);
     SafeInitCall("PreventFinish", Init_PreventFinish, nullptr);
     SafeInitCall("GameMode", Init_GameMode, &ctx);
+    SafeInitCall("FMOD", Init_Fmod, &ctx);
     SafeInitCall("BikeSwap", Init_BikeSwap, &ctx);
     SafeInitCall("Keybindings", Init_Keybindings, nullptr);
-
-    // Wait a moment to ensure ProxyDLL has hooked D3D11
-    LOG_VERBOSE("[TFPayload] Waiting for ProxyDLL to initialize D3D11...");
-    Sleep(400);
 
     // Initialize rendering system (connects to ProxyDLL's hook)
     SafeInitCall("Rendering", Init_Rendering, nullptr);
@@ -596,7 +726,9 @@ void PrintHelpText()
     std::string ResetTimeKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ResetTime));
     std::string ToggleLimitValidationKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleLimitValidation));
     std::string ToggleOverlayKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleOverlay));
+#ifdef DEVELOPMENT_MODE
     std::string ToggleConsoleKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ToggleConsole));
+#endif
     // Leaderboard Scanner
     std::string ScanLeaderboardByIDKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ScanLeaderboardByID));
     std::string ScanCurrentLeaderboardKey = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ScanCurrentLeaderboard));
@@ -636,7 +768,9 @@ void PrintHelpText()
     LOG_INFO("\t" << ToggleDevMenuKey << "\t\t\t- Open DevMenu");
     LOG_INFO("\t" << ToggleOverlayKey << "\t\t\t- Show/Hide overlay");
     LOG_INFO("\tK\t\t\t- Open Keybindings Menu");
+#ifdef DEVELOPMENT_MODE
     LOG_INFO("\t" << ToggleConsoleKey << "\t\t\t- Toggle ImGui Console");
+#endif
     LOG_INFO("");
     LOG_INFO("\tTrack Functions");
     LOG_INFO("\t" << InstantFinishKey << "\t\t\t- Instant Pass Track");
@@ -845,6 +979,32 @@ void HandleToggleVerbose()
     }
 }
 
+static void ClearAttachedConsole()
+{
+    HWND consoleWindow = GetConsoleWindow();
+    if (!consoleWindow) {
+        return;
+    }
+
+    HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (output == INVALID_HANDLE_VALUE || output == NULL) {
+        return;
+    }
+
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    if (!GetConsoleScreenBufferInfo(output, &info)) {
+        return;
+    }
+
+    const DWORD cellCount = static_cast<DWORD>(info.dwSize.X) * static_cast<DWORD>(info.dwSize.Y);
+    const COORD home = { 0, 0 };
+    DWORD written = 0;
+
+    FillConsoleOutputCharacterA(output, ' ', cellCount, home, &written);
+    FillConsoleOutputAttribute(output, info.wAttributes, cellCount, home, &written);
+    SetConsoleCursorPosition(output, home);
+}
+
 void HandleShowHelp()
 {
     if (Keybindings::IsActionPressed(Keybindings::Action::ShowHelpText)) {
@@ -857,12 +1017,11 @@ void HandleClearConsole()
 {
     if (Keybindings::IsActionPressed(Keybindings::Action::ClearConsole)) {
 #ifndef RELEASE_AUTOLOAD_MODE
-        system("cls");
+        ClearAttachedConsole();
 #endif
         std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(Keybindings::Action::ClearConsole));
-        LOG_VERBOSE("[" << keyName << "] Debug console cleared");
-        // Also clear the ImGui console
         Logging::ClearConsole();
+        LOG_VERBOSE("[" << keyName << "] Debug console cleared");
     }
 }
 
@@ -935,9 +1094,11 @@ void HandleToggleLimitValidation()
 
 void HandleToggleConsole()
 {
+#ifdef DEVELOPMENT_MODE
     if (Keybindings::IsActionPressed(Keybindings::Action::ToggleConsole)) {
         Logging::ToggleConsole();
     }
+#endif
 }
 
 // Helper function to check if game window has focus
@@ -1009,6 +1170,7 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         Camera::CheckHotkey();
         Multiplayer::CheckHotkey();
         BikeSwap::CheckHotkey();
+        Fmod::Update();
         PreventFinish::Update();
         
         Sleep(80);

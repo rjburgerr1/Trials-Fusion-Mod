@@ -4,6 +4,7 @@
 #include "imgui/imgui.h"
 #include "logging.h"
 #include "respawn.h"
+#include "gear-customization.h"
 #include "limits.h"
 #include "actionscript.h"
 #include "keybindings.h"
@@ -12,8 +13,16 @@
 #include "host-join.h"
 #include "base-address.h"
 #include "prevent-finish.h"
+#include "fmod.h"
+#include "ui-view-explorer.h"
+#include "bike-item-catalog.generated.h"
+#include "gear-set-catalog.generated.h"
 #include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstring>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <initializer_list>
 #include <Windows.h>
@@ -58,6 +67,7 @@ static std::string GetKeybindingCategory(Keybindings::Action action) {
     case Keybindings::Action::ToggleDevMenu:
     case Keybindings::Action::ToggleKeybindingsMenu:
     case Keybindings::Action::ToggleOverlay:
+    case Keybindings::Action::ToggleConsole:
     case Keybindings::Action::ClearConsole:
     case Keybindings::Action::ToggleVerboseLogging:
     case Keybindings::Action::ShowHelpText:
@@ -109,8 +119,6 @@ static std::string GetKeybindingCategory(Keybindings::Action action) {
     case Keybindings::Action::DumpPhysicsLog:
     case Keybindings::Action::ModifyXPosition:
         return "Debug / Patch Controls";
-    case Keybindings::Action::ToggleConsole:
-        return "Console Controls";
     case Keybindings::Action::SwapNextBike:
     case Keybindings::Action::SwapPrevBike:
     case Keybindings::Action::DebugBikeInfo:
@@ -542,6 +550,11 @@ bool TweakableTireColor::WriteBrightness(float brightness) const {
 }
 
 void TweakableTireColor::Render() {
+    static constexpr float kTireColorSwatchColumnX = 115.0f;
+    static constexpr float kTireColorResetColumnX = 145.0f;
+    static constexpr float kTireBrightnessLabelColumnX = 205.0f;
+    static constexpr float kTireBrightnessSliderColumnX = 285.0f;
+
     float liveColor[3] = {};
     float liveBrightness = 1.0f;
     const bool isAvailable = ReadCurrentValues(liveColor, liveBrightness);
@@ -567,12 +580,21 @@ void TweakableTireColor::Render() {
         ClampFloat(m_color[2] / 6.0f, 0.0f, 1.0f)
     };
 
-    ImGui::PushItemWidth(200.0f);
+    const bool colorChanged =
+        fabsf(m_color[0] - m_defaultColor[0]) > 0.0001f ||
+        fabsf(m_color[1] - m_defaultColor[1]) > 0.0001f ||
+        fabsf(m_color[2] - m_defaultColor[2]) > 0.0001f;
+    const bool brightnessChanged = fabsf(m_brightness - m_defaultBrightness) > 0.0001f;
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::Text("%s", m_name.c_str());
+    ImGui::SameLine(kTireColorSwatchColumnX);
+
     std::string colorLabel = "##" + m_name + "Color" + std::to_string(m_id);
     if (ImGui::ColorEdit3(
         colorLabel.c_str(),
         normalizedPickerColor,
-        ImGuiColorEditFlags_Float | ImGuiColorEditFlags_NoInputs
+        ImGuiColorEditFlags_Float | ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel
     )) {
         for (int i = 0; i < 3; ++i) {
             m_color[i] = ClampFloat(normalizedPickerColor[i] * 6.0f, 0.0f, 6.0f);
@@ -581,34 +603,46 @@ void TweakableTireColor::Render() {
             LOG_WARNING("[DevMenu] Failed to write live tire diffuse color");
         }
     }
-    ImGui::PopItemWidth();
-    ImGui::SameLine();
-    ImGui::Text("%s", m_name.c_str());
-
-    ImGui::PushItemWidth(200.0f);
-    std::string rgbScalarLabel = "##" + m_name + "RgbScalar" + std::to_string(m_id);
-    if (ImGui::SliderFloat3(rgbScalarLabel.c_str(), m_color, 0.0f, 6.0f, "RGB %.3f")) {
-        for (int i = 0; i < 3; ++i) {
-            m_color[i] = ClampFloat(m_color[i], 0.0f, 6.0f);
+    if (colorChanged) {
+        ImGui::SameLine(kTireColorResetColumnX);
+        if (ImGui::SmallButton(("Reset##Color" + std::to_string(m_id)).c_str())) {
+            for (int i = 0; i < 3; ++i) {
+                m_color[i] = m_defaultColor[i];
+            }
+            if (!WriteColor(m_color)) {
+                LOG_WARNING("[DevMenu] Failed to reset live tire diffuse color");
+            }
         }
-        if (!WriteColor(m_color)) {
-            LOG_WARNING("[DevMenu] Failed to write live tire diffuse color");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Reset color to default");
         }
     }
-    ImGui::PopItemWidth();
+
+    ImGui::SameLine(kTireBrightnessLabelColumnX);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Brightness");
+    ImGui::SameLine(kTireBrightnessSliderColumnX);
 
     ImGui::PushItemWidth(200.0f);
     std::string brightnessLabel = "##" + m_name + "Brightness" + std::to_string(m_id);
-    if (ImGui::SliderFloat(brightnessLabel.c_str(), &m_brightness, 0.0f, 1.0f, "Brightness %.3f")) {
+    if (ImGui::SliderFloat(brightnessLabel.c_str(), &m_brightness, 0.0f, 1.0f, "%.3f")) {
         m_brightness = ClampFloat(m_brightness, 0.0f, 1.0f);
         if (!WriteBrightness(m_brightness)) {
             LOG_WARNING("[DevMenu] Failed to write live tire brightness");
         }
     }
     ImGui::PopItemWidth();
-
-    if (ImGui::SmallButton(("Reset##" + std::to_string(m_id)).c_str())) {
-        ResetToDefault();
+    if (brightnessChanged) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton(("Reset##Brightness" + std::to_string(m_id)).c_str())) {
+            m_brightness = m_defaultBrightness;
+            if (!WriteBrightness(m_brightness)) {
+                LOG_WARNING("[DevMenu] Failed to reset live tire brightness");
+            }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Reset brightness to default");
+        }
     }
 }
 
@@ -623,6 +657,871 @@ void TweakableTireColor::ResetToDefault() {
     Reset();
     WriteColor(m_color);
     WriteBrightness(m_brightness);
+}
+
+namespace {
+    static constexpr int kBikePartMaxColorParts = 3;
+    static constexpr float kGearEditorControlColumnX = 165.0f;
+    static constexpr float kGearEditorControlWidth = 190.0f;
+    static constexpr float kGearEditorColorColumnX = 375.0f;
+    static constexpr float kGearEditorVariantColumnX = 470.0f;
+    static constexpr float kGearEditorColorSwatchSize = 22.0f;
+
+    static const BikeItemCatalogEntry* FindBikeCatalogEntry(uint16_t itemId) {
+        for (size_t i = 0; i < kBikeItemCatalogCount; ++i) {
+            if (kBikeItemCatalog[i].id == itemId) {
+                return &kBikeItemCatalog[i];
+            }
+        }
+        return nullptr;
+    }
+
+    static const GearSetCatalogEntry* FindGearSetCatalogEntry(uint16_t setId) {
+        for (size_t i = 0; i < kGearSetCatalogCount; ++i) {
+            if (kGearSetCatalog[i].id == setId) {
+                return &kGearSetCatalog[i];
+            }
+        }
+        return nullptr;
+    }
+
+    static int GearSetVariantIndexFromSuffix(const std::string& suffix) {
+        if (suffix == "1") return 1;
+        if (suffix == "2") return 2;
+        if (suffix == "4") return 3;
+        if (suffix == "8") return 4;
+        if (suffix == "16") return 5;
+        if (suffix == "32") return 6;
+        if (suffix == "64") return 7;
+        if (suffix == "128") return 8;
+        return 0;
+    }
+
+    static const char* GearSetFamilyAlias(const std::string& family) {
+        if (family == "DIRTRUNNER") return "OUTSIDER";
+        if (family == "TECHBOY") return "BIOTECH";
+        if (family == "EVEL") return "DASHING HERO";
+        if (family == "XPOLICE") return "ENFORCER";
+        if (family == "FMX") return "CONTENDER";
+        if (family == "GEOLOGIST") return "EXCAVATOR";
+        if (family == "HAZMASUIT") return "HAZMAT";
+        if (family == "SUPERHERO") return "SUPERHERO";
+        if (family == "CHEETAH") return "Pit-Viper";
+        if (family == "KINGCOBRA") return "ROACH";
+        if (family == "TRICKY") return "FOXBAT";
+        if (family == "PAPER") return "RABBIT";
+        if (family == "FAT") return "PANDA";
+        if (family == "SQUIRREL") return "SQUIRREL";
+        if (family == "ULCCLOWN") return "CLOWN";
+        if (family == "ULCDRINK") return "DRINK";
+        if (family == "ULCRHINO") return "RHINO";
+        return nullptr;
+    }
+
+    static const char* GearSetSlotSingular(GearSetSlot slot) {
+        switch (slot) {
+        case GearSetSlot::RiderTop:
+            return "Torso";
+        case GearSetSlot::RiderBottom:
+            return "Legs";
+        case GearSetSlot::RiderHelmet:
+            return "Helmet";
+        case GearSetSlot::BikeFairings:
+            return "Fairings";
+        case GearSetSlot::BikeWheels:
+            return "Wheels";
+        default:
+            return "Gear";
+        }
+    }
+
+    static bool ParseGearSetFamilyAndVariant(const GearSetCatalogEntry& entry, std::string& family, int& variant) {
+        const std::string genKey(entry.genKey);
+        const size_t firstUnderscore = genKey.find('_');
+        const size_t lastUnderscore = genKey.rfind('_');
+        if (firstUnderscore == std::string::npos || lastUnderscore == std::string::npos || lastUnderscore <= firstUnderscore) {
+            return false;
+        }
+
+        family = genKey.substr(0, firstUnderscore);
+        variant = GearSetVariantIndexFromSuffix(genKey.substr(lastUnderscore + 1));
+        return variant > 0;
+    }
+
+    static std::string GearSetDisplayName(const GearSetCatalogEntry& entry) {
+        std::string family;
+        int variant = 0;
+        if (ParseGearSetFamilyAndVariant(entry, family, variant)) {
+            const char* familyAlias = GearSetFamilyAlias(family);
+            if (familyAlias) {
+                const bool numberedSingleItem =
+                    (family == "EVEL" || family == "HAZMASUIT" || family == "SUPERHERO" ||
+                        family == "SQUIRREL" || family == "ULCCLOWN" || family == "ULCDRINK" || family == "ULCRHINO") &&
+                    variant == 1;
+
+                std::ostringstream aliasStream;
+                aliasStream << familyAlias << ' ' << GearSetSlotSingular(entry.slot);
+                if (!numberedSingleItem) {
+                    aliasStream << ' ' << variant;
+                }
+                return aliasStream.str();
+            }
+        }
+
+        std::ostringstream stream;
+        stream << entry.id << " - " << entry.genKey;
+        return stream.str();
+    }
+
+    struct GearSetGroupOption {
+        const GearSetCatalogEntry* entry;
+        int variant;
+    };
+
+    struct GearSetGroup {
+        std::string label;
+        std::vector<GearSetGroupOption> options;
+    };
+
+    static std::string GearSetGroupLabel(const GearSetCatalogEntry& entry) {
+        std::string family;
+        int variant = 0;
+        if (ParseGearSetFamilyAndVariant(entry, family, variant)) {
+            const char* familyAlias = GearSetFamilyAlias(family);
+            if (familyAlias) {
+                std::ostringstream stream;
+                stream << familyAlias;
+                return stream.str();
+            }
+        }
+
+        return entry.category;
+    }
+
+    static std::vector<GearSetGroup> BuildGearSetGroups(GearSetSlot slot) {
+        std::vector<GearSetGroup> groups;
+        for (size_t i = 0; i < kGearSetCatalogCount; ++i) {
+            const GearSetCatalogEntry& entry = kGearSetCatalog[i];
+            if (entry.slot != slot) {
+                continue;
+            }
+
+            std::string family;
+            int variant = 0;
+            if (!ParseGearSetFamilyAndVariant(entry, family, variant)) {
+                variant = 1;
+            }
+
+            const std::string groupLabel = GearSetGroupLabel(entry);
+            auto groupIt = std::find_if(groups.begin(), groups.end(), [&groupLabel](const GearSetGroup& group) {
+                return group.label == groupLabel;
+            });
+            if (groupIt == groups.end()) {
+                groups.push_back({ groupLabel, {} });
+                groupIt = groups.end() - 1;
+            }
+
+            groupIt->options.push_back({ &entry, variant });
+        }
+
+        return groups;
+    }
+
+    static std::string GearSetPreview(int setId) {
+        if (setId <= 0 || setId > 0xffff) {
+            return std::to_string(setId);
+        }
+
+        const GearSetCatalogEntry* entry = FindGearSetCatalogEntry(static_cast<uint16_t>(setId));
+        if (!entry) {
+            std::ostringstream stream;
+            stream << setId << " - unknown";
+            return stream.str();
+        }
+
+        return GearSetDisplayName(*entry);
+    }
+
+    static std::string PrettyPartName(const std::string& partKey) {
+        static const std::map<std::string, std::string> kAliases = {
+            { "BACKSWING", "Back Swing" },
+            { "BACK_SWING_ARM", "Back Swing Arm" },
+            { "BOY_FRAME", "Frame" },
+            { "BOY_PEDAL_ARMS", "Pedal Arms" },
+            { "BOY_PEDAL_LEFT", "Pedal Left" },
+            { "BOY_PEDAL_RIGHT", "Pedal Right" },
+            { "BOY_STEERING", "Steering" },
+            { "BOY_SUSPENSION_FRONT", "Front Suspension" },
+            { "BOY_TIRE_FRONT", "Front Tire" },
+            { "BOY_TIRE_REAR", "Rear Tire" },
+            { "ENGINE", "Engine" },
+            { "ENGINE_FENDER", "Engine Fender" },
+            { "EXHAUST", "Exhaust" },
+            { "EXHAUST_PIPE", "Exhaust" },
+            { "FENDER_FRONT", "Front Fender" },
+            { "FENDER_REAR", "Rear Fender" },
+            { "FRAME", "Frame" },
+            { "FRONT_FENDER", "Front Fender" },
+            { "FRONT_RIM", "Front Rim" },
+            { "FRONT_SUSPENSION", "Front Suspension" },
+            { "FRONT_TIRE", "Front Tire" },
+            { "GRIZZLY_BODY", "Body" },
+            { "GRIZZLY_CHASSIS", "Chassis" },
+            { "GRIZZLY_EXHAUST", "Exhaust" },
+            { "GRIZZLY_HEADLIGHT", "Headlight" },
+            { "GRIZZLY_STEERING", "Steering" },
+            { "GRIZZLY_SUSPENSION_FRONT", "Front Suspension" },
+            { "GRIZZLY_SUSPENSION_REAR", "Rear Suspension" },
+            { "HEAD_LIGHT", "Headlight" },
+            { "HEADLIGHT", "Headlight" },
+            { "REAR_FENDER", "Rear Fender" },
+            { "REAR_RIM", "Rear Rim" },
+            { "REAR_TIRE", "Rear Tire" },
+            { "RIM_FRONT", "Front Rim" },
+            { "RIM_REAR", "Rear Rim" },
+            { "SEAT", "Seat" },
+            { "STEERING", "Steering" },
+            { "SUSPENSION_FRONT", "Front Suspension" },
+            { "SWING_ARM", "Swing Arm" },
+            { "TANK", "Tank" },
+            { "TIRE_FRONT", "Front Tire" },
+            { "TIRE_REAR", "Rear Tire" },
+            { "WHEEL_FRONT", "Front Wheel" },
+            { "WHEEL_REAR", "Rear Wheel" },
+        };
+
+        const auto aliasIt = kAliases.find(partKey);
+        if (aliasIt != kAliases.end()) {
+            return aliasIt->second;
+        }
+
+        std::string result;
+        bool capitalizeNext = true;
+        for (char ch : partKey) {
+            if (ch == '_') {
+                result.push_back(' ');
+                capitalizeNext = true;
+                continue;
+            }
+
+            const char lower = static_cast<char>(tolower(static_cast<unsigned char>(ch)));
+            result.push_back(capitalizeNext ? static_cast<char>(toupper(static_cast<unsigned char>(lower))) : lower);
+            capitalizeNext = false;
+        }
+        return result;
+    }
+
+    static int BikeItemVariantIndex(const BikeItemCatalogEntry& entry) {
+        const std::string genKey(entry.genKey);
+        const size_t lastUnderscore = genKey.rfind('_');
+        if (lastUnderscore == std::string::npos) {
+            return 1;
+        }
+        const int variant = GearSetVariantIndexFromSuffix(genKey.substr(lastUnderscore + 1));
+        return variant > 0 ? variant : 1;
+    }
+
+    static std::string BikeItemGroupLabel(const BikeItemCatalogEntry& entry) {
+        const char* familyAlias = GearSetFamilyAlias(entry.bikeKey);
+        std::ostringstream stream;
+        stream << (familyAlias ? familyAlias : entry.bikeKey) << ' ' << PrettyPartName(entry.partKey);
+        return stream.str();
+    }
+
+    static std::string BikeItemDisplayName(const BikeItemCatalogEntry& entry) {
+        std::ostringstream stream;
+        stream << BikeItemGroupLabel(entry) << ' ' << BikeItemVariantIndex(entry);
+        return stream.str();
+    }
+
+    static bool RenderGearSetCombo(
+        const char* label,
+        GearSetSlot slot,
+        int* setId,
+        float* color = nullptr,
+        bool* outColorChanged = nullptr,
+        bool* outColorEditFinished = nullptr) {
+        bool changed = false;
+        const std::vector<GearSetGroup> groups = BuildGearSetGroups(slot);
+        const GearSetGroup* selectedGroup = nullptr;
+        const GearSetCatalogEntry* selectedEntry = nullptr;
+        int selectedOptionIndex = -1;
+
+        for (const GearSetGroup& group : groups) {
+            for (size_t i = 0; i < group.options.size(); ++i) {
+                if (*setId == group.options[i].entry->id) {
+                    selectedGroup = &group;
+                    selectedEntry = group.options[i].entry;
+                    selectedOptionIndex = static_cast<int>(i);
+                    break;
+                }
+            }
+            if (selectedGroup) {
+                break;
+            }
+        }
+
+        const std::string preview = selectedGroup ? selectedGroup->label : GearSetPreview(*setId);
+
+        const std::string labelText(label);
+        const size_t idSeparator = labelText.find("##");
+        const std::string visibleLabel = idSeparator == std::string::npos ? labelText : labelText.substr(0, idSeparator);
+        const std::string idSuffix = idSeparator == std::string::npos ? labelText : labelText.substr(idSeparator + 2);
+        const std::string comboId = "##GearGroup" + idSuffix;
+
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(visibleLabel.c_str());
+        ImGui::SameLine(kGearEditorControlColumnX);
+
+        ImGui::PushItemWidth(kGearEditorControlWidth);
+        if (ImGui::BeginCombo(comboId.c_str(), preview.c_str())) {
+            for (const GearSetGroup& group : groups) {
+                const bool selected = selectedGroup && group.label == selectedGroup->label;
+                if (ImGui::Selectable(group.label.c_str(), selected)) {
+                    *setId = group.options.empty() ? *setId : group.options[0].entry->id;
+                    changed = true;
+                }
+                if (selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::PopItemWidth();
+
+        if (color) {
+            ImGui::SameLine(kGearEditorColorColumnX);
+            if (selectedEntry && selectedEntry->colorPartCount > 0) {
+                const std::string colorId = "##GearColor" + idSuffix;
+                const bool colorChanged = ImGui::ColorEdit3(
+                    colorId.c_str(),
+                    color,
+                    ImGuiColorEditFlags_Float | ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                if (outColorChanged && colorChanged) {
+                    *outColorChanged = true;
+                }
+                if (outColorEditFinished && ImGui::IsItemDeactivatedAfterEdit()) {
+                    *outColorEditFinished = true;
+                }
+            }
+            else {
+                ImGui::Dummy(ImVec2(kGearEditorColorSwatchSize, ImGui::GetFrameHeight()));
+            }
+        }
+
+        if (selectedGroup) {
+            ImGui::SameLine(color ? kGearEditorVariantColumnX : kGearEditorColorColumnX);
+            for (size_t i = 0; i < selectedGroup->options.size(); ++i) {
+                if (i > 0) {
+                    ImGui::SameLine();
+                }
+                const GearSetGroupOption& option = selectedGroup->options[i];
+                const bool selected = selectedOptionIndex == static_cast<int>(i);
+                if (selected) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+                }
+
+                std::string buttonLabel = std::to_string(i + 1) + "##" + std::string(label) + std::to_string(option.entry->id);
+                if (ImGui::Button(buttonLabel.c_str(), ImVec2(24.0f, 0.0f))) {
+                    *setId = option.entry->id;
+                    changed = true;
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", GearSetDisplayName(*option.entry).c_str());
+                }
+
+                if (selected) {
+                    ImGui::PopStyleColor();
+                }
+            }
+        }
+
+        return changed;
+    }
+
+    static void DecodeRgb24(uint32_t rgb, float outColor[3]) {
+        outColor[0] = static_cast<float>((rgb >> 16) & 0xff) / 255.0f;
+        outColor[1] = static_cast<float>((rgb >> 8) & 0xff) / 255.0f;
+        outColor[2] = static_cast<float>(rgb & 0xff) / 255.0f;
+    }
+
+    static uint32_t EncodeRgb24(const float color[3]) {
+        const uint32_t red = static_cast<uint32_t>(ClampFloat(color[0], 0.0f, 1.0f) * 255.0f + 0.5f);
+        const uint32_t green = static_cast<uint32_t>(ClampFloat(color[1], 0.0f, 1.0f) * 255.0f + 0.5f);
+        const uint32_t blue = static_cast<uint32_t>(ClampFloat(color[2], 0.0f, 1.0f) * 255.0f + 0.5f);
+        return (red << 16) | (green << 8) | blue;
+    }
+
+    static uint32_t ReadAppearanceColor(const uint16_t appearance[16], int wordIndex) {
+        uint32_t color = 0;
+        memcpy(&color, appearance + wordIndex, sizeof(color));
+        return color;
+    }
+
+    static void WriteAppearanceColor(uint16_t appearance[16], int wordIndex, uint32_t color) {
+        memcpy(appearance + wordIndex, &color, sizeof(color));
+    }
+}
+
+TweakableAppearanceReload::TweakableAppearanceReload(int id, const std::string& name)
+    : TweakableItem(id, name, TweakableType::Custom)
+    , m_appearance{}
+    , m_defaultAppearance{}
+    , m_riderGearIds{}
+    , m_bikeGearIds{}
+    , m_riderColors{}
+    , m_bikeColors{}
+    , m_hasAppearance(false)
+    , m_hasCapturedDefaults(false)
+    , m_dirty(false) {
+}
+
+bool TweakableAppearanceReload::LoadLiveAppearance() {
+    if (!GearCustomization::GetCurrentAppearanceData(m_appearance)) {
+        m_hasAppearance = false;
+        return false;
+    }
+
+    if (!m_hasCapturedDefaults) {
+        memcpy(m_defaultAppearance, m_appearance, sizeof(m_defaultAppearance));
+        m_hasCapturedDefaults = true;
+    }
+
+    DecodeGearFromAppearance();
+    DecodeColorsFromAppearance();
+    RefreshBikePartEditors();
+    m_hasAppearance = true;
+    m_dirty = false;
+    return true;
+}
+
+void TweakableAppearanceReload::DecodeColorsFromAppearance() {
+    for (int i = 0; i < 3; ++i) {
+        DecodeRgb24(ReadAppearanceColor(m_appearance, 4 + i * 2), m_riderColors[i]);
+    }
+    for (int i = 0; i < 2; ++i) {
+        DecodeRgb24(ReadAppearanceColor(m_appearance, 12 + i * 2), m_bikeColors[i]);
+    }
+}
+
+void TweakableAppearanceReload::DecodeGearFromAppearance() {
+    for (int i = 0; i < 3; ++i) {
+        m_riderGearIds[i] = m_appearance[i];
+    }
+    for (int i = 0; i < 2; ++i) {
+        m_bikeGearIds[i] = m_appearance[10 + i];
+    }
+}
+
+void TweakableAppearanceReload::EncodeColorsIntoAppearance() {
+    for (int i = 0; i < 3; ++i) {
+        WriteAppearanceColor(m_appearance, 4 + i * 2, EncodeRgb24(m_riderColors[i]));
+    }
+    for (int i = 0; i < 2; ++i) {
+        WriteAppearanceColor(m_appearance, 12 + i * 2, EncodeRgb24(m_bikeColors[i]));
+    }
+}
+
+void TweakableAppearanceReload::EncodeGearIntoAppearance() {
+    for (int i = 0; i < 3; ++i) {
+        int clampedGearId = m_riderGearIds[i];
+        if (clampedGearId < 0) {
+            clampedGearId = 0;
+        }
+        else if (clampedGearId > 0xffff) {
+            clampedGearId = 0xffff;
+        }
+        m_riderGearIds[i] = clampedGearId;
+        m_appearance[i] = static_cast<uint16_t>(clampedGearId);
+    }
+
+    for (int i = 0; i < 2; ++i) {
+        int clampedGearId = m_bikeGearIds[i];
+        if (clampedGearId < 0) {
+            clampedGearId = 0;
+        }
+        else if (clampedGearId > 0xffff) {
+            clampedGearId = 0xffff;
+        }
+        m_bikeGearIds[i] = clampedGearId;
+        m_appearance[10 + i] = static_cast<uint16_t>(clampedGearId);
+    }
+}
+
+void TweakableAppearanceReload::RefreshBikePartEditors() {
+    std::map<uint16_t, uint16_t> previousSources;
+    struct PreviousColorState {
+        uint32_t colors[3];
+        bool hasOverrides[3];
+    };
+    std::map<uint16_t, PreviousColorState> previousColors;
+    for (const BikePartEditorState& state : m_bikePartEditors) {
+        previousSources[state.targetItemId] = state.currentSourceItemId;
+        PreviousColorState colorState = {};
+        for (int i = 0; i < 3; ++i) {
+            colorState.colors[i] = EncodeRgb24(state.colors[i]);
+            colorState.hasOverrides[i] = state.hasColorOverrides[i];
+        }
+        previousColors[state.targetItemId] = colorState;
+    }
+
+    m_bikePartEditors.clear();
+
+    struct ActiveBikeChild {
+        uint16_t itemId;
+        int colorSlot;
+    };
+    std::vector<ActiveBikeChild> activeChildren;
+    bool hasPitViperChild = false;
+    for (int i = 0; i < 2; ++i) {
+        std::vector<uint16_t> children;
+        if (m_bikeGearIds[i] > 0
+            && GearCustomization::GetBikeGearSetChildren(static_cast<uint16_t>(m_bikeGearIds[i]), &children)) {
+            for (uint16_t child : children) {
+                activeChildren.push_back({ child, i });
+                const BikeItemCatalogEntry* childEntry = FindBikeCatalogEntry(child);
+                if (childEntry && std::string(childEntry->bikeKey) == "CHEETAH") {
+                    hasPitViperChild = true;
+                }
+            }
+        }
+    }
+
+    if (hasPitViperChild) {
+        const uint16_t pitViperEngineItemId = 147;
+        const bool alreadyHasPitViperEngine = std::any_of(activeChildren.begin(), activeChildren.end(), [](const ActiveBikeChild& child) {
+            const BikeItemCatalogEntry* childEntry = FindBikeCatalogEntry(child.itemId);
+            return childEntry
+                && std::string(childEntry->bikeKey) == "CHEETAH"
+                && std::string(childEntry->partKey) == "ENGINE";
+        });
+        if (!alreadyHasPitViperEngine) {
+            activeChildren.push_back({ pitViperEngineItemId, 1 });
+        }
+    }
+
+    for (const ActiveBikeChild& child : activeChildren) {
+        const uint16_t targetItemId = child.itemId;
+        const BikeItemCatalogEntry* targetEntry = FindBikeCatalogEntry(targetItemId);
+        if (!targetEntry) {
+            continue;
+        }
+
+        BikePartEditorState state = {};
+        state.targetItemId = targetItemId;
+        state.currentSourceItemId = targetItemId;
+        state.bikeKey = targetEntry->bikeKey;
+        state.partKey = targetEntry->partKey;
+        state.selectedIndex = 0;
+        // Bike appearance slots 12..15 are resolved variant IDs, not RGB colors.
+        // Leave per-part color neutral until the real bike color source is mapped.
+        for (int colorIndex = 0; colorIndex < 3; ++colorIndex) {
+            state.colors[colorIndex][0] = 1.0f;
+            state.colors[colorIndex][1] = 1.0f;
+            state.colors[colorIndex][2] = 1.0f;
+            state.hasColorOverrides[colorIndex] = false;
+        }
+        GearCustomization::GetHiddenObjectName(targetItemId, &state.nodeName);
+        if (state.nodeName.empty()) {
+            state.nodeName = state.partKey;
+        }
+
+        const auto previous = previousSources.find(targetItemId);
+        if (previous != previousSources.end()) {
+            state.currentSourceItemId = previous->second;
+        }
+
+        const auto previousColor = previousColors.find(targetItemId);
+        if (previousColor != previousColors.end()) {
+            for (int colorIndex = 0; colorIndex < 3; ++colorIndex) {
+                DecodeRgb24(previousColor->second.colors[colorIndex], state.colors[colorIndex]);
+                state.hasColorOverrides[colorIndex] = previousColor->second.hasOverrides[colorIndex];
+            }
+        }
+
+        for (size_t i = 0; i < kBikeItemCatalogCount; ++i) {
+            const BikeItemCatalogEntry& candidate = kBikeItemCatalog[i];
+            if (state.bikeKey == candidate.bikeKey && state.partKey == candidate.partKey) {
+                state.candidateItemIds.push_back(candidate.id);
+                if (candidate.id == state.currentSourceItemId) {
+                    state.selectedIndex = static_cast<int>(state.candidateItemIds.size()) - 1;
+                }
+            }
+        }
+
+        if (!state.candidateItemIds.empty()) {
+            m_bikePartEditors.push_back(state);
+        }
+    }
+}
+
+void TweakableAppearanceReload::Render() {
+    if (!m_hasAppearance && !LoadLiveAppearance()) {
+        ImGui::TextDisabled("%s unavailable (load into a track first)", m_name.c_str());
+        return;
+    }
+
+    bool gearChanged = false;
+    bool colorsChanged = false;
+    bool colorEditFinished = false;
+
+    gearChanged |= RenderGearSetCombo(
+        "Helmet##appearanceGearHelmet",
+        GearSetSlot::RiderHelmet,
+        &m_riderGearIds[0],
+        m_riderColors[0],
+        &colorsChanged,
+        &colorEditFinished);
+    gearChanged |= RenderGearSetCombo(
+        "Torso##appearanceGearTop",
+        GearSetSlot::RiderTop,
+        &m_riderGearIds[1],
+        m_riderColors[1],
+        &colorsChanged,
+        &colorEditFinished);
+    gearChanged |= RenderGearSetCombo(
+        "Legs##appearanceGearBottom",
+        GearSetSlot::RiderBottom,
+        &m_riderGearIds[2],
+        m_riderColors[2],
+        &colorsChanged,
+        &colorEditFinished);
+
+    gearChanged |= RenderGearSetCombo(
+        "Body kit##appearanceBikeGearBody",
+        GearSetSlot::BikeFairings,
+        &m_bikeGearIds[1],
+        m_bikeColors[1],
+        &colorsChanged,
+        &colorEditFinished);
+    gearChanged |= RenderGearSetCombo(
+        "Rims##appearanceBikeGearRims",
+        GearSetSlot::BikeWheels,
+        &m_bikeGearIds[0],
+        m_bikeColors[0],
+        &colorsChanged,
+        &colorEditFinished);
+    if (gearChanged) {
+        EncodeGearIntoAppearance();
+        EncodeColorsIntoAppearance();
+        RefreshBikePartEditors();
+        m_dirty = true;
+        Logging::WriteImmediate("[AppearanceApply] queueing direct gear customization update after gear change");
+        if (!GearCustomization::QueueAppearanceUpdate(m_appearance)) {
+            LOG_WARNING("[DevMenu] Failed to queue direct customization update after gear change");
+        }
+        else {
+            m_dirty = false;
+        }
+    }
+
+    if (colorsChanged) {
+        EncodeColorsIntoAppearance();
+        m_dirty = true;
+    }
+
+    if (colorEditFinished) {
+        EncodeGearIntoAppearance();
+        EncodeColorsIntoAppearance();
+        m_dirty = true;
+        if (!GearCustomization::QueueAppearanceUpdate(m_appearance)) {
+            LOG_WARNING("[DevMenu] Failed to queue direct customization update after edit");
+        }
+        else {
+            m_dirty = false;
+        }
+    }
+
+    if (!m_bikePartEditors.empty()) {
+        ImGui::Spacing();
+        for (BikePartEditorState& state : m_bikePartEditors) {
+            if (state.candidateItemIds.empty()) {
+                continue;
+            }
+
+            const BikeItemCatalogEntry* selectedEntry = FindBikeCatalogEntry(state.currentSourceItemId);
+            if (!selectedEntry) {
+                selectedEntry = FindBikeCatalogEntry(state.candidateItemIds[0]);
+            }
+            if (!selectedEntry) {
+                continue;
+            }
+
+            auto selectBikePartOption = [&](const BikeItemCatalogEntry& option) {
+                const uint16_t previousTargetItemId = state.targetItemId;
+                state.currentSourceItemId = option.id;
+                uint32_t color = 0x00ffffff;
+                bool hasColorOverride = false;
+                if (option.colorPartCount > 0) {
+                    for (int colorIndex = 0; colorIndex < kBikePartMaxColorParts; ++colorIndex) {
+                        if (state.hasColorOverrides[colorIndex]) {
+                            color = EncodeRgb24(state.colors[colorIndex]);
+                            hasColorOverride = true;
+                            break;
+                        }
+                    }
+                }
+                if (hasColorOverride) {
+                    GearCustomization::SetBikeChildColorOverride(previousTargetItemId, color);
+                }
+
+                bool payloadPatchQueued = false;
+                if (!GearCustomization::CopyHiddenObjectVisualPayload(
+                        previousTargetItemId,
+                        state.currentSourceItemId,
+                        &payloadPatchQueued)) {
+                    LOG_WARNING("[DevMenu] Failed to queue bike child visual payload copy");
+                }
+                if (payloadPatchQueued) {
+                    if (!GearCustomization::QueueBikeChildItemOverride(0, previousTargetItemId, color)) {
+                        LOG_WARNING("[DevMenu] Failed to queue bike child item refresh");
+                    }
+                }
+                else if (previousTargetItemId != state.currentSourceItemId) {
+                    if (!GearCustomization::ReplaceCurrentBikeGearSetChild(previousTargetItemId, state.currentSourceItemId)) {
+                        LOG_WARNING("[DevMenu] Failed to queue bike child set replacement");
+                    }
+                    if (hasColorOverride) {
+                        GearCustomization::SetBikeChildColorOverride(state.currentSourceItemId, color);
+                    }
+                    if (std::string(option.partKey) != "ENGINE"
+                        && !GearCustomization::QueueBikeChildItemOverride(previousTargetItemId, state.currentSourceItemId, color)) {
+                        LOG_WARNING("[DevMenu] Failed to queue replacement bike child item refresh");
+                    }
+                    state.targetItemId = state.currentSourceItemId;
+                }
+            };
+
+            const std::string label = PrettyPartName(state.partKey);
+            const std::string comboId = "##BikePartGroup" + std::to_string(state.targetItemId);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(label.c_str());
+            ImGui::SameLine(kGearEditorControlColumnX);
+
+            const std::string preview = BikeItemGroupLabel(*selectedEntry);
+            ImGui::TextUnformatted(preview.c_str());
+
+            ImGui::SameLine(kGearEditorColorColumnX);
+            const int colorPartCount = std::min<int>(selectedEntry->colorPartCount, kBikePartMaxColorParts);
+            for (int colorIndex = 0; colorIndex < kBikePartMaxColorParts; ++colorIndex) {
+                if (colorIndex > 0) {
+                    ImGui::SameLine();
+                }
+
+                if (colorIndex >= colorPartCount) {
+                    ImGui::Dummy(ImVec2(kGearEditorColorSwatchSize, ImGui::GetFrameHeight()));
+                    continue;
+                }
+
+                const std::string colorId =
+                    "##BikePartColor" + std::to_string(state.targetItemId) + "_" + std::to_string(colorIndex);
+                if (ImGui::ColorEdit3(
+                        colorId.c_str(),
+                        state.colors[colorIndex],
+                        ImGuiColorEditFlags_Float | ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel)) {
+                    state.hasColorOverrides[colorIndex] = true;
+                    GearCustomization::SetBikeChildColorOverride(state.targetItemId, EncodeRgb24(state.colors[colorIndex]));
+                }
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    state.hasColorOverrides[colorIndex] = true;
+                    const uint32_t color = EncodeRgb24(state.colors[colorIndex]);
+                    GearCustomization::SetBikeChildColorOverride(state.targetItemId, color);
+                    if (!GearCustomization::QueueBikeChildItemOverride(0, state.targetItemId, color)) {
+                        LOG_WARNING("[DevMenu] Failed to queue bike child color update");
+                    }
+                }
+                if (ImGui::IsItemHovered() && colorPartCount > 1) {
+                    ImGui::SetTooltip("Color part %d", colorIndex + 1);
+                }
+            }
+
+            ImGui::SameLine(kGearEditorVariantColumnX);
+            for (size_t i = 0; i < state.candidateItemIds.size(); ++i) {
+                if (i > 0) {
+                    ImGui::SameLine();
+                }
+
+                const BikeItemCatalogEntry* option = FindBikeCatalogEntry(state.candidateItemIds[i]);
+                if (!option) {
+                    continue;
+                }
+
+                const bool selected = state.currentSourceItemId == option->id;
+                if (selected) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+                }
+
+                const std::string buttonLabel =
+                    std::to_string(i + 1) + "##BikePart" + std::to_string(state.targetItemId) + "_" + std::to_string(option->id);
+                if (ImGui::Button(buttonLabel.c_str(), ImVec2(24.0f, 0.0f))) {
+                    state.selectedIndex = static_cast<int>(i);
+                    selectBikePartOption(*option);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", BikeItemDisplayName(*option).c_str());
+                }
+
+                if (selected) {
+                    ImGui::PopStyleColor();
+                }
+            }
+        }
+    }
+
+}
+
+void TweakableAppearanceReload::Reset() {
+    if (!m_hasCapturedDefaults) {
+        return;
+    }
+
+    memcpy(m_appearance, m_defaultAppearance, sizeof(m_appearance));
+    DecodeGearFromAppearance();
+    DecodeColorsFromAppearance();
+    m_hasAppearance = true;
+    m_dirty = false;
+}
+
+void TweakableAppearanceReload::ResetToDefault() {
+    Reset();
+    if (m_hasAppearance && !GearCustomization::QueueAppearanceUpdate(m_appearance)) {
+        LOG_WARNING("[DevMenu] Failed to queue default customization update");
+    }
+}
+
+void TweakableUIViewExplorer::Render() {
+#ifdef DEVELOPMENT_MODE
+    UIViewExplorer::RenderImGui();
+#else
+    ImGui::TextDisabled("UI View Explorer is available in DEVELOPMENT_MODE builds.");
+#endif
+}
+
+void TweakableFmodControls::Render() {
+    ImGui::TextUnformatted(Fmod::GetStatusString());
+    ImGui::SameLine();
+    ImGui::TextDisabled("(last result: %d)", Fmod::GetLastResult());
+
+    const bool eventsMuted = Fmod::AreEventsMuted();
+    const char* eventButtonLabel = eventsMuted
+        ? "Restore Audio Events##FmodEvents"
+        : "Mute Audio Events##FmodEvents";
+    if (ImGui::Button(eventButtonLabel, ImVec2(180.0f, 0.0f))) {
+        if (!Fmod::ToggleEventsMuted()) {
+            LOG_WARNING("[DevMenu] FMOD audio event toggle is pending until FMOD is resolved");
+        }
+    }
+
+    const bool muteOnStartup = Fmod::IsMuteOnStartupEnabled();
+    const char* startupButtonLabel = muteOnStartup
+        ? "Disable Startup Mute##FmodStartup"
+        : "Enable Startup Mute##FmodStartup";
+    ImGui::SameLine();
+    if (ImGui::Button(startupButtonLabel, ImVec2(180.0f, 0.0f))) {
+        Fmod::ToggleMuteOnStartup();
+    }
+
+    ImGui::TextDisabled("%s", Fmod::GetStartupMuteStatusString());
 }
 
 // TweakableFolder Implementation
@@ -3955,8 +4854,45 @@ void DevMenu::InitializeMod() {
     RegisterTweakable(tireColor);
     appearanceFolder->AddChild(tireColor);
 
+    auto appearanceReload = std::make_shared<TweakableAppearanceReload>(
+        10072,
+        "Rider / Bike Tint Refresh"
+    );
+    RegisterTweakable(appearanceReload);
+    appearanceFolder->AddChild(appearanceReload);
+
     RegisterTweakable(appearanceFolder);
     mod->AddChild(appearanceFolder);
+
+    // ============================================================================
+    // UI / AVM1 Discovery Subcategory
+    // ============================================================================
+    auto uiExplorerFolder = std::make_shared<TweakableFolder>(10080, "UI View Explorer");
+
+    auto uiExplorer = std::make_shared<TweakableUIViewExplorer>(
+        10081,
+        "Live Object Probe"
+    );
+    RegisterTweakable(uiExplorer);
+    uiExplorerFolder->AddChild(uiExplorer);
+
+    RegisterTweakable(uiExplorerFolder);
+    mod->AddChild(uiExplorerFolder);
+
+    // ============================================================================
+    // FMOD Subcategory
+    // ============================================================================
+    auto fmodFolder = std::make_shared<TweakableFolder>(10090, "FMOD");
+
+    auto fmodControls = std::make_shared<TweakableFmodControls>(
+        10091,
+        "FMOD Controls"
+    );
+    RegisterTweakable(fmodControls);
+    fmodFolder->AddChild(fmodControls);
+
+    RegisterTweakable(fmodFolder);
+    mod->AddChild(fmodFolder);
 
     // ============================================================================
     // Checkpoint Subcategory
@@ -4623,6 +5559,7 @@ void DevMenu::InitializeKeybindings() {
     static bool waitingForSwapNextBike = false;
     static bool waitingForSwapPrevBike = false;
     static bool waitingForDebugBikeInfo = false;
+    static bool waitingForToggleConsole = false;
     
     // Clear the action and default vectors in case of re-initialization
     m_keybindingActions.clear();
@@ -4650,6 +5587,15 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(toggleOverlayBtn);
     m_keybindingActions.push_back(Keybindings::Action::ToggleOverlay);
     m_keybindingDefaults.push_back(VK_F4);
+
+#ifdef DEVELOPMENT_MODE
+    // Toggle ImGui Console
+    auto toggleConsoleBtn = CreateKeybindButton(10148, Keybindings::Action::ToggleConsole, &waitingForToggleConsole, this);
+    RegisterTweakable(toggleConsoleBtn);
+    m_keybindingItems.push_back(toggleConsoleBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ToggleConsole);
+    m_keybindingDefaults.push_back(VK_F11);
+#endif
     
 #ifndef RELEASE_AUTOLOAD_MODE
     // Clear Console

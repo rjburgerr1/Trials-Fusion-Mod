@@ -1,0 +1,1313 @@
+<gear>
+	<riders>
+		<rider name="ridergear_category_techboy" genKey="TECHBOY" id="1" icon="images\garage\rider\Tech_Boy.png">
+			<groups>
+				<group name="TOP">
+					<set id="1"/>
+					<set id="2"/>
+					<set id="3"/>
+				</group>
+				<group name="BOTTOM">
+					<set id="4"/>
+					<set id="5"/>
+					<set id="6"/>
+				</group>
+				<group name="HELMET">
+					<set id="7"/>
+					<set id="8"/>
+					<set id="9"/>
+				</group>
+			</groups>
+		</rider>
+		<rider name="ridergear_category_evil" genKey="EVEL" id="7" icon="images\garage\rider\EvelKnievel.png">
+			<groups>
+				<group name="TOP">
+					<set id="11"/>
+				</group>
+				<group name="HELMET">
+					<set id="12"/>
+				</group>
+				<group name="BOTTOM">
+					<set id="13"/>
+				</group>
+			</groups>
+		</rider>
+		<rider name="ridergear_category_dirtrunner" genKey="DIRTRUNNER" id="2" icon="images\garage\rider\Dirt_Runner.png">
+			<groups>
+				<group name="TOP">
+					<set id="14"/>
+					<set id="15"/>
+					<set id="16"/>
+				</group>
+				<group name="BOTTOM">
+					<set id="17"/>
+					<set id="18"/>
+					<set id="19"/>
+				</group>
+				<group name="HELMET">
+					<set id="20"/>
+					<set id="21"/>
+					<set id="22"/>
+				</group>
+			</groups>
+		</rider>
+		<rider name="ridergear_category_xpolice" genKey="XPOLICE" id="3" icon="images\garage\rider\XPolice.png">
+			<groups>
+				<group name="BOTTOM">
+					<set id="23"/>
+					<set id="24"/>
+					<set id="25"/>
+				</group>
+				<group name="HELMET">
+					<set id="26"/>
+					<set id="27"/>
+					<set id="28"/>
+				</group>
+				<group name="TOP">
+					<set id="29"/>
+					<set id="30"/>
+					<set id="31"/>
+				</group>
+			</groups>
+		</rider>
+		<rider name="ridergear_category_fmxfreak" genKey="FMX" id="4" icon="images\garage\rider\FMX_Freak.png">
+			<groups>
+				<group name="TOP">
+					<set id="32"/>
+					<set id="33"/>
+					<set id="34"/>
+				</group>
+				<group name="BOTTOM">
+					<set id="35"/>
+					<set id="36"/>
+					<set id="37"/>
+				</group>
+				<group name="HELMET">
+					<set id="38"/>
+					<set id="39"/>
+					<set id="40"/>
+				</group>
+			</groups>
+		</rider>
+		<rider name="ridergear_category_geologist" genKey="GEOLOGIST" id="5" icon="images\garage\rider\Geologist.png">
+			<groups>
+				<group name="TOP">
+					<set id="41"/>
+					<set id="42"/>
+					<set id="43"/>
+				</group>
+				<group name="BOTTOM">
+					<set id="44"/>
+					<set id="45"/>
+					<set id="46"/>
+				</group>
+				<group name="HELMET">
+					<set id="47"/>
+					<set id="48"/>
+					<set id="49"/>
+				</group>
+			</groups>
+		</rider>	
+		<rider name="ULC_HAZMAT" genKey="HAZMASUIT" id="8" icon="images\garage\rider\HazmaSuit.png">
+			<groups>
+				<group name="BOTTOM">
+					<set id="91"/>
+				</group>
+				<group name="HELMET">
+					<set id="92"/>
+				</group>
+				<group name="TOP">
+					<set id="93"/>
+				</group>
+			</groups>
+		</rider>
+		<rider name="ULC_CAPE" genKey="SUPERHERO" id="11" icon="images\garage\rider\SuperHero.png">
+			<groups>
+				<group name="HELMET">
+					<set id="96"/>
+				</group>
+				<group name="TOP">
+					<set id="97"/>
+				</group>
+			</groups>
+		</rider>
+		<rider name="ridergear_category_squirrel" genKey="SQUIRREL" id="6" icon="images\garage\rider\Squirrel.png">
+			<groups>
+				<group name="HELMET">
+					<set id="10"/>
+				</group>
+			</groups>
+		</rider>		
+		<rider name="UPLAYREWARD_20POINTS" genKey="CLOWN" id="13" icon="images\garage\rider\Clown.png">
+			<groups>
+				<group name="HELMET">
+					<set id="98"/>				
+				</group>
+			</groups>
+		</rider>		
+		<rider name="ULC_DRINK" genKey="DRINK" id="14" icon="images\garage\rider\Drink.png">
+			<groups>
+				<group name="HELMET">
+					<set id="99"/>				
+				</group>
+			</groups>
+		</rider>		
+		<rider name="ULC_RHINO" genKey="RHINO" id="12" icon="images\garage\rider\Rhino.png">
+			<groups>
+				<group name="HELMET">
+					<set id="100"/>					
+				</group>
+			</groups>
+		</rider>
+	</riders>
+	<bikes>
+		<bike name="BIKE_MX_NAME" genKey="KINGCOBRA" id="2" objectId="3042773437">
+			<groups>
+				<group name="BodyKits">
+					<set id="50"/>
+					<set id="51"/>
+					<set id="52"/>
+					<set id="53"/>
+					<set id="54"/>
+					<set id="101"/>					
+				</group>
+				<group name="Rims">
+					<set id="55"/>
+					<set id="56"/>
+					<set id="57"/>
+					<set id="58"/>
+					<set id="59"/>
+					<set id="60"/>
+					<set id="61"/>
+					<set id="102"/>					
+				</group>
+			</groups>
+		</bike>
+		<bike name="BIKE_TRIALS_NAME" genKey="CHEETAH" id="3" objectId="4212178080">
+			<groups>
+				<group name="Rims">
+					<set id="62"/>
+					<set id="66"/>
+					<set id="67"/>
+					<set id="68"/>
+					<set id="69"/>
+					<set id="70"/>
+					<set id="71"/>
+				</group>
+				<group name="BodyKits">
+					<set id="63"/>
+					<set id="64"/>
+					<set id="65"/>
+					<set id="72"/>
+					<set id="73"/>
+					<set id="103"/>					
+				</group>
+			</groups>
+		</bike>
+		<bike name="BIKE_BEGINNER_NAME" genKey="MINX" id="1" objectId="2489512951">
+			<groups>
+				<group name="BodyKits">
+					<set id="74"/>
+				</group>
+				<group name="Rims">
+					<set id="75"/>
+					<set id="76"/>
+					<set id="77"/>
+					<set id="78"/>
+					<set id="79"/>
+					<set id="80"/>
+					<set id="81"/>
+				</group>
+			</groups>
+		</bike>
+		<bike name="BIKE_QUAD_NAME" genKey="FAT" id="5" objectId="698370663">
+			<groups>
+				<group name="BodyKits">
+					<set id="82"/>
+				</group>
+				<group name="Rims">
+					<set id="83"/>
+				</group>
+			</groups>
+		</bike>
+		<bike name="BIKE_BMX_NAME" genKey="PAPER" id="6" objectId="527361418">
+			<groups>
+				<group name="BodyKits">
+					<set id="84"/>
+				</group>
+				<group name="Rims">
+					<set id="85"/>
+				</group>
+			</groups>
+		</bike>
+		<bike name="BIKE_FMX_NAME" genKey="TRICKY" id="4" objectId="456969479">
+			<groups>
+				<group name="BodyKits">
+					<set id="86"/>
+					<set id="87"/>
+					<set id="88"/>
+					<set id="89"/>
+					<set id="104"/>					
+				</group>
+				<group name="Rims">
+					<set id="90"/>
+					<set id="106"/>
+					<set id="107"/>
+					<set id="108"/>
+					<set id="109"/>
+					<set id="110"/>
+					<set id="111"/>
+					<set id="105"/>					
+				</group>
+			</groups>
+		</bike>
+	</bikes>
+	<sets>
+		<set id="1" name="ridergear_clothing_body" genKey="TECHBOY_TOP_1" icon="images\garage\rider\Techboy_A_Body.png" type="rider" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="1" genKey="TECHBOY_TOP_1"/>
+		</set>
+		<set id="2" name="ridergear_clothing_body" genKey="TECHBOY_TOP_2" icon="images\garage\rider\Techboy_B_Body.png" type="rider" price="9000" expLevelReq="20" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="2" genKey="TECHBOY_TOP_2"/>
+		</set>
+		<set id="3" name="ridergear_clothing_body" genKey="TECHBOY_TOP_4" icon="images\garage\rider\Techboy_C_Body.png" type="rider" price="28000" expLevelReq="100" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="3" genKey="TECHBOY_TOP_4"/>
+		</set>
+		<set id="4" name="ridergear_clothing_legs" genKey="TECHBOY_BOTTOM_1" icon="images\garage\rider\Techboy_A_Pants.png" type="rider" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="4" genKey="TECHBOY_BOTTOM_1"/>
+		</set>
+		<set id="5" name="ridergear_clothing_legs" genKey="TECHBOY_BOTTOM_2" icon="images\garage\rider\Techboy_B_Pants.png" type="rider" price="9000" expLevelReq="20" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="5" genKey="TECHBOY_BOTTOM_2"/>
+		</set>
+		<set id="6" name="ridergear_clothing_legs" genKey="TECHBOY_BOTTOM_4" icon="images\garage\rider\Techboy_C_Pants.png" type="rider" price="28000" expLevelReq="100" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="6" genKey="TECHBOY_BOTTOM_4"/>
+		</set>
+		<set id="7" name="ridergear_clothing_head" genKey="TECHBOY_HELMET_1" icon="images\garage\rider\Techboy_A_Head.png" type="rider" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="7" genKey="TECHBOY_HEAD_1"/>
+		</set>
+		<set id="8" name="ridergear_clothing_head" genKey="TECHBOY_HELMET_2" icon="images\garage\rider\Techboy_B_Head.png" type="rider" price="9000" expLevelReq="20" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="8" genKey="TECHBOY_HEAD_2"/>
+		</set>
+		<set id="9" name="ridergear_clothing_head" genKey="TECHBOY_HELMET_4" icon="images\garage\rider\Techboy_C_Head.png" type="rider" price="28000" expLevelReq="100" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="9" genKey="TECHBOY_HEAD_4"/>
+		</set>
+		<set id="10" name="ridergear_clothing_head" genKey="SQUIRREL_HELMET_1" icon="images\garage\rider\Squirrel_Head.png" type="rider" price="0" expLevelReq="0" alwaysLocked="1" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="10" genKey="SQUIRREL_HELMET_1"/>
+		</set>
+		<set id="11" name="ridergear_clothing_body" genKey="EVEL_TOP_1" icon="images\garage\rider\EvelKnievel_Body.png" type="rider" price="0" expLevelReq="0" alwaysLocked="1" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="11" genKey="EVEL_KNIEVEL_TOPS_1"/>
+		</set>
+		<set id="12" name="ridergear_clothing_head" genKey="EVEL_HELMET_1" icon="images\garage\rider\EvelKnievel_Head.png" type="rider" price="0" expLevelReq="0" alwaysLocked="1" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="12" genKey="EVEL_KNIEVEL_HELMETS_1"/>
+		</set>
+		<set id="13" name="ridergear_clothing_legs" genKey="EVEL_BOTTOM_1" icon="images\garage\rider\EvelKnievel_Pants.png" type="rider" price="0" expLevelReq="0" alwaysLocked="1" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="13" genKey="EVEL_KNIEVEL_BOTTOMS_1"/>
+		</set>
+		<set id="14" name="ridergear_clothing_body" genKey="DIRTRUNNER_TOP_1" icon="images\garage\rider\DirtRunner_A_Body.png" type="rider" price="1500" expLevelReq="10" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="14" genKey="DIRTRUNNER_TOPS_1"/>
+		</set>
+		<set id="15" name="ridergear_clothing_body" genKey="DIRTRUNNER_TOP_2" icon="images\garage\rider\DirtRunner_B_Body.png" type="rider" price="6000" expLevelReq="30" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="15" genKey="DIRTRUNNER_TOPS_2"/>
+		</set>
+		<set id="16" name="ridergear_clothing_body" genKey="DIRTRUNNER_TOP_4" icon="images\garage\rider\DirtRunner_C_Body.png" type="rider" price="11000" expLevelReq="80" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="16" genKey="DIRTRUNNER_TOPS_4"/>
+		</set>
+		<set id="17" name="ridergear_clothing_legs" genKey="DIRTRUNNER_BOTTOM_1" icon="images\garage\rider\DirtRunner_A_Pants.png" type="rider" price="1500" expLevelReq="10" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="17" genKey="DIRTRUNNER_BOTTOMS_1"/>
+		</set>
+		<set id="18" name="ridergear_clothing_legs" genKey="DIRTRUNNER_BOTTOM_2" icon="images\garage\rider\DirtRunner_B_Pants.png" type="rider" price="6000" expLevelReq="30" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="18" genKey="DIRTRUNNER_BOTTOMS_2"/>
+		</set>
+		<set id="19" name="ridergear_clothing_legs" genKey="DIRTRUNNER_BOTTOM_4" icon="images\garage\rider\DirtRunner_C_Pants.png" type="rider" price="11000" expLevelReq="80" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="19" genKey="DIRTRUNNER_BOTTOMS_4"/>
+		</set>
+		<set id="20" name="ridergear_clothing_head" genKey="DIRTRUNNER_HELMET_1" icon="images\garage\rider\DirtRunner_A_Head.png" type="rider" price="1500" expLevelReq="10" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="20" genKey="DIRTRUNNER_HELMETS_1"/>
+		</set>
+		<set id="21" name="ridergear_clothing_head" genKey="DIRTRUNNER_HELMET_2" icon="images\garage\rider\DirtRunner_B_Head.png" type="rider" price="6000" expLevelReq="30" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="21" genKey="DIRTRUNNER_HELMETS_2"/>
+		</set>
+		<set id="22" name="ridergear_clothing_head" genKey="DIRTRUNNER_HELMET_4" icon="images\garage\rider\DirtRunner_C_Head.png" type="rider" price="11000" expLevelReq="80" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="22" genKey="DIRTRUNNER_HELMETS_4"/>
+		</set>
+		<set id="23" name="ridergear_clothing_legs" genKey="XPOLICE_BOTTOM_1" icon="images\garage\rider\XPolice_A_Pants.png" type="rider" price="5000" expLevelReq="24" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="23" genKey="XPOLICE_BOTTOM_1"/>
+		</set>
+		<set id="24" name="ridergear_clothing_legs" genKey="XPOLICE_BOTTOM_2" icon="images\garage\rider\XPolice_B_Pants.png" type="rider" price="8000" expLevelReq="44" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="24" genKey="XPOLICE_BOTTOM_2"/>
+		</set>
+		<set id="25" name="ridergear_clothing_legs" genKey="XPOLICE_BOTTOM_4" icon="images\garage\rider\XPolice_C_Pants.png" type="rider" price="14000" expLevelReq="60" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="25" genKey="XPOLICE_BOTTOM_4"/>
+		</set>
+		<set id="26" name="ridergear_clothing_head" genKey="XPOLICE_HELMET_1" icon="images\garage\rider\XPolice_A_Head.png" type="rider" price="5000" expLevelReq="24" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="26" genKey="XPOLICE_HELMETS_1"/>
+		</set>
+		<set id="27" name="ridergear_clothing_head" genKey="XPOLICE_HELMET_2" icon="images\garage\rider\XPolice_B_Head.png" type="rider" price="8000" expLevelReq="44" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="27" genKey="XPOLICE_HELMETS_2"/>
+		</set>
+		<set id="28" name="ridergear_clothing_head" genKey="XPOLICE_HELMET_4" icon="images\garage\rider\XPolice_C_Head.png" type="rider" price="14000" expLevelReq="60" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="28" genKey="XPOLICE_HELMETS_4"/>
+		</set>
+		<set id="29" name="ridergear_clothing_body" genKey="XPOLICE_TOP_1" icon="images\garage\rider\XPolice_A_Body.png" type="rider" price="5000" expLevelReq="24" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="29" genKey="XPOLICE_TOPS_1"/>
+		</set>
+		<set id="30" name="ridergear_clothing_body" genKey="XPOLICE_TOP_2" icon="images\garage\rider\XPolice_B_Body.png" type="rider" price="8000" expLevelReq="44" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="30" genKey="XPOLICE_TOPS_2"/>
+		</set>
+		<set id="31" name="ridergear_clothing_body" genKey="XPOLICE_TOP_4" icon="images\garage\rider\XPolice_C_Body.png" type="rider" price="14000" expLevelReq="60" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="31" genKey="XPOLICE_TOPS_4"/>
+		</set>
+		<set id="32" name="ridergear_clothing_body" genKey="FMX_TOP_1" icon="images\garage\rider\FMX_Freak_A_Body.png" type="rider" price="1000" expLevelReq="6" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="32" genKey="FMX_FREAK_TOP_1"/>
+		</set>
+		<set id="33" name="ridergear_clothing_body" genKey="FMX_TOP_2" icon="images\garage\rider\FMX_Freak_B_Body.png" type="rider" price="1500" expLevelReq="18" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="33" genKey="FMX_FREAK_TOP_2"/>
+		</set>
+		<set id="34" name="ridergear_clothing_body" genKey="FMX_TOP_4" icon="images\garage\rider\FMX_Freak_C_Body.png" type="rider" price="3500" expLevelReq="50" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="34" genKey="FMX_FREAK_TOP_4"/>
+		</set>
+		<set id="35" name="ridergear_clothing_legs" genKey="FMX_BOTTOM_1" icon="images\garage\rider\FMX_Freak_A_Pants.png" type="rider" price="1000" expLevelReq="6" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="35" genKey="FMX_FREAK_BOTTOM_1"/>
+		</set>
+		<set id="36" name="ridergear_clothing_legs" genKey="FMX_BOTTOM_2" icon="images\garage\rider\FMX_Freak_B_Pants.png" type="rider" price="1500" expLevelReq="18" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="36" genKey="FMX_FREAK_BOTTOM_2"/>
+		</set>
+		<set id="37" name="ridergear_clothing_legs" genKey="FMX_BOTTOM_4" icon="images\garage\rider\FMX_Freak_C_Pants.png" type="rider" price="3500" expLevelReq="50" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="37" genKey="FMX_FREAK_BOTTOM_4"/>
+		</set>
+		<set id="38" name="ridergear_clothing_head" genKey="FMX_HELMET_1" icon="images\garage\rider\FMX_Freak_A_Head.png" type="rider" price="1000" expLevelReq="6" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="38" genKey="FMX_FREAK_HELMET_1"/>
+		</set>
+		<set id="39" name="ridergear_clothing_head" genKey="FMX_HELMET_2" icon="images\garage\rider\FMX_Freak_B_Head.png" type="rider" price="1500" expLevelReq="18" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="39" genKey="FMX_FREAK_HELMET_2"/>
+		</set>
+		<set id="40" name="ridergear_clothing_head" genKey="FMX_HELMET_4" icon="images\garage\rider\FMX_Freak_C_Head.png" type="rider" price="3500" expLevelReq="50" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="40" genKey="FMX_FREAK_HELMET_4"/>
+		</set>
+		<set id="41" name="ridergear_clothing_body" genKey="GEOLOGIST_TOP_1" icon="images\garage\rider\Geologist_A_Body.png" type="rider" price="2000" expLevelReq="14" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="41" genKey="GEOLOGIST_TOP_1"/>
+		</set>
+		<set id="42" name="ridergear_clothing_body" genKey="GEOLOGIST_TOP_2" icon="images\garage\rider\Geologist_B_Body.png" type="rider" price="5500" expLevelReq="26" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="42" genKey="GEOLOGIST_TOP_2"/>
+		</set>
+		<set id="43" name="ridergear_clothing_body" genKey="GEOLOGIST_TOP_4" icon="images\garage\rider\Geologist_C_Body.png" type="rider" price="17000" expLevelReq="52" alwaysLocked="0" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="43" genKey="GEOLOGIST_TOP_4"/>
+		</set>
+		<set id="44" name="ridergear_clothing_legs" genKey="GEOLOGIST_BOTTOM_1" icon="images\garage\rider\Geologist_A_Pants.png" type="rider" price="2000" expLevelReq="14" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="44" genKey="GEOLOGIST_BOTTOM_1"/>
+		</set>
+		<set id="45" name="ridergear_clothing_legs" genKey="GEOLOGIST_BOTTOM_2" icon="images\garage\rider\Geologist_B_Pants.png" type="rider" price="5500" expLevelReq="26" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="45" genKey="GEOLOGIST_BOTTOM_2"/>
+		</set>
+		<set id="46" name="ridergear_clothing_legs" genKey="GEOLOGIST_BOTTOM_4" icon="images\garage\rider\Geologist_C_Pants.png" type="rider" price="17000" expLevelReq="52" alwaysLocked="0" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="46" genKey="GEOLOGIST_BOTTOM_4"/>
+		</set>
+		<set id="47" name="ridergear_clothing_head" genKey="GEOLOGIST_HELMET_1" icon="images\garage\rider\Geologist_A_Head.png" type="rider" price="2000" expLevelReq="14" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="47" genKey="GEOLOGIST_HELMET_1"/>
+		</set>
+		<set id="48" name="ridergear_clothing_head" genKey="GEOLOGIST_HELMET_2" icon="images\garage\rider\Geologist_B_Head.png" type="rider" price="5500" expLevelReq="26" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="48" genKey="GEOLOGIST_HELMET_2"/>
+		</set>
+		<set id="49" name="ridergear_clothing_head" genKey="GEOLOGIST_HELMET_4" icon="images\garage\rider\Geologist_C_Head.png" type="rider" price="17000" expLevelReq="52" alwaysLocked="0" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="49" genKey="GEOLOGIST_HELMET_4"/>
+		</set>
+		<set id="50" name="bike_category_bodykit_1" genKey="KINGCOBRA_FAIRINGS_1" icon="images\garage\bike\upgrades\KingCobra_1.png" type="bike" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="FRONT_LIGHT" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="55" genKey="KINGCOBRA_FRAME_1_1"/>		
+			<item id="91" genKey="KINGCOBRA_FRONT_SUSPENSION_1_1"/>
+			<item id="79" genKey="KINGCOBRA_REAR_FENDER_1_1"/>			
+			<item id="74" genKey="KINGCOBRA_EXHAUST_PIPE_1_1"/>			
+			<item id="69" genKey="KINGCOBRA_SEAT_1_1"/>			
+			<item id="84" genKey="KINGCOBRA_STEERING_1_1"/>			
+			<item id="100" genKey="KINGCOBRA_SWING_ARM_1_1"/>			
+			<item id="56" genKey="KINGCOBRA_ENGINE_FENDER_1_1"/>			
+			<item id="90" genKey="KINGCOBRA_ENGINE_1_1"/>			
+			<item id="50" genKey="KINGCOBRA_HEAD_LIGHT_1_1"/>
+			<item id="85" genKey="KINGCOBRA_FRONT_FENDER_1_1"/>
+		</set>
+		<set id="51" name="bike_category_bodykit_2" genKey="KINGCOBRA_FAIRINGS_2" icon="images\garage\bike\upgrades\KingCobra_2.png" type="bike" price="1000" expLevelReq="0" medalReq="1504" alwaysLocked="0" cameraTarget="FRONT_LIGHT" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="55" genKey="KINGCOBRA_FRAME_1_1"/>
+			<item id="91" genKey="KINGCOBRA_FRONT_SUSPENSION_1_1"/>			
+			<item id="80" genKey="KINGCOBRA_REAR_FENDER_1_2"/>			
+			<item id="75" genKey="KINGCOBRA_EXHAUST_PIPE_1_2"/>			
+			<item id="70" genKey="KINGCOBRA_SEAT_1_2"/>			
+			<item id="84" genKey="KINGCOBRA_STEERING_1_1"/>			
+			<item id="268" genKey="KINGCOBRA_SWING_ARM_1_2"/>			
+			<item id="57" genKey="KINGCOBRA_ENGINE_FENDER_1_2"/>			
+			<item id="90" genKey="KINGCOBRA_ENGINE_1_1"/>			
+			<item id="51" genKey="KINGCOBRA_HEAD_LIGHT_1_2"/>
+			<item id="86" genKey="KINGCOBRA_FRONT_FENDER_1_2"/>
+		</set>
+		<set id="52" name="bike_category_bodykit_3" genKey="KINGCOBRA_FAIRINGS_4" icon="images\garage\bike\upgrades\KingCobra_3.png" type="bike" price="2000" expLevelReq="0" medalReq="1503" alwaysLocked="0" cameraTarget="FRONT_LIGHT" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="55" genKey="KINGCOBRA_FRAME_1_1"/>
+			<item id="91" genKey="KINGCOBRA_FRONT_SUSPENSION_1_1"/>			
+			<item id="81" genKey="KINGCOBRA_REAR_FENDER_1_4"/>			
+			<item id="76" genKey="KINGCOBRA_EXHAUST_PIPE_1_4"/>			
+			<item id="71" genKey="KINGCOBRA_SEAT_1_4"/>			
+			<item id="84" genKey="KINGCOBRA_STEERING_1_1"/>			
+			<item id="269" genKey="KINGCOBRA_SWING_ARM_1_4"/>			
+			<item id="58" genKey="KINGCOBRA_ENGINE_FENDER_1_4"/>			
+			<item id="90" genKey="KINGCOBRA_ENGINE_1_1"/>			
+			<item id="52" genKey="KINGCOBRA_HEAD_LIGHT_1_4"/>
+			<item id="87" genKey="KINGCOBRA_FRONT_FENDER_1_4"/>
+		</set>
+		<set id="53" name="bike_category_bodykit_4" genKey="KINGCOBRA_FAIRINGS_8" icon="images\garage\bike\upgrades\KingCobra_4.png" type="bike" price="4500" expLevelReq="0" medalReq="1505" alwaysLocked="0" cameraTarget="FRONT_LIGHT" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="55" genKey="KINGCOBRA_FRAME_1_1"/>
+			<item id="91" genKey="KINGCOBRA_FRONT_SUSPENSION_1_1"/>			
+			<item id="82" genKey="KINGCOBRA_REAR_FENDER_1_8"/>			
+			<item id="77" genKey="KINGCOBRA_EXHAUST_PIPE_1_8"/>			
+			<item id="72" genKey="KINGCOBRA_SEAT_1_8"/>		
+			<item id="84" genKey="KINGCOBRA_STEERING_1_1"/>				
+			<item id="270" genKey="KINGCOBRA_SWING_ARM_1_8"/>			
+			<item id="59" genKey="KINGCOBRA_ENGINE_FENDER_1_8"/>			
+			<item id="90" genKey="KINGCOBRA_ENGINE_1_1"/>			
+			<item id="53" genKey="KINGCOBRA_HEAD_LIGHT_1_8"/>
+			<item id="88" genKey="KINGCOBRA_FRONT_FENDER_1_8"/>
+		</set>
+		<set id="54" name="bike_category_bodykit_5" genKey="KINGCOBRA_FAIRINGS_16" icon="images\garage\bike\upgrades\KingCobra_5.png" type="bike" price="9500" expLevelReq="0" medalReq="1507" alwaysLocked="0" cameraTarget="FRONT_LIGHT" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="55" genKey="KINGCOBRA_FRAME_1_1"/>
+			<item id="91" genKey="KINGCOBRA_FRONT_SUSPENSION_1_1"/>			
+			<item id="83" genKey="KINGCOBRA_REAR_FENDER_1_16"/>			
+			<item id="78" genKey="KINGCOBRA_EXHAUST_PIPE_1_16"/>			
+			<item id="73" genKey="KINGCOBRA_SEAT_1_16"/>			
+			<item id="84" genKey="KINGCOBRA_STEERING_1_1"/>			
+			<item id="100" genKey="KINGCOBRA_SWING_ARM_1_1"/>			
+			<item id="60" genKey="KINGCOBRA_ENGINE_FENDER_1_16"/>			
+			<item id="90" genKey="KINGCOBRA_ENGINE_1_1"/>			
+			<item id="54" genKey="KINGCOBRA_HEAD_LIGHT_1_16"/>
+			<item id="89" genKey="KINGCOBRA_FRONT_FENDER_1_16"/>
+		</set>
+		<set id="55" name="bike_category_rims_1" genKey="KINGCOBRA_WHEELS_1" icon="images\garage\bike\upgrades\KingCobra_Rims.png" type="bike" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="FRONT_WHEEL" colorSlotId="0" colorCategory="WHEELS">
+			<item id="61" genKey="KINGCOBRA_FRONT_TIRE_1_1"/>
+			<item id="62" genKey="KINGCOBRA_FRONT_RIM_1_1"/>
+			<item id="92" genKey="KINGCOBRA_REAR_RIM_1_1"/>
+			<item id="99" genKey="KINGCOBRA_REAR_TIRE_1_1"/>
+		</set>
+		<set id="56" name="bike_category_rims_2" genKey="KINGCOBRA_WHEELS_2" icon="images\garage\bike\upgrades\Rims_1.png" type="bike" price="1800" expLevelReq="4" alwaysLocked="0" cameraTarget="FRONT_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="63" genKey="KINGCOBRA_FRONT_RIM_1_2"/>
+			<item id="93" genKey="KINGCOBRA_REAR_RIM_1_2"/>
+			<item id="61" genKey="KINGCOBRA_FRONT_TIRE_1_1"/>
+			<item id="99" genKey="KINGCOBRA_REAR_TIRE_1_1"/>
+		</set>
+		<set id="57" name="bike_category_rims_3" genKey="KINGCOBRA_WHEELS_4" icon="images\garage\bike\upgrades\Rims_2.png" type="bike" price="2200" expLevelReq="8" alwaysLocked="0" cameraTarget="FRONT_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="64" genKey="KINGCOBRA_FRONT_RIM_1_4"/>
+			<item id="94" genKey="KINGCOBRA_REAR_RIM_1_4"/>
+			<item id="61" genKey="KINGCOBRA_FRONT_TIRE_1_1"/>
+			<item id="99" genKey="KINGCOBRA_REAR_TIRE_1_1"/>
+		</set>
+		<set id="58" name="bike_category_rims_4" genKey="KINGCOBRA_WHEELS_8" icon="images\garage\bike\upgrades\Rims_3.png" type="bike" price="3500" expLevelReq="20" alwaysLocked="0" cameraTarget="FRONT_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="65" genKey="KINGCOBRA_FRONT_RIM_1_8"/>
+			<item id="95" genKey="KINGCOBRA_REAR_RIM_1_8"/>
+			<item id="61" genKey="KINGCOBRA_FRONT_TIRE_1_1"/>
+			<item id="99" genKey="KINGCOBRA_REAR_TIRE_1_1"/>
+		</set>
+		<set id="59" name="bike_category_rims_5" genKey="KINGCOBRA_WHEELS_16" icon="images\garage\bike\upgrades\Rims_4.png" type="bike" price="7000" expLevelReq="40" alwaysLocked="0" cameraTarget="FRONT_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="66" genKey="KINGCOBRA_FRONT_RIM_1_16"/>
+			<item id="96" genKey="KINGCOBRA_REAR_RIM_1_16"/>
+			<item id="61" genKey="KINGCOBRA_FRONT_TIRE_1_1"/>
+			<item id="99" genKey="KINGCOBRA_REAR_TIRE_1_1"/>
+		</set>
+		<set id="60" name="bike_category_rims_6" genKey="KINGCOBRA_WHEELS_32" icon="images\garage\bike\upgrades\Rims_5.png" type="bike" price="12000" expLevelReq="90" alwaysLocked="0" cameraTarget="FRONT_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="67" genKey="KINGCOBRA_FRONT_RIM_1_32"/>
+			<item id="97" genKey="KINGCOBRA_REAR_RIM_1_32"/>
+			<item id="61" genKey="KINGCOBRA_FRONT_TIRE_1_1"/>
+			<item id="99" genKey="KINGCOBRA_REAR_TIRE_1_1"/>
+		</set>
+		<set id="61" name="bike_category_rims_7" genKey="KINGCOBRA_WHEELS_64" icon="images\garage\bike\upgrades\Rims_6.png" type="bike" price="45000" expLevelReq="150" alwaysLocked="0" cameraTarget="FRONT_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="68" genKey="KINGCOBRA_FRONT_RIM_1_64"/>
+			<item id="98" genKey="KINGCOBRA_REAR_RIM_1_64"/>
+			<item id="61" genKey="KINGCOBRA_FRONT_TIRE_1_1"/>
+			<item id="99" genKey="KINGCOBRA_REAR_TIRE_1_1"/>
+		</set>
+		<set id="62" name="bike_category_rims_1" genKey="CHEETAH_WHEELS_1" icon="images\garage\bike\upgrades\Cheetah_Rims.png" type="bike" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="FRONT_WHEEL" colorSlotId="0" colorCategory="WHEELS">
+			<item id="101" genKey="CHEETAH_WHEEL_FRONT_1_1"/>
+			<item id="105" genKey="CHEETAH_RIM_REAR_1_1"/>
+			<item id="112" genKey="CHEETAH_WHEEL_REAR_1_1"/>
+			<item id="128" genKey="CHEETAH_RIM_FRONT_1_1"/>
+		</set>
+		<set id="63" name="bike_category_bodykit_1" genKey="CHEETAH_FAIRINGS_1" icon="images\garage\bike\upgrades\Cheetah_1.png" type="bike" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="FRAME" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="102" genKey="CHEETAH_FRAME_1_1"/>
+			<item id="113" genKey="CHEETAH_FRONT_SUSPENSION_1_1"/>
+			<item id="114" genKey="CHEETAH_FENDER_REAR_1_1"/>
+			<item id="119" genKey="CHEETAH_EXHAUST_1_1"/>
+			<item id="122" genKey="CHEETAH_SEAT_1_1"/>
+			<item id="127" genKey="CHEETAH_TANK_1_1"/>
+			<item id="135" genKey="CHEETAH_STEERING_1_1"/>
+			<item id="137" genKey="CHEETAH_BACKSWING_1_1"/>
+			<item id="142" genKey="CHEETAH_ENGINE_FENDER_1_1"/>
+			<item id="147" genKey="CHEETAH_ENGINE_1_1"/>
+			<item id="148" genKey="CHEETAH_HEADLIGHT_1_1"/>
+			<item id="153" genKey="CHEETAH_FENDER_FRONT_1_1"/>
+		</set>
+		<set id="64" name="bike_category_bodykit_2" genKey="CHEETAH_FAIRINGS_2" icon="images\garage\bike\upgrades\Cheetah_2.png" type="bike" price="2000" expLevelReq="0" medalReq="1404,1142,1132,1128,1133,1107,1604,1506" alwaysLocked="0" cameraTarget="FRAME" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="102" genKey="CHEETAH_FRAME_1_1"/>
+			<item id="113" genKey="CHEETAH_FRONT_SUSPENSION_1_1"/>			
+			<item id="115" genKey="CHEETAH_FENDER_REAR_1_2"/>
+			<item id="120" genKey="CHEETAH_EXHAUST_1_2"/>
+			<item id="123" genKey="CHEETAH_SEAT_1_2"/>
+			<item id="127" genKey="CHEETAH_TANK_1_1"/>			
+			<item id="135" genKey="CHEETAH_STEERING_1_1"/>
+			<item id="138" genKey="CHEETAH_BACKSWING_1_2"/>
+			<item id="143" genKey="CHEETAH_ENGINE_FENDER_1_2"/>
+			<item id="147" genKey="CHEETAH_ENGINE_1_1"/>			
+			<item id="149" genKey="CHEETAH_HEADLIGHT_1_2"/>
+			<item id="154" genKey="CHEETAH_FENDER_FRONT_1_2"/>
+		</set>
+		<set id="65" name="bike_category_bodykit_3" genKey="CHEETAH_FAIRINGS_4" icon="images\garage\bike\upgrades\Cheetah_3.png" type="bike" price="5000" expLevelReq="0" medalReq="1124,1127,1134,1130,1141,1605,1507,1126" alwaysLocked="0" cameraTarget="FRAME" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="102" genKey="CHEETAH_FRAME_1_1"/>
+			<item id="113" genKey="CHEETAH_FRONT_SUSPENSION_1_1"/>			
+			<item id="116" genKey="CHEETAH_FENDER_REAR_1_4"/>
+			<item id="121" genKey="CHEETAH_EXHAUST_1_4"/>
+			<item id="124" genKey="CHEETAH_SEAT_1_4"/>
+			<item id="127" genKey="CHEETAH_TANK_1_1"/>	
+			<item id="135" genKey="CHEETAH_STEERING_1_1"/>					
+			<item id="139" genKey="CHEETAH_BACKSWING_1_4"/>
+			<item id="144" genKey="CHEETAH_ENGINE_FENDER_1_4"/>
+			<item id="147" genKey="CHEETAH_ENGINE_1_1"/>			
+			<item id="150" genKey="CHEETAH_HEADLIGHT_1_4"/>
+			<item id="155" genKey="CHEETAH_FENDER_FRONT_1_4"/>
+		</set>
+		<set id="66" name="bike_category_rims_2" genKey="CHEETAH_WHEELS_2" icon="images\garage\bike\upgrades\Rims_1.png" type="bike" price="1800" expLevelReq="4" alwaysLocked="0" cameraTarget="BACK_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="106" genKey="CHEETAH_RIM_REAR_1_2"/>
+			<item id="129" genKey="CHEETAH_RIM_FRONT_1_2"/>
+			<item id="101" genKey="CHEETAH_WHEEL_FRONT_1_1"/>
+			<item id="112" genKey="CHEETAH_WHEEL_REAR_1_1"/>
+		</set>
+		<set id="67" name="bike_category_rims_3" genKey="CHEETAH_WHEELS_4" icon="images\garage\bike\upgrades\Rims_2.png" type="bike" price="2200" expLevelReq="8" alwaysLocked="0" cameraTarget="BACK_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="107" genKey="CHEETAH_RIM_REAR_1_4"/>
+			<item id="130" genKey="CHEETAH_RIM_FRONT_1_4"/>
+			<item id="101" genKey="CHEETAH_WHEEL_FRONT_1_1"/>
+			<item id="112" genKey="CHEETAH_WHEEL_REAR_1_1"/>
+		</set>
+		<set id="68" name="bike_category_rims_4" genKey="CHEETAH_WHEELS_8" icon="images\garage\bike\upgrades\Rims_3.png" type="bike" price="3500" expLevelReq="20" alwaysLocked="0" cameraTarget="BACK_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="108" genKey="CHEETAH_RIM_REAR_1_8"/>
+			<item id="131" genKey="CHEETAH_RIM_FRONT_1_8"/>
+			<item id="101" genKey="CHEETAH_WHEEL_FRONT_1_1"/>
+			<item id="112" genKey="CHEETAH_WHEEL_REAR_1_1"/>
+		</set>
+		<set id="69" name="bike_category_rims_5" genKey="CHEETAH_WHEELS_16" icon="images\garage\bike\upgrades\Rims_4.png" type="bike" price="7000" expLevelReq="40" alwaysLocked="0" cameraTarget="BACK_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="109" genKey="CHEETAH_RIM_REAR_1_16"/>
+			<item id="132" genKey="CHEETAH_RIM_FRONT_1_16"/>
+			<item id="101" genKey="CHEETAH_WHEEL_FRONT_1_1"/>
+			<item id="112" genKey="CHEETAH_WHEEL_REAR_1_1"/>
+		</set>
+		<set id="70" name="bike_category_rims_6" genKey="CHEETAH_WHEELS_32" icon="images\garage\bike\upgrades\Rims_5.png" type="bike" price="12000" expLevelReq="90" alwaysLocked="0" cameraTarget="BACK_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="110" genKey="CHEETAH_RIM_REAR_1_32"/>
+			<item id="133" genKey="CHEETAH_RIM_FRONT_1_32"/>
+			<item id="101" genKey="CHEETAH_WHEEL_FRONT_1_1"/>
+			<item id="112" genKey="CHEETAH_WHEEL_REAR_1_1"/>
+		</set>
+		<set id="71" name="bike_category_rims_7" genKey="CHEETAH_WHEELS_64" icon="images\garage\bike\upgrades\Rims_6.png" type="bike" price="45000" expLevelReq="150" alwaysLocked="0" cameraTarget="BACK_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="111" genKey="CHEETAH_RIM_REAR_1_64"/>
+			<item id="134" genKey="CHEETAH_RIM_FRONT_1_64"/>
+			<item id="101" genKey="CHEETAH_WHEEL_FRONT_1_1"/>
+			<item id="112" genKey="CHEETAH_WHEEL_REAR_1_1"/>
+		</set>
+		<set id="72" name="bike_category_bodykit_4" genKey="CHEETAH_FAIRINGS_8" icon="images\garage\bike\upgrades\Cheetah_5.png" type="bike" price="8000" expLevelReq="0" medalReq="1126" alwaysLocked="0" cameraTarget="BACK_FENDER" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="103" genKey="CHEETAH_FRAME_1_4"/>
+			<item id="113" genKey="CHEETAH_FRONT_SUSPENSION_1_1"/>			
+			<item id="117" genKey="CHEETAH_FENDER_REAR_1_8"/>
+			<item id="274" genKey="CHEETAH_EXHAUST_1_8"/>			
+			<item id="125" genKey="CHEETAH_SEAT_1_8"/>
+			<item id="127" genKey="CHEETAH_TANK_1_1"/>			
+			<item id="136" genKey="CHEETAH_STEERING_1_2"/>			
+			<item id="140" genKey="CHEETAH_BACKSWING_1_8"/>
+			<item id="145" genKey="CHEETAH_ENGINE_FENDER_1_8"/>
+			<item id="147" genKey="CHEETAH_ENGINE_1_1"/>			
+			<item id="151" genKey="CHEETAH_HEADLIGHT_1_8"/>
+			<item id="156" genKey="CHEETAH_FENDER_FRONT_1_8"/>
+		</set>
+		<set id="73" name="bike_category_bodykit_5" genKey="CHEETAH_FAIRINGS_16" icon="images\garage\bike\upgrades\Cheetah_4.png" type="bike" price="20000" expLevelReq="0" medalReq="1136,1139,1138,1137,1140,1508" alwaysLocked="0" cameraTarget="BACK_FENDER" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="104" genKey="CHEETAH_FRAME_1_4"/>
+			<item id="113" genKey="CHEETAH_FRONT_SUSPENSION_1_1"/>			
+			<item id="118" genKey="CHEETAH_FENDER_REAR_1_16"/>
+			<item id="297" genKey="CHEETAH_EXHAUST_1_16"/>						
+			<item id="126" genKey="CHEETAH_SEAT_1_16"/>
+			<item id="127" genKey="CHEETAH_TANK_1_1"/>		
+			<item id="135" genKey="CHEETAH_STEERING_1_1"/>					
+			<item id="141" genKey="CHEETAH_BACKSWING_1_16"/>
+			<item id="146" genKey="CHEETAH_ENGINE_FENDER_1_16"/>
+			<item id="147" genKey="CHEETAH_ENGINE_1_1"/>			
+			<item id="152" genKey="CHEETAH_HEADLIGHT_1_16"/>
+			<item id="157" genKey="CHEETAH_FENDER_FRONT_1_16"/>
+		</set>
+		<set id="74" name="bike_category_bodykit_1" genKey="MINX_FAIRINGS_1" icon="images\garage\bike\upgrades\Minx_1.png" type="bike" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="BACK_FRAME" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="158" genKey="MINX_BACK_SWING_ARM_1_1"/>
+			<item id="159" genKey="MINX_STEERING_1_1"/>
+			<item id="161" genKey="MINX_ENGINE_1_1"/>
+			<item id="162" genKey="MINX_FRONT_SUSPENSION_1_1"/>
+			<item id="163" genKey="MINX_HEAD_LIGHT_1_1"/>
+			<item id="164" genKey="MINX_FRAME_1_1"/>
+			<item id="165" genKey="MINX_ENGINE_FENDER_1_1"/>
+			<item id="173" genKey="MINX_EXHAUST_1_1"/>
+			<item id="175" genKey="MINX_SEAT_1_1"/>
+			<item id="176" genKey="MINX_TANK_1_1"/>
+			<item id="177" genKey="MINX_FENDER_REAR_1_1"/>
+			<item id="185" genKey="MINX_FENDER_FRONT_1_1"/>
+		</set>
+		<set id="75" name="bike_category_rims_1" genKey="MINX_WHEELS_1" icon="images\garage\bike\upgrades\Minx_Rims.png" type="bike" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="FRONT_WHEEL" colorSlotId="0" colorCategory="WHEELS">
+			<item id="160" genKey="MINX_TIRE_FRONT_1_1"/>
+			<item id="166" genKey="MINX_RIM_FRONT_1_1"/>
+			<item id="174" genKey="MINX_TIRE_REAR_1_1"/>
+			<item id="178" genKey="MINX_RIM_REAR_1_1"/>
+		</set>
+		<set id="76" name="bike_category_rims_2" genKey="MINX_WHEELS_2" icon="images\garage\bike\upgrades\Rims_1.png" type="bike" price="1800" expLevelReq="4" alwaysLocked="0" cameraTarget="FRONT_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="167" genKey="MINX_RIM_FRONT_1_2"/>
+			<item id="179" genKey="MINX_RIM_REAR_1_2"/>
+			<item id="160" genKey="MINX_TIRE_FRONT_1_1"/>
+			<item id="174" genKey="MINX_TIRE_REAR_1_1"/>
+		</set>
+		<set id="77" name="bike_category_rims_3" genKey="MINX_WHEELS_4" icon="images\garage\bike\upgrades\Rims_2.png" type="bike" price="2200" expLevelReq="8" alwaysLocked="0" cameraTarget="FRONT_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="168" genKey="MINX_RIM_FRONT_1_4"/>
+			<item id="180" genKey="MINX_RIM_REAR_1_4"/>
+			<item id="160" genKey="MINX_TIRE_FRONT_1_1"/>
+			<item id="174" genKey="MINX_TIRE_REAR_1_1"/>
+		</set>
+		<set id="78" name="bike_category_rims_4" genKey="MINX_WHEELS_8" icon="images\garage\bike\upgrades\Rims_3.png" type="bike" price="3500" expLevelReq="20" alwaysLocked="0" cameraTarget="FRONT_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="169" genKey="MINX_RIM_FRONT_1_8"/>
+			<item id="181" genKey="MINX_RIM_REAR_1_8"/>
+			<item id="160" genKey="MINX_TIRE_FRONT_1_1"/>
+			<item id="174" genKey="MINX_TIRE_REAR_1_1"/>
+		</set>
+		<set id="79" name="bike_category_rims_5" genKey="MINX_WHEELS_16" icon="images\garage\bike\upgrades\Rims_4.png" type="bike" price="7000" expLevelReq="40" alwaysLocked="0" cameraTarget="FRONT_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="170" genKey="MINX_RIM_FRONT_1_16"/>
+			<item id="182" genKey="MINX_RIM_REAR_1_16"/>
+			<item id="160" genKey="MINX_TIRE_FRONT_1_1"/>
+			<item id="174" genKey="MINX_TIRE_REAR_1_1"/>
+		</set>
+		<set id="80" name="bike_category_rims_6" genKey="MINX_WHEELS_32" icon="images\garage\bike\upgrades\Rims_5.png" type="bike" price="12000" expLevelReq="90" alwaysLocked="0" cameraTarget="FRONT_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="171" genKey="MINX_RIM_FRONT_1_32"/>
+			<item id="183" genKey="MINX_RIM_REAR_1_32"/>
+			<item id="160" genKey="MINX_TIRE_FRONT_1_1"/>
+			<item id="174" genKey="MINX_TIRE_REAR_1_1"/>
+		</set>
+		<set id="81" name="bike_category_rims_7" genKey="MINX_WHEELS_64" icon="images\garage\bike\upgrades\Rims_6.png" type="bike" price="45000" expLevelReq="150" alwaysLocked="0" cameraTarget="FRONT_RIM" colorSlotId="0" colorCategory="WHEELS">
+			<item id="172" genKey="MINX_RIM_FRONT_1_64"/>
+			<item id="184" genKey="MINX_RIM_REAR_1_64"/>
+			<item id="160" genKey="MINX_TIRE_FRONT_1_1"/>
+			<item id="174" genKey="MINX_TIRE_REAR_1_1"/>
+		</set>
+		<set id="82" name="bike_category_bodykit_1" genKey="FAT_FAIRINGS_1" icon="images\garage\bike\upgrades\Fat_1.png" type="bike" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="BACK_FRAME" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="186" genKey="FAT_GRIZZLY_SUSPENSION_REAR_1_1"/>
+			<item id="187" genKey="FAT_GRIZZLY_SUSPENSION_FRONT_1_1"/>
+			<item id="188" genKey="FAT_GRIZZLY_BODY_1_1"/>
+			<item id="189" genKey="FAT_GRIZZLY_CHASSIS_1_1"/>
+			<item id="190" genKey="FAT_GRIZZLY_EXHAUST_1_1"/>
+			<item id="191" genKey="FAT_GRIZZLY_HEADLIGHT_1_1"/>
+			<item id="192" genKey="FAT_GRIZZLY_STEERING_1_1"/>
+		</set>
+		<set id="83" name="bike_category_rims_1" genKey="FAT_WHEELS_1" icon="images\garage\bike\upgrades\Fat_Rims.png" type="bike" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="FRONT_TIRE_RIGHT" colorSlotId="0" colorCategory="WHEELS">
+			<item id="193" genKey="FAT_GRIZZLY_TIRE_RIGHTSIDE_FRONT_1"/>
+			<item id="194" genKey="FAT_GRIZZLY_TIRE_LEFTSIDE_FRONT_1"/>
+			<item id="195" genKey="FAT_GRIZZLY_TIRE_RIGHTSIDE_BACK_1"/>
+			<item id="196" genKey="FAT_GRIZZLY_TIRE_LEFTSIDE_BACK_1"/>
+		</set>
+		<set id="84" name="bike_category_bodykit_1" genKey="PAPER_FAIRINGS_1" icon="images\garage\bike\upgrades\Paper_1.png" type="bike" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="FRAME" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="197" genKey="PAPER_BOY_FRAME_1_1"/>
+			<item id="198" genKey="PAPER_BOY_PEDAL_ARMS_1_1"/>
+			<item id="199" genKey="PAPER_BOY_PEDAL_LEFT_1_1"/>
+			<item id="200" genKey="PAPER_BOY_PEDAL_RIGHT_1_1"/>
+			<item id="201" genKey="PAPER_BOY_STEERING_1_1"/>
+			<item id="202" genKey="PAPER_BOY_SUSPENSION_FRONT_1_1"/>
+			<item id="205" genKey="PAPER_BOY_BACK_SWING_ARM_1"/>
+		</set>
+		<set id="85" name="bike_category_rims_1" genKey="PAPER_WHEELS_1" icon="images\garage\bike\upgrades\Paper_Rims.png" type="bike" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="FRONT_WHEEL" colorSlotId="0" colorCategory="WHEELS">
+			<item id="203" genKey="PAPER_BOY_TIRE_FRONT_1_1"/>
+			<item id="204" genKey="PAPER_BOY_TIRE_REAR_1_1"/>
+		</set>
+		<set id="86" name="bike_category_bodykit_1" genKey="TRICKY_FAIRINGS_1" icon="images\garage\bike\upgrades\Tricky_1.png" type="bike" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="FRONT_LIGHT" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="229" genKey="TRICKY_FRAME_1"/>
+			<item id="211" genKey="TRICKY_SUSPENSION_FRONT_1"/>			
+			<item id="220" genKey="TRICKY_FENDER_REAR_1"/>			
+			<item id="216" genKey="TRICKY_EXHAUST_1"/>			
+			<item id="236" genKey="TRICKY_SEAT_1"/>			
+			<item id="224" genKey="TRICKY_TANK_1"/>			
+			<item id="235" genKey="TRICKY_STEERING_1"/>			
+			<item id="225" genKey="TRICKY_BACK_SWING_ARM_1"/>						
+			<item id="240" genKey="TRICKY_ENGINE_FENDER_1"/>			
+			<item id="233" genKey="TRICKY_ENGINE_1"/>			
+			<item id="206" genKey="TRICKY_HEAD_LIGHT_1"/>
+			<item id="245" genKey="TRICKY_FENDER_FRONT_1"/>
+		</set>
+		<set id="87" name="bike_category_bodykit_2" genKey="TRICKY_FAIRINGS_2" icon="images\garage\bike\upgrades\Tricky_2.png" type="bike" price="1500" expLevelReq="0" medalReq="1601" alwaysLocked="0" cameraTarget="FRONT_LIGHT" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="230" genKey="TRICKY_FRAME_2"/>			
+			<item id="212" genKey="TRICKY_SUSPENSION_FRONT_2"/>			
+			<item id="221" genKey="TRICKY_FENDER_REAR_2"/>						
+			<item id="217" genKey="TRICKY_EXHAUST_2"/>			
+			<item id="237" genKey="TRICKY_SEAT_2"/>			
+			<item id="224" genKey="TRICKY_TANK_1"/>			
+			<item id="235" genKey="TRICKY_STEERING_1"/>			
+			<item id="226" genKey="TRICKY_BACK_SWING_ARM_2"/>						
+			<item id="241" genKey="TRICKY_ENGINE_FENDER_2"/>			
+			<item id="233" genKey="TRICKY_ENGINE_1"/>			
+			<item id="207" genKey="TRICKY_HEAD_LIGHT_2"/>
+			<item id="246" genKey="TRICKY_FENDER_FRONT_2"/>
+		</set>
+		<set id="88" name="bike_category_bodykit_3" genKey="TRICKY_FAIRINGS_4" icon="images\garage\bike\upgrades\Tricky_3.png" type="bike" price="4500" expLevelReq="0" medalReq="1603" alwaysLocked="0" cameraTarget="FRONT_LIGHT" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="231" genKey="TRICKY_FRAME_4"/>
+			<item id="213" genKey="TRICKY_SUSPENSION_FRONT_4"/>			
+			<item id="222" genKey="TRICKY_FENDER_REAR_4"/>			
+			<item id="218" genKey="TRICKY_EXHAUST_4"/>			
+			<item id="238" genKey="TRICKY_SEAT_4"/>			
+			<item id="224" genKey="TRICKY_TANK_1"/>			
+			<item id="235" genKey="TRICKY_STEERING_1"/>			
+			<item id="227" genKey="TRICKY_BACK_SWING_ARM_4"/>			
+			<item id="242" genKey="TRICKY_ENGINE_FENDER_4"/>			
+			<item id="233" genKey="TRICKY_ENGINE_1"/>			
+			<item id="208" genKey="TRICKY_HEAD_LIGHT_4"/>
+			<item id="247" genKey="TRICKY_FENDER_FRONT_4"/>
+		</set>
+		<set id="89" name="bike_category_bodykit_4" genKey="TRICKY_FAIRINGS_8" icon="images\garage\bike\upgrades\Tricky_4.png" type="bike" price="12000" expLevelReq="0" medalReq="1605" alwaysLocked="0" cameraTarget="FRONT_LIGHT" colorSlotId="0" colorCategory="FAIRINGS">
+			<item id="232" genKey="TRICKY_FRAME_8"/>
+			<item id="214" genKey="TRICKY_SUSPENSION_FRONT_8"/>			
+			<item id="223" genKey="TRICKY_FENDER_REAR_8"/>			
+			<item id="219" genKey="TRICKY_EXHAUST_8"/>
+			<item id="239" genKey="TRICKY_SEAT_8"/>			
+			<item id="224" genKey="TRICKY_TANK_1"/>			
+			<item id="235" genKey="TRICKY_STEERING_1"/>			
+			<item id="228" genKey="TRICKY_BACK_SWING_ARM_8"/>
+			<item id="243" genKey="TRICKY_ENGINE_FENDER_8"/>
+			<item id="233" genKey="TRICKY_ENGINE_1"/>
+			<item id="209" genKey="TRICKY_HEAD_LIGHT_8"/>			
+			<item id="248" genKey="TRICKY_FENDER_FRONT_8"/>			
+		</set>
+		<set id="90" name="bike_category_rims_1" genKey="TRICKY_WHEELS_1" icon="images\garage\bike\upgrades\Tricky_Rims.png" type="bike" price="0" expLevelReq="0" alwaysLocked="0" cameraTarget="FRONT_WHEEL" colorSlotId="0" colorCategory="WHEELS">
+			<item id="210" genKey="TRICKY_TIRE_FRONT_1"/>
+			<item id="215" genKey="TRICKY_TIRE_REAR_1"/>
+			<item id="234" genKey="TRICKY_RIM_FRONT_1"/>
+			<item id="244" genKey="TRICKY_RIM_REAR_1"/>
+		</set>
+		<set id="91" name="ridergear_clothing_legs" genKey="HAZMASUIT_BOTTOM_1" icon="images\garage\rider\HazmaSuit_Pants.png" defaultColor="D7D096" type="rider" price="0" expLevelReq="0" alwaysLocked="1" hidden="1" cameraTarget="PANTS" colorSlotId="0" colorCategory="BOTTOM">
+			<item id="249" genKey="HAZMASUIT_BOTTOM_1"/>
+		</set>
+		<set id="92" name="ridergear_clothing_head" genKey="HAZMASUIT_HELMET_1" icon="images\garage\rider\HazmaSuit_Head.png" defaultColor="D7D096" type="rider" price="0" expLevelReq="0" alwaysLocked="1" hidden="1" cameraTarget="HELMET" colorSlotId="0" colorCategory="HELMET">
+			<item id="250" genKey="HAZMASUIT_HELMET_1"/>
+		</set>
+		<set id="93" name="ridergear_clothing_body" genKey="HAZMASUIT_TOP_1" icon="images\garage\rider\HazmaSuit_Body.png" defaultColor="D7D096" type="rider" price="0" expLevelReq="0" alwaysLocked="1" hidden="1" cameraTarget="SHIRT" colorSlotId="0" colorCategory="TOP">
+			<item id="251" genKey="HAZMASUIT_TOP_1"/>
+		</set>
+		<set id="96" name="ridergear_clothing_head" genKey="SUPERHERO_HELMET_1" price="0" icon="images\garage\rider\SuperHero_Head.png" defaultColor="A8676B" type="rider" expLevelReq="0" alwaysLocked="1" hidden="1" cameraTarget="HELMET" colorCategory="HELMET">
+			<item id="255" genKey="SUPERHERO_HELMET_1"/>
+		</set>
+		<set id="97" name="ridergear_clothing_body" genKey="SUPERHERO_TOP_1" price="0" icon="images\garage\rider\SuperHero_Body.png" defaultColor="A8676B" type="rider" expLevelReq="0" alwaysLocked="1" hidden="1" cameraTarget="SHIRT" colorCategory="TOP">
+			<item id="256" genKey="SUPERHERO_TORSO_1"/>
+		</set>
+		<set id="98" name="ridergear_clothing_head" genKey="ULCCLOWN_HELMET_1" price="0" icon="images\garage\rider\Clown_Head.png" type="rider" expLevelReq="0" alwaysLocked="1" cameraTarget="HELMET" colorCategory="HELMET">
+			<item id="257" genKey="ULCCLOWN_HELMET_1"/>
+		</set>
+		<set id="99" name="ridergear_clothing_head" genKey="ULCDRINK_HELMET_1" price="0" icon="images\garage\rider\Drink_Head.png" type="rider" expLevelReq="0" alwaysLocked="1" hidden="1" cameraTarget="HELMET" colorCategory="HELMET">
+			<item id="258" genKey="ULCDRINK_HELMET_1"/>
+		</set>
+		<set id="100" name="ridergear_clothing_head" genKey="ULCRHINO_HELMET_1" price="0" icon="images\garage\rider\Rhino_Head.png" type="rider" expLevelReq="0" alwaysLocked="1" hidden="1" cameraTarget="HELMET" colorCategory="HELMET">
+			<item id="259" genKey="ULCRHINO_HELMET_1"/>
+		</set>
+		<set id="101" name="UPLAYREWARD_40POINTS" genKey="KINGCOBRA_FAIRINGS_32" price="0" icon="images\garage\bike\upgrades\KingCobra_ULC.png" type="bike" expLevelReq="0" alwaysLocked="1" cameraTarget="FRONT_LIGHT" colorCategory="FAIRINGS">
+			<item id="262" genKey="KINGCOBRA_FRAME_1_2"/>
+			<item id="265" genKey="KINGCOBRA_FRONT_SUSPENSION_1_2"/>			
+			<item id="261" genKey="KINGCOBRA_REAR_FENDER_1_32"/>			
+			<item id="264" genKey="KINGCOBRA_EXHAUST_PIPE_1_32"/>			
+			<item id="266" genKey="KINGCOBRA_SEAT_1_32"/>			
+			<item id="263" genKey="KINGCOBRA_STEERING_1_2"/>			
+			<item id="271" genKey="KINGCOBRA_SWING_ARM_1_16"/>			
+			<item id="267" genKey="KINGCOBRA_ENGINE_FENDER_1_32"/>			
+			<item id="90" genKey="KINGCOBRA_ENGINE_1_1"/>			
+			<item id="260" genKey="KINGCOBRA_HEAD_LIGHT_1_32"/>
+		</set>
+		<set id="102" name="UPLAYREWARD_40POINTS_RIM" genKey="KINGCOBRA_WHEELS_128" price="0" icon="images\garage\bike\upgrades\KingCobra_Rims_ULC.png" type="bike" expLevelReq="0" alwaysLocked="1" cameraTarget="FRONT_RIM" colorCategory="WHEELS">
+			<item id="272" genKey="KINGCOBRA_FRONT_RIM_1_128"/>
+			<item id="273" genKey="KINGCOBRA_REAR_RIM_1_128"/>
+			<item id="61" genKey="KINGCOBRA_FRONT_TIRE_1_1"/>
+			<item id="99" genKey="KINGCOBRA_REAR_TIRE_1_1"/>
+		</set>
+		<set id="103" name="ULC_CHEETAHUPG" genKey="CHEETAH_FAIRINGS_32" price="0" icon="images\garage\bike\upgrades\Cheetah_ULC.png" type="bike" expLevelReq="0" alwaysLocked="1" hidden="1" cameraTarget="ENGINE_COVER" colorCategory="FAIRINGS">		
+			<item id="280" genKey="CHEETAH_FRAME_1_8"/>		
+			<item id="113" genKey="CHEETAH_FRONT_SUSPENSION_1_1"/>			
+			<item id="298" genKey="CHEETAH_EXHAUST_1_32"/>									
+			<item id="277" genKey="CHEETAH_SEAT_1_32"/>			
+			<item id="278" genKey="CHEETAH_TANK_1_2"/>		
+			<item id="135" genKey="CHEETAH_STEERING_1_1"/>					
+			<item id="276" genKey="CHEETAH_BACKSWING_1_32"/>
+			<item id="275" genKey="CHEETAH_ENGINE_FENDER_1_32"/>			
+			<item id="279" genKey="CHEETAH_FENDER_REAR_1_32"/>
+			<item id="281" genKey="CHEETAH_ENGINE_1_2"/>			
+			<item id="282" genKey="CHEETAH_HEADLIGHT_1_32"/>
+			<item id="283" genKey="CHEETAH_FENDER_FRONT_1_32"/>
+		</set>
+		<set id="104" name="ULC_MANTISUPG" genKey="TRICKY_FAIRINGS_16" price="0" icon="images\garage\bike\upgrades\Tricky_ULC.png" type="bike" expLevelReq="0" alwaysLocked="1" hidden="1" cameraTarget="SUSPENSION" colorCategory="FAIRINGS">
+			<item id="290" genKey="TRICKY_FRAME_16"/>
+			<item id="284" genKey="TRICKY_SUSPENSION_FRONT_16"/>
+			<item id="289" genKey="TRICKY_FENDER_REAR_16"/>			
+			<item id="285" genKey="TRICKY_EXHAUST_16"/>
+			<item id="293" genKey="TRICKY_SEAT_16"/>			
+			<item id="288" genKey="TRICKY_TANK_2"/>			
+			<item id="291" genKey="TRICKY_STEERING_2"/>			
+			<item id="287" genKey="TRICKY_BACK_SWING_ARM_16"/>			
+			<item id="294" genKey="TRICKY_ENGINE_FENDER_16"/>			
+			<item id="233" genKey="TRICKY_ENGINE_1"/>			
+			<item id="286" genKey="TRICKY_HEAD_LIGHT_16"/>
+			<item id="295" genKey="TRICKY_FENDER_FRONT_16"/>
+		</set>
+		<set id="105" name="ULC_MANTISUPG_RIM" genKey="TRICKY_WHEELS_128" price="0" icon="images\garage\bike\upgrades\Tricky_Rims_ULC.png" type="bike" expLevelReq="0" alwaysLocked="1" hidden="1" cameraTarget="FRONT_RIM" colorCategory="WHEELS">
+			<item id="304" genKey="TRICKY_RIM_FRONT_2"/>
+			<item id="310" genKey="TRICKY_RIM_REAR_2"/>
+			<item id="210" genKey="TRICKY_TIRE_FRONT_1"/>
+			<item id="215" genKey="TRICKY_TIRE_REAR_1"/>
+		</set>	
+		<set id="106" name="bike_category_rims_2" genKey="TRICKY_WHEELS_2" icon="images\garage\bike\upgrades\Rims_1.png" type="bike" price="1800" expLevelReq="4" alwaysLocked="0" cameraTarget="FRONT_WHEEL" colorSlotId="0" colorCategory="WHEELS">
+			<item id="210" genKey="TRICKY_TIRE_FRONT_1"/>
+			<item id="215" genKey="TRICKY_TIRE_REAR_1"/>
+			<item id="292" genKey="TRICKY_RIM_FRONT_2"/>
+			<item id="296" genKey="TRICKY_RIM_REAR_2"/>
+		</set>		
+		<set id="107" name="bike_category_rims_3" genKey="TRICKY_WHEELS_4" icon="images\garage\bike\upgrades\Rims_2.png" type="bike" price="2200" expLevelReq="8" alwaysLocked="0" cameraTarget="FRONT_WHEEL" colorSlotId="0" colorCategory="WHEELS">
+			<item id="210" genKey="TRICKY_TIRE_FRONT_1"/>
+			<item id="215" genKey="TRICKY_TIRE_REAR_1"/>
+			<item id="299" genKey="TRICKY_RIM_FRONT_3"/>
+			<item id="305" genKey="TRICKY_RIM_REAR_3"/>
+		</set>	
+		<set id="108" name="bike_category_rims_4" genKey="TRICKY_WHEELS_8" icon="images\garage\bike\upgrades\Rims_3.png" type="bike" price="3500" expLevelReq="20" alwaysLocked="0" cameraTarget="FRONT_WHEEL" colorSlotId="0" colorCategory="WHEELS">
+			<item id="210" genKey="TRICKY_TIRE_FRONT_1"/>
+			<item id="215" genKey="TRICKY_TIRE_REAR_1"/>
+			<item id="300" genKey="TRICKY_RIM_FRONT_4"/>
+			<item id="306" genKey="TRICKY_RIM_REAR_4"/>
+		</set>	
+		<set id="109" name="bike_category_rims_5" genKey="TRICKY_WHEELS_16" icon="images\garage\bike\upgrades\Rims_4.png" type="bike" price="7000" expLevelReq="40" alwaysLocked="0" cameraTarget="FRONT_WHEEL" colorSlotId="0" colorCategory="WHEELS">
+			<item id="210" genKey="TRICKY_TIRE_FRONT_1"/>
+			<item id="215" genKey="TRICKY_TIRE_REAR_1"/>
+			<item id="301" genKey="TRICKY_RIM_FRONT_5"/>
+			<item id="307" genKey="TRICKY_RIM_REAR_5"/>
+		</set>	
+		<set id="110" name="bike_category_rims_6" genKey="TRICKY_WHEELS_32" icon="images\garage\bike\upgrades\Rims_5.png" type="bike" price="12000" expLevelReq="90" alwaysLocked="0" cameraTarget="FRONT_WHEEL" colorSlotId="0" colorCategory="WHEELS">
+			<item id="210" genKey="TRICKY_TIRE_FRONT_1"/>
+			<item id="215" genKey="TRICKY_TIRE_REAR_1"/>
+			<item id="302" genKey="TRICKY_RIM_FRONT_6"/>
+			<item id="308" genKey="TRICKY_RIM_REAR_6"/>
+		</set>
+		<set id="111" name="bike_category_rims_7" genKey="TRICKY_WHEELS_64" icon="images\garage\bike\upgrades\Rims_6.png" type="bike" price="45000" expLevelReq="150" alwaysLocked="0" cameraTarget="FRONT_WHEEL" colorSlotId="0" colorCategory="WHEELS">
+			<item id="210" genKey="TRICKY_TIRE_FRONT_1"/>
+			<item id="215" genKey="TRICKY_TIRE_REAR_1"/>
+			<item id="303" genKey="TRICKY_RIM_FRONT_7"/>
+			<item id="309" genKey="TRICKY_RIM_REAR_7"/>
+		</set>			
+	</sets>
+	<items>
+		<item id="4" genKey="TECHBOY_BOTTOM_1" colorPartId="239769300" bindId="PANTS" objectId="3486890472" shared="0" variationId="1"/>
+		<item id="5" genKey="TECHBOY_BOTTOM_2" colorPartId="260479147" bindId="PANTS" objectId="3486890472" shared="0" variationId="2"/>
+		<item id="6" genKey="TECHBOY_BOTTOM_4" colorPartId="139120705" bindId="PANTS" objectId="3486890472" shared="0" variationId="4"/>
+		<item id="7" genKey="TECHBOY_HEAD_1" colorPartId="795375336" bindId="HELMET" objectId="3440826863" shared="0" variationId="1"/>
+		<item id="8" genKey="TECHBOY_HEAD_2" colorPartId="655737260" bindId="HELMET" objectId="3440826863" shared="0" variationId="2"/>
+		<item id="9" genKey="TECHBOY_HEAD_4" colorPartId="197963867" bindId="HELMET" objectId="3440826863" shared="0" variationId="4"/>
+		<item id="1" genKey="TECHBOY_TOP_1" colorPartId="318519819" bindId="SHIRT" objectId="2729008919" shared="0" variationId="1"/>
+		<item id="2" genKey="TECHBOY_TOP_2" colorPartId="243358698" bindId="SHIRT" objectId="2729008919" shared="0" variationId="2"/>
+		<item id="3" genKey="TECHBOY_TOP_4" colorPartId="190033754" bindId="SHIRT" objectId="2729008919" shared="0" variationId="4"/>
+		<item id="10" genKey="SQUIRREL_HELMET_1" bindId="HELMET" objectId="1786136959" shared="0" variationId="1"/>
+		<item id="11" genKey="EVEL_KNIEVEL_TOPS_1" colorPartId="555398537" bindId="SHIRT" objectId="2970472106" shared="0" variationId="1"/>
+		<item id="12" genKey="EVEL_KNIEVEL_HELMETS_1" colorPartId="191514486" bindId="HELMET" objectId="3917481059" shared="0" variationId="1"/>
+		<item id="13" genKey="EVEL_KNIEVEL_BOTTOMS_1" colorPartId="46220238" bindId="PANTS" objectId="2886343732" shared="0" variationId="1"/>
+		<item id="14" genKey="DIRTRUNNER_TOPS_1" colorPartId="758847557" bindId="SHIRT" objectId="2205109786" shared="0" variationId="1"/>
+		<item id="15" genKey="DIRTRUNNER_TOPS_2" colorPartId="589395675" bindId="SHIRT" objectId="2205109786" shared="0" variationId="2"/>
+		<item id="16" genKey="DIRTRUNNER_TOPS_4" colorPartId="578602806" bindId="SHIRT" objectId="2205109786" shared="0" variationId="4"/>
+		<item id="17" genKey="DIRTRUNNER_BOTTOMS_1" colorPartId="669180435" bindId="PANTS" objectId="621293020" shared="0" variationId="1"/>
+		<item id="18" genKey="DIRTRUNNER_BOTTOMS_2" colorPartId="204453090" bindId="PANTS" objectId="621293020" shared="0" variationId="2"/>
+		<item id="19" genKey="DIRTRUNNER_BOTTOMS_4" colorPartId="216885466" bindId="PANTS" objectId="621293020" shared="0" variationId="4"/>
+		<item id="20" genKey="DIRTRUNNER_HELMETS_1" colorPartId="48332168" bindId="HELMET" objectId="4228964176" shared="0" variationId="1"/>
+		<item id="21" genKey="DIRTRUNNER_HELMETS_2" colorPartId="117779310" bindId="HELMET" objectId="4228964176" shared="0" variationId="2"/>
+		<item id="22" genKey="DIRTRUNNER_HELMETS_4" colorPartId="260842230" bindId="HELMET" objectId="4228964176" shared="0" variationId="4"/>
+		<item id="23" genKey="XPOLICE_BOTTOM_1" colorPartId="129251080" bindId="PANTS" objectId="730734378" shared="0" variationId="1"/>
+		<item id="24" genKey="XPOLICE_BOTTOM_2" colorPartId="76388049" bindId="PANTS" objectId="730734378" shared="0" variationId="2"/>
+		<item id="25" genKey="XPOLICE_BOTTOM_4" colorPartId="410249796" bindId="PANTS" objectId="730734378" shared="0" variationId="4"/>
+		<item id="26" genKey="XPOLICE_HELMETS_1" colorPartId="345901791" bindId="HELMET" objectId="2019321888" shared="0" variationId="1"/>
+		<item id="27" genKey="XPOLICE_HELMETS_2" colorPartId="58021060" bindId="HELMET" objectId="2019321888" shared="0" variationId="2"/>
+		<item id="28" genKey="XPOLICE_HELMETS_4" colorPartId="33120296" bindId="HELMET" objectId="2019321888" shared="0" variationId="4"/>
+		<item id="29" genKey="XPOLICE_TOPS_1" colorPartId="290461986" bindId="SHIRT" objectId="3836199735" shared="0" variationId="1"/>
+		<item id="30" genKey="XPOLICE_TOPS_2" colorPartId="64913407" bindId="SHIRT" objectId="3836199735" shared="0" variationId="2"/>
+		<item id="31" genKey="XPOLICE_TOPS_4" colorPartId="1862267" bindId="SHIRT" objectId="3836199735" shared="0" variationId="4"/>
+		<item id="32" genKey="FMX_FREAK_TOP_1" colorPartId="355274144" bindId="SHIRT" objectId="3240576765" shared="0" variationId="1"/>
+		<item id="33" genKey="FMX_FREAK_TOP_2" colorPartId="719387552" bindId="SHIRT" objectId="3240576765" shared="0" variationId="2"/>
+		<item id="34" genKey="FMX_FREAK_TOP_4" colorPartId="626267300" bindId="SHIRT" objectId="3240576765" shared="0" variationId="4"/>
+		<item id="35" genKey="FMX_FREAK_BOTTOM_1" colorPartId="117517125" bindId="PANTS" objectId="3641660362" shared="0" variationId="1"/>
+		<item id="36" genKey="FMX_FREAK_BOTTOM_2" colorPartId="309031857" bindId="PANTS" objectId="3641660362" shared="0" variationId="2"/>
+		<item id="37" genKey="FMX_FREAK_BOTTOM_4" colorPartId="413476822" bindId="PANTS" objectId="3641660362" shared="0" variationId="4"/>
+		<item id="38" genKey="FMX_FREAK_HELMET_1" colorPartId="131029524" bindId="HELMET" objectId="1198491454" shared="0" variationId="1"/>
+		<item id="39" genKey="FMX_FREAK_HELMET_2" colorPartId="463625756" bindId="HELMET" objectId="1198491454" shared="0" variationId="2"/>
+		<item id="40" genKey="FMX_FREAK_HELMET_4" colorPartId="154870870" bindId="HELMET" objectId="1198491454" shared="0" variationId="4"/>
+		<item id="41" genKey="GEOLOGIST_TOP_1" colorPartId="378717200" bindId="SHIRT" objectId="3665689525" shared="0" variationId="1"/>
+		<item id="42" genKey="GEOLOGIST_TOP_2" colorPartId="128962908" bindId="SHIRT" objectId="3665689525" shared="0" variationId="2"/>
+		<item id="43" genKey="GEOLOGIST_TOP_4" colorPartId="114588392" bindId="SHIRT" objectId="3665689525" shared="0" variationId="4"/>
+		<item id="44" genKey="GEOLOGIST_BOTTOM_1" colorPartId="286743744" bindId="PANTS" objectId="2795854687" shared="0" variationId="1"/>
+		<item id="45" genKey="GEOLOGIST_BOTTOM_2" colorPartId="382613160" bindId="PANTS" objectId="2795854687" shared="0" variationId="2"/>
+		<item id="46" genKey="GEOLOGIST_BOTTOM_4" colorPartId="233189762" bindId="PANTS" objectId="2795854687" shared="0" variationId="4"/>
+		<item id="47" genKey="GEOLOGIST_HELMET_1" colorPartId="685581760" bindId="HELMET" objectId="1920525124" shared="0" variationId="1"/>
+		<item id="48" genKey="GEOLOGIST_HELMET_2" colorPartId="136722765" bindId="HELMET" objectId="1920525124" shared="0" variationId="2"/>
+		<item id="49" genKey="GEOLOGIST_HELMET_4" colorPartId="925277925" bindId="HELMET" objectId="1920525124" shared="0" variationId="4"/>
+		<item id="249" genKey="HAZMASUIT_BOTTOM_1" colorPartId="254757484" bindId="PANTS" objectId="448314530" shared="0" variationId="1"/>
+		<item id="250" genKey="HAZMASUIT_HELMET_1" colorPartId="638201233" bindId="HELMET" objectId="852916207" shared="0" variationId="1"/>
+		<item id="251" genKey="HAZMASUIT_TOP_1" colorPartId="83748544" bindId="SHIRT" objectId="1682904899" shared="0" variationId="1"/>
+		<item id="257" genKey="ULCCLOWN_HELMET_1" bindId="HELMET" objectId="3195417312" shared="0" variationId="1"/>
+		<item id="258" genKey="ULCDRINK_HELMET_1" bindId="HELMET" objectId="2572910634" shared="0" variationId="1"/>
+		<item id="259" genKey="ULCRHINO_HELMET_1" bindId="HELMET" objectId="3475818384" shared="0" variationId="1"/>
+		<item id="255" genKey="SUPERHERO_HELMET_1" colorPartId="48391905" bindId="HELMET" objectId="2121301039" shared="0" variationId="1"/>
+		<item id="256" genKey="SUPERHERO_TORSO_1" colorPartId="44450438" bindId="SHIRT" objectId="1467640519" shared="0" variationId="1"/>
+		<item id="85" genKey="KINGCOBRA_FRONT_FENDER_1_1" colorPartId="10636162" bindId="FRONT_FENDER" objectId="1800909551" shared="0" variationId="1"/>
+		<item id="86" genKey="KINGCOBRA_FRONT_FENDER_1_2" colorPartId="92410778" bindId="FRONT_FENDER" objectId="1800909551" shared="0" variationId="2"/>
+		<item id="87" genKey="KINGCOBRA_FRONT_FENDER_1_4" colorPartId="66919694" bindId="FRONT_FENDER" objectId="1800909551" shared="0" variationId="4"/>
+		<item id="88" genKey="KINGCOBRA_FRONT_FENDER_1_8" colorPartId="350353465" bindId="FRONT_FENDER" objectId="1800909551" shared="0" variationId="8"/>
+		<item id="89" genKey="KINGCOBRA_FRONT_FENDER_1_16" colorPartId="1029879548" bindId="FRONT_FENDER" objectId="1800909551" shared="0" variationId="16"/>
+		<item id="50" genKey="KINGCOBRA_HEAD_LIGHT_1_1" bindId="FRONT_LIGHT" objectId="4264875563" shared="0" variationId="1"/>
+		<item id="51" genKey="KINGCOBRA_HEAD_LIGHT_1_2" bindId="FRONT_LIGHT" objectId="4264875563" shared="0" variationId="2"/>
+		<item id="52" genKey="KINGCOBRA_HEAD_LIGHT_1_4" colorPartId="120761436" bindId="FRONT_LIGHT" objectId="4264875563" shared="0" variationId="4"/>
+		<item id="53" genKey="KINGCOBRA_HEAD_LIGHT_1_8" colorPartId="20196760" bindId="FRONT_LIGHT" objectId="4264875563" shared="0" variationId="8"/>
+		<item id="54" genKey="KINGCOBRA_HEAD_LIGHT_1_16" colorPartId="243407370" bindId="FRONT_LIGHT" objectId="4264875563" shared="0" variationId="16"/>
+		<item id="260" genKey="KINGCOBRA_HEAD_LIGHT_1_32" bindId="FRONT_LIGHT" objectId="4264875563" shared="0" variationId="32"/>
+		<item id="61" genKey="KINGCOBRA_FRONT_TIRE_1_1" bindId="FRONT_WHEEL" objectId="3124148953" shared="1" variationId="1"/>
+		<item id="79" genKey="KINGCOBRA_REAR_FENDER_1_1" colorPartId="134961742" bindId="BACK_FENDER" objectId="277613352" shared="0" variationId="1"/>
+		<item id="80" genKey="KINGCOBRA_REAR_FENDER_1_2" colorPartId="340318314" bindId="BACK_FENDER" objectId="277613352" shared="0" variationId="2"/>
+		<item id="81" genKey="KINGCOBRA_REAR_FENDER_1_4" colorPartId="498381660" bindId="BACK_FENDER" objectId="277613352" shared="0" variationId="4"/>
+		<item id="82" genKey="KINGCOBRA_REAR_FENDER_1_8" colorPartId="257579460" bindId="BACK_FENDER" objectId="277613352" shared="0" variationId="8"/>
+		<item id="83" genKey="KINGCOBRA_REAR_FENDER_1_16" colorPartId="324574320" bindId="BACK_FENDER" objectId="277613352" shared="0" variationId="16"/>
+		<item id="261" genKey="KINGCOBRA_REAR_FENDER_1_32" colorPartId="17161875" bindId="BACK_FENDER" objectId="277613352" shared="0" variationId="32"/>
+		<item id="55" genKey="KINGCOBRA_FRAME_1_1" colorPartId="19048300" bindId="FRAME" objectId="176373241" shared="1" variationId="1"/>
+		<item id="262" genKey="KINGCOBRA_FRAME_1_2" colorPartId="204674706" bindId="FRAME" objectId="176373241" shared="1" variationId="2"/>
+		<item id="84" genKey="KINGCOBRA_STEERING_1_1" bindId="STEERING" objectId="307650035" shared="1" variationId="1"/>
+		<item id="263" genKey="KINGCOBRA_STEERING_1_2" bindId="STEERING" objectId="307650035" shared="1" variationId="2"/>
+		<item id="74" genKey="KINGCOBRA_EXHAUST_PIPE_1_1" bindId="EXHAUST" objectId="981018436" shared="0" variationId="1"/>
+		<item id="75" genKey="KINGCOBRA_EXHAUST_PIPE_1_2" bindId="EXHAUST" objectId="981018436" shared="0" variationId="2"/>
+		<item id="76" genKey="KINGCOBRA_EXHAUST_PIPE_1_4" bindId="EXHAUST" objectId="981018436" shared="0" variationId="4"/>
+		<item id="77" genKey="KINGCOBRA_EXHAUST_PIPE_1_8" bindId="EXHAUST" objectId="981018436" shared="0" variationId="8"/>
+		<item id="78" genKey="KINGCOBRA_EXHAUST_PIPE_1_16" bindId="EXHAUST" objectId="981018436" shared="0" variationId="16"/>
+		<item id="264" genKey="KINGCOBRA_EXHAUST_PIPE_1_32" bindId="EXHAUST" objectId="981018436" shared="0" variationId="32" colorPartId="123614834"/>
+		<item id="99" genKey="KINGCOBRA_REAR_TIRE_1_1" bindId="BACK_WHEEL" objectId="3401730370" shared="1" variationId="1"/>
+		<item id="91" genKey="KINGCOBRA_FRONT_SUSPENSION_1_1" bindId="SUSPENSION" objectId="1836283527" shared="0" variationId="1"/>
+		<item id="265" genKey="KINGCOBRA_FRONT_SUSPENSION_1_2" bindId="SUSPENSION" objectId="1836283527" shared="0" variationId="2"/>
+		<item id="69" genKey="KINGCOBRA_SEAT_1_1" colorPartId="154111971" bindId="BENCH" objectId="4027737474" shared="0" variationId="1"/>
+		<item id="70" genKey="KINGCOBRA_SEAT_1_2" colorPartId="3822390" bindId="BENCH" objectId="4027737474" shared="0" variationId="2"/>
+		<item id="71" genKey="KINGCOBRA_SEAT_1_4" colorPartId="829736091" bindId="BENCH" objectId="4027737474" shared="0" variationId="4"/>
+		<item id="72" genKey="KINGCOBRA_SEAT_1_8" colorPartId="44717778" bindId="BENCH" objectId="4027737474" shared="0" variationId="8"/>
+		<item id="73" genKey="KINGCOBRA_SEAT_1_16" colorPartId="223468245" bindId="BENCH" objectId="4027737474" shared="0" variationId="16"/>
+		<item id="266" genKey="KINGCOBRA_SEAT_1_32" bindId="BENCH" objectId="4027737474" shared="0" variationId="32" colorPartId="712686024"/>
+		<item id="56" genKey="KINGCOBRA_ENGINE_FENDER_1_1" bindId="ENGINE_COVER" objectId="2559047388" shared="0" variationId="1"/>
+		<item id="57" genKey="KINGCOBRA_ENGINE_FENDER_1_2" colorPartId="280833680" bindId="ENGINE_COVER" objectId="2559047388" shared="0" variationId="2"/>
+		<item id="58" genKey="KINGCOBRA_ENGINE_FENDER_1_4" colorPartId="314541168" bindId="ENGINE_COVER" objectId="2559047388" shared="0" variationId="4"/>
+		<item id="59" genKey="KINGCOBRA_ENGINE_FENDER_1_8" colorPartId="961243007" bindId="ENGINE_COVER" objectId="2559047388" shared="0" variationId="8"/>
+		<item id="60" genKey="KINGCOBRA_ENGINE_FENDER_1_16" colorPartId="119999923" bindId="ENGINE_COVER" objectId="2559047388" shared="0" variationId="16"/>
+		<item id="267" genKey="KINGCOBRA_ENGINE_FENDER_1_32" colorPartId="578015910" bindId="ENGINE_COVER" objectId="2559047388" shared="0" variationId="32"/>
+		<item id="100" genKey="KINGCOBRA_SWING_ARM_1_1" colorPartId="244317692" bindId="BACK_FRAME" objectId="3391534189" shared="1" variationId="1"/>
+		<item id="268" genKey="KINGCOBRA_SWING_ARM_1_2" colorPartId="700601944" bindId="BACK_FRAME" objectId="3391534189" shared="1" variationId="2"/>
+		<item id="269" genKey="KINGCOBRA_SWING_ARM_1_4" colorPartId="132081513" bindId="BACK_FRAME" objectId="3391534189" shared="1" variationId="4"/>
+		<item id="270" genKey="KINGCOBRA_SWING_ARM_1_8" colorPartId="43759311" bindId="BACK_FRAME" objectId="3391534189" shared="1" variationId="8"/>
+		<item id="271" genKey="KINGCOBRA_SWING_ARM_1_16" colorPartId="142739872" bindId="BACK_FRAME" objectId="3391534189" shared="1" variationId="16"/>
+		<item id="62" genKey="KINGCOBRA_FRONT_RIM_1_1" colorPartId="523734" bindId="FRONT_RIM" objectId="900228276" shared="0" variationId="1"/>
+		<item id="63" genKey="KINGCOBRA_FRONT_RIM_1_2" colorPartId="241375050" bindId="FRONT_RIM" objectId="900228276" shared="0" variationId="2"/>
+		<item id="64" genKey="KINGCOBRA_FRONT_RIM_1_4" colorPartId="12995712" bindId="FRONT_RIM" objectId="900228276" shared="0" variationId="4"/>
+		<item id="65" genKey="KINGCOBRA_FRONT_RIM_1_8" colorPartId="55382208" bindId="FRONT_RIM" objectId="900228276" shared="0" variationId="8"/>
+		<item id="66" genKey="KINGCOBRA_FRONT_RIM_1_16" colorPartId="187175412" bindId="FRONT_RIM" objectId="900228276" shared="0" variationId="16"/>
+		<item id="67" genKey="KINGCOBRA_FRONT_RIM_1_32" colorPartId="219683940" bindId="FRONT_RIM" objectId="900228276" shared="0" variationId="32"/>
+		<item id="68" genKey="KINGCOBRA_FRONT_RIM_1_64" colorPartId="7530798" bindId="FRONT_RIM" objectId="900228276" shared="0" variationId="64"/>
+		<item id="272" genKey="KINGCOBRA_FRONT_RIM_1_128" bindId="FRONT_RIM" objectId="900228276" shared="0" variationId="128" colorPartId="439398190"/>
+		<item id="92" genKey="KINGCOBRA_REAR_RIM_1_1" colorPartId="761037658" bindId="BACK_RIM" objectId="4163910667" shared="0" variationId="1"/>
+		<item id="93" genKey="KINGCOBRA_REAR_RIM_1_2" colorPartId="168020424" bindId="BACK_RIM" objectId="4163910667" shared="0" variationId="2"/>
+		<item id="94" genKey="KINGCOBRA_REAR_RIM_1_4" colorPartId="164514720" bindId="BACK_RIM" objectId="4163910667" shared="0" variationId="4"/>
+		<item id="95" genKey="KINGCOBRA_REAR_RIM_1_8" colorPartId="97042804" bindId="BACK_RIM" objectId="4163910667" shared="0" variationId="8"/>
+		<item id="96" genKey="KINGCOBRA_REAR_RIM_1_16" colorPartId="7421006" bindId="BACK_RIM" objectId="4163910667" shared="0" variationId="16"/>
+		<item id="97" genKey="KINGCOBRA_REAR_RIM_1_32" colorPartId="185385888" bindId="BACK_RIM" objectId="4163910667" shared="0" variationId="32"/>
+		<item id="98" genKey="KINGCOBRA_REAR_RIM_1_64" colorPartId="206026000" bindId="BACK_RIM" objectId="4163910667" shared="0" variationId="64"/>
+		<item id="273" genKey="KINGCOBRA_REAR_RIM_1_128" bindId="BACK_RIM" objectId="4163910667" shared="0" variationId="128" colorPartId="138350877"/>
+		<item id="90" genKey="KINGCOBRA_ENGINE_1_1" bindId="ENGINE" objectId="2807610219" shared="1" variationId="1"/>
+		<item id="113" genKey="CHEETAH_FRONT_SUSPENSION_1_1" bindId="SUSPENSION" objectId="449501442" shared="1" variationId="1"/>
+		<item id="119" genKey="CHEETAH_EXHAUST_1_1" colorPartId="172344552" bindId="EXHAUST" objectId="2481253494" shared="0" variationId="1"/>
+		<item id="120" genKey="CHEETAH_EXHAUST_1_2" colorPartId="28600376" bindId="EXHAUST" objectId="2481253494" shared="0" variationId="2"/>
+		<item id="121" genKey="CHEETAH_EXHAUST_1_4" colorPartId="61383720" bindId="EXHAUST" objectId="2481253494" shared="0" variationId="4"/>
+		<item id="274" genKey="CHEETAH_EXHAUST_1_8" colorPartId="272844470" bindId="EXHAUST" objectId="2481253494" shared="0" variationId="8"/>
+		<item id="297" genKey="CHEETAH_EXHAUST_1_16" colorPartId="771758835" bindId="EXHAUST" objectId="2481253494" shared="0" variationId="16"/>		
+		<item id="298" genKey="CHEETAH_EXHAUST_1_32" colorPartId="426903796" bindId="EXHAUST" objectId="2481253494" shared="0" variationId="32"/>				
+		<item id="142" genKey="CHEETAH_ENGINE_FENDER_1_1" colorPartId="163397696" bindId="ENGINE_COVER" objectId="1268337543" shared="0" variationId="1"/>
+		<item id="143" genKey="CHEETAH_ENGINE_FENDER_1_2" colorPartId="202647746" bindId="ENGINE_COVER" objectId="1268337543" shared="0" variationId="2"/>
+		<item id="144" genKey="CHEETAH_ENGINE_FENDER_1_4" colorPartId="286835056" bindId="ENGINE_COVER" objectId="1268337543" shared="0" variationId="4"/>
+		<item id="145" genKey="CHEETAH_ENGINE_FENDER_1_8" colorPartId="778027194" bindId="ENGINE_COVER" objectId="1268337543" shared="0" variationId="8"/>
+		<item id="146" genKey="CHEETAH_ENGINE_FENDER_1_16" colorPartId="308880783" bindId="ENGINE_COVER" objectId="1268337543" shared="0" variationId="16"/>
+		<item id="275" genKey="CHEETAH_ENGINE_FENDER_1_32" colorPartId="536302896" bindId="ENGINE_COVER" objectId="1268337543" shared="0" variationId="32"/>
+		<item id="137" genKey="CHEETAH_BACKSWING_1_1" colorPartId="41017575" bindId="BACK_FRAME" objectId="4118466544" shared="0" variationId="1"/>
+		<item id="138" genKey="CHEETAH_BACKSWING_1_2" colorPartId="32664324" bindId="BACK_FRAME" objectId="4118466544" shared="0" variationId="2"/>
+		<item id="139" genKey="CHEETAH_BACKSWING_1_4" colorPartId="26649115" bindId="BACK_FRAME" objectId="4118466544" shared="0" variationId="4"/>
+		<item id="140" genKey="CHEETAH_BACKSWING_1_8" colorPartId="290489049" bindId="BACK_FRAME" objectId="4118466544" shared="0" variationId="8"/>
+		<item id="141" genKey="CHEETAH_BACKSWING_1_16" colorPartId="495587820" bindId="BACK_FRAME" objectId="4118466544" shared="0" variationId="16"/>
+		<item id="276" genKey="CHEETAH_BACKSWING_1_32" colorPartId="631904655" bindId="BACK_FRAME" objectId="4118466544" shared="0" variationId="32"/>
+		<item id="105" genKey="CHEETAH_RIM_REAR_1_1" colorPartId="34431741" bindId="BACK_RIM" objectId="1712951832" shared="0" variationId="1"/>
+		<item id="106" genKey="CHEETAH_RIM_REAR_1_2" colorPartId="55675584" bindId="BACK_RIM" objectId="1712951832" shared="0" variationId="2"/>
+		<item id="107" genKey="CHEETAH_RIM_REAR_1_4" colorPartId="116362146" bindId="BACK_RIM" objectId="1712951832" shared="0" variationId="4"/>
+		<item id="108" genKey="CHEETAH_RIM_REAR_1_8" colorPartId="383183559" bindId="BACK_RIM" objectId="1712951832" shared="0" variationId="8"/>
+		<item id="109" genKey="CHEETAH_RIM_REAR_1_16" colorPartId="348243771" bindId="BACK_RIM" objectId="1712951832" shared="0" variationId="16"/>
+		<item id="110" genKey="CHEETAH_RIM_REAR_1_32" colorPartId="800198075" bindId="BACK_RIM" objectId="1712951832" shared="0" variationId="32"/>
+		<item id="111" genKey="CHEETAH_RIM_REAR_1_64" colorPartId="618715656" bindId="BACK_RIM" objectId="1712951832" shared="0" variationId="64"/>
+		<item id="122" genKey="CHEETAH_SEAT_1_1" colorPartId="6536922" bindId="BENCH" objectId="2758898808" shared="0" variationId="1"/>
+		<item id="123" genKey="CHEETAH_SEAT_1_2" colorPartId="350534792" bindId="BENCH" objectId="2758898808" shared="0" variationId="2"/>
+		<item id="124" genKey="CHEETAH_SEAT_1_4" colorPartId="222407053" bindId="BENCH" objectId="2758898808" shared="0" variationId="4"/>
+		<item id="125" genKey="CHEETAH_SEAT_1_8" colorPartId="282585288" bindId="BENCH" objectId="2758898808" shared="0" variationId="8"/>
+		<item id="126" genKey="CHEETAH_SEAT_1_16" colorPartId="129950414" bindId="BENCH" objectId="2758898808" shared="0" variationId="16"/>
+		<item id="277" genKey="CHEETAH_SEAT_1_32" bindId="BENCH" objectId="2758898808" shared="0" variationId="32" colorPartId="643804776"/>
+		<item id="127" genKey="CHEETAH_TANK_1_1" colorPartId="24106670" bindId="TANK" objectId="3358672034" shared="1" variationId="1"/>
+		<item id="278" genKey="CHEETAH_TANK_1_2" colorPartId="168402227" bindId="TANK" objectId="3358672034" shared="1" variationId="2"/>
+		<item id="114" genKey="CHEETAH_FENDER_REAR_1_1" colorPartId="4442424,20859091" bindId="BACK_FENDER" objectId="773407022" shared="0" variationId="1"/>
+		<item id="115" genKey="CHEETAH_FENDER_REAR_1_2" colorPartId="253132572" bindId="BACK_FENDER" objectId="773407022" shared="0" variationId="2"/>
+		<item id="116" genKey="CHEETAH_FENDER_REAR_1_4" colorPartId="199405095" bindId="BACK_FENDER" objectId="773407022" shared="0" variationId="4"/>
+		<item id="117" genKey="CHEETAH_FENDER_REAR_1_8" colorPartId="329071572" bindId="BACK_FENDER" objectId="773407022" shared="0" variationId="8"/>
+		<item id="118" genKey="CHEETAH_FENDER_REAR_1_16" colorPartId="237405798,2251638,469401180" bindId="BACK_FENDER" objectId="773407022" shared="0" variationId="16"/>
+		<item id="279" genKey="CHEETAH_FENDER_REAR_1_32" bindId="BACK_FENDER" objectId="773407022" shared="0" variationId="32" colorPartId="145241704"/>
+		<item id="101" genKey="CHEETAH_WHEEL_FRONT_1_1" bindId="FRONT_WHEEL" objectId="3743050135" shared="1" variationId="1"/>
+		<item id="112" genKey="CHEETAH_WHEEL_REAR_1_1" bindId="BACK_WHEEL" objectId="2848404268" shared="1" variationId="1"/>
+		<item id="135" genKey="CHEETAH_STEERING_1_1" bindId="STEERING" objectId="2364827786" shared="0" variationId="1"/>
+		<item id="136" genKey="CHEETAH_STEERING_1_2" bindId="STEERING" objectId="2364827786" shared="0" variationId="2"/>
+		<item id="102" genKey="CHEETAH_FRAME_1_1" bindId="FRAME" objectId="1309382674" shared="0" variationId="1"/>
+		<item id="103" genKey="CHEETAH_FRAME_1_2" bindId="FRAME" objectId="1309382674" shared="0" variationId="2"/>
+		<item id="104" genKey="CHEETAH_FRAME_1_4" bindId="FRAME" objectId="1309382674" shared="0" variationId="4"/>
+		<item id="280" genKey="CHEETAH_FRAME_1_8" bindId="FRAME" objectId="1309382674" shared="0" variationId="8"/>
+		<item id="128" genKey="CHEETAH_RIM_FRONT_1_1" colorPartId="34673404" bindId="FRONT_RIM" objectId="4247647172" shared="0" variationId="1"/>
+		<item id="129" genKey="CHEETAH_RIM_FRONT_1_2" colorPartId="95018175" bindId="FRONT_RIM" objectId="4247647172" shared="0" variationId="2"/>
+		<item id="130" genKey="CHEETAH_RIM_FRONT_1_4" colorPartId="428748624" bindId="FRONT_RIM" objectId="4247647172" shared="0" variationId="4"/>
+		<item id="131" genKey="CHEETAH_RIM_FRONT_1_8" colorPartId="448095186" bindId="FRONT_RIM" objectId="4247647172" shared="0" variationId="8"/>
+		<item id="132" genKey="CHEETAH_RIM_FRONT_1_16" colorPartId="282433280" bindId="FRONT_RIM" objectId="4247647172" shared="0" variationId="16"/>
+		<item id="133" genKey="CHEETAH_RIM_FRONT_1_32" colorPartId="254363032" bindId="FRONT_RIM" objectId="4247647172" shared="0" variationId="32"/>
+		<item id="134" genKey="CHEETAH_RIM_FRONT_1_64" colorPartId="418965910" bindId="FRONT_RIM" objectId="4247647172" shared="0" variationId="64"/>
+		<item id="147" genKey="CHEETAH_ENGINE_1_1" bindId="ENGINE" objectId="4225178140" shared="1" variationId="1"/>
+		<item id="281" genKey="CHEETAH_ENGINE_1_2" bindId="ENGINE" objectId="4225178140" shared="1" variationId="2"/>
+		<item id="148" genKey="CHEETAH_HEADLIGHT_1_1" bindId="FRONT_LIGHT" objectId="846302503" shared="0" variationId="1"/>
+		<item id="149" genKey="CHEETAH_HEADLIGHT_1_2" colorPartId="173910886" bindId="FRONT_LIGHT" objectId="846302503" shared="0" variationId="2"/>
+		<item id="150" genKey="CHEETAH_HEADLIGHT_1_4" colorPartId="123812000" bindId="FRONT_LIGHT" objectId="846302503" shared="0" variationId="4"/>
+		<item id="151" genKey="CHEETAH_HEADLIGHT_1_8" colorPartId="540294303" bindId="FRONT_LIGHT" objectId="846302503" shared="0" variationId="8"/>
+		<item id="152" genKey="CHEETAH_HEADLIGHT_1_16" colorPartId="7225548" bindId="FRONT_LIGHT" objectId="846302503" shared="0" variationId="16"/>
+		<item id="282" genKey="CHEETAH_HEADLIGHT_1_32" bindId="FRONT_LIGHT" objectId="846302503" shared="0" variationId="32"/>
+		<item id="153" genKey="CHEETAH_FENDER_FRONT_1_1" colorPartId="11758056" bindId="FRONT_FENDER" objectId="2602896430" shared="0" variationId="1"/>
+		<item id="154" genKey="CHEETAH_FENDER_FRONT_1_2" colorPartId="392588943" bindId="FRONT_FENDER" objectId="2602896430" shared="0" variationId="2"/>
+		<item id="155" genKey="CHEETAH_FENDER_FRONT_1_4" colorPartId="89456400" bindId="FRONT_FENDER" objectId="2602896430" shared="0" variationId="4"/>
+		<item id="156" genKey="CHEETAH_FENDER_FRONT_1_8" colorPartId="285179580" bindId="FRONT_FENDER" objectId="2602896430" shared="0" variationId="8"/>
+		<item id="157" genKey="CHEETAH_FENDER_FRONT_1_16" colorPartId="625723674" bindId="FRONT_FENDER" objectId="2602896430" shared="0" variationId="16"/>
+		<item id="283" genKey="CHEETAH_FENDER_FRONT_1_32" colorPartId="369472077" bindId="FRONT_FENDER" objectId="2602896430" shared="0" variationId="32" />
+		<item id="164" genKey="MINX_FRAME_1_1" bindId="FRAME" objectId="181902663" shared="0" variationId="1"/>
+		<item id="173" genKey="MINX_EXHAUST_1_1" colorPartId="619517430" bindId="EXHAUST" objectId="1796714929" shared="0" variationId="1"/>
+		<item id="166" genKey="MINX_RIM_FRONT_1_1" colorPartId="52245726" bindId="FRONT_RIM" objectId="217056114" shared="0" variationId="1"/>
+		<item id="167" genKey="MINX_RIM_FRONT_1_2" colorPartId="86503622" bindId="FRONT_RIM" objectId="217056114" shared="0" variationId="2"/>
+		<item id="168" genKey="MINX_RIM_FRONT_1_4" colorPartId="133933265" bindId="FRONT_RIM" objectId="217056114" shared="0" variationId="4"/>
+		<item id="169" genKey="MINX_RIM_FRONT_1_8" colorPartId="36944469" bindId="FRONT_RIM" objectId="217056114" shared="0" variationId="8"/>
+		<item id="170" genKey="MINX_RIM_FRONT_1_16" colorPartId="2984961" bindId="FRONT_RIM" objectId="217056114" shared="0" variationId="16"/>
+		<item id="171" genKey="MINX_RIM_FRONT_1_32" colorPartId="430161726" bindId="FRONT_RIM" objectId="217056114" shared="0" variationId="32"/>
+		<item id="172" genKey="MINX_RIM_FRONT_1_64" colorPartId="224452524" bindId="FRONT_RIM" objectId="217056114" shared="0" variationId="64"/>
+		<item id="162" genKey="MINX_FRONT_SUSPENSION_1_1" bindId="SUSPENSION" objectId="547921224" shared="0" variationId="1"/>
+		<item id="163" genKey="MINX_HEAD_LIGHT_1_1" bindId="FRONT_LIGHT" objectId="4178620700" shared="0" variationId="1"/>
+		<item id="160" genKey="MINX_TIRE_FRONT_1_1" bindId="FRONT_WHEEL" objectId="3229655965" shared="1" variationId="1"/>
+		<item id="159" genKey="MINX_STEERING_1_1" bindId="STEERING" objectId="1062940314" shared="0" variationId="1"/>
+		<item id="175" genKey="MINX_SEAT_1_1" colorPartId="110944575" bindId="BENCH" objectId="3736617860" shared="0" variationId="1"/>
+		<item id="161" genKey="MINX_ENGINE_1_1" bindId="ENGINE" objectId="2198487182" shared="0" variationId="1"/>
+		<item id="158" genKey="MINX_BACK_SWING_ARM_1_1" colorPartId="284232654,176919718,306242415" bindId="BACK_FRAME" objectId="1947742409" shared="0" variationId="1"/>
+		<item id="177" genKey="MINX_FENDER_REAR_1_1" colorPartId="330302520,53386355" bindId="BACK_FENDER" objectId="2121769751" shared="0" variationId="1"/>
+		<item id="165" genKey="MINX_ENGINE_FENDER_1_1" colorPartId="237553500" bindId="ENGINE_COVER" objectId="2119016505" shared="0" variationId="1"/>
+		<item id="174" genKey="MINX_TIRE_REAR_1_1" bindId="BACK_WHEEL" objectId="2028452995" shared="1" variationId="1"/>
+		<item id="176" genKey="MINX_TANK_1_1" colorPartId="731159985" bindId="TANK" objectId="327608925" shared="0" variationId="1"/>
+		<item id="178" genKey="MINX_RIM_REAR_1_1" colorPartId="268912664" bindId="BACK_RIM" objectId="4229655583" shared="0" variationId="1"/>
+		<item id="179" genKey="MINX_RIM_REAR_1_2" colorPartId="159018468" bindId="BACK_RIM" objectId="4229655583" shared="0" variationId="2"/>
+		<item id="180" genKey="MINX_RIM_REAR_1_4" colorPartId="185083330" bindId="BACK_RIM" objectId="4229655583" shared="0" variationId="4"/>
+		<item id="181" genKey="MINX_RIM_REAR_1_8" colorPartId="483966764" bindId="BACK_RIM" objectId="4229655583" shared="0" variationId="8"/>
+		<item id="182" genKey="MINX_RIM_REAR_1_16" colorPartId="9204000" bindId="BACK_RIM" objectId="4229655583" shared="0" variationId="16"/>
+		<item id="183" genKey="MINX_RIM_REAR_1_32" colorPartId="7361784" bindId="BACK_RIM" objectId="4229655583" shared="0" variationId="32"/>
+		<item id="184" genKey="MINX_RIM_REAR_1_64" colorPartId="491251200" bindId="BACK_RIM" objectId="4229655583" shared="0" variationId="64"/>
+		<item id="185" genKey="MINX_FENDER_FRONT_1_1" colorPartId="320897960" bindId="FRONT_FENDER" objectId="1823202081" shared="0" variationId="1"/>
+		<item id="186" genKey="FAT_GRIZZLY_SUSPENSION_REAR_1_1" colorPartId="208141584" bindId="BACK_FRAME" objectId="2403098839" shared="0" variationId="1"/>
+		<item id="187" genKey="FAT_GRIZZLY_SUSPENSION_FRONT_1_1" colorPartId="5772214" bindId="SUSPENSION" objectId="960364720" shared="0" variationId="1"/>
+		<item id="188" genKey="FAT_GRIZZLY_BODY_1_1" colorPartId="10059546" bindId="ENGINE_COVER" objectId="1636534121" shared="0" variationId="1"/>
+		<item id="189" genKey="FAT_GRIZZLY_CHASSIS_1_1" colorPartId="12270000,29077973,642597224" bindId="FRAME" objectId="4244928144" shared="0" variationId="1"/>
+		<item id="190" genKey="FAT_GRIZZLY_EXHAUST_1_1" colorPartId="356945280" bindId="EXHAUST" objectId="1844402925" shared="0" variationId="1"/>
+		<item id="191" genKey="FAT_GRIZZLY_HEADLIGHT_1_1" bindId="FRONT_LIGHT" objectId="1926630339" shared="0" variationId="1"/>
+		<item id="192" genKey="FAT_GRIZZLY_STEERING_1_1" bindId="STEERING" objectId="165265465" shared="0" variationId="1"/>
+		<item id="193" genKey="FAT_GRIZZLY_TIRE_RIGHTSIDE_FRONT_1" colorPartId="385561440" bindId="FRONT_TIRE_RIGHT" objectId="1953956558" shared="0" variationId="1"/>
+		<item id="194" genKey="FAT_GRIZZLY_TIRE_LEFTSIDE_FRONT_1" colorPartId="385561440" bindId="FRONT_TIRE_LEFT" objectId="4110292984" shared="0" variationId="1"/>
+		<item id="195" genKey="FAT_GRIZZLY_TIRE_RIGHTSIDE_BACK_1" colorPartId="385561440" bindId="BACK_TIRE_RIGHT" objectId="181960929" shared="0" variationId="1"/>
+		<item id="196" genKey="FAT_GRIZZLY_TIRE_LEFTSIDE_BACK_1" colorPartId="385561440" bindId="BACK_TIRE_LEFT" objectId="4003567676" shared="0" variationId="1"/>
+		<item id="197" genKey="PAPER_BOY_FRAME_1_1" colorPartId="97468030" bindId="FRAME" objectId="2232819273" shared="0" variationId="1"/>
+		<item id="198" genKey="PAPER_BOY_PEDAL_ARMS_1_1" colorPartId="56610288" bindId="PEDAL_ARMS" objectId="951195150" shared="0" variationId="1"/>
+		<item id="199" genKey="PAPER_BOY_PEDAL_LEFT_1_1" colorPartId="151202746" bindId="PEDAL_LEFT" objectId="3283896376" shared="0" variationId="1"/>
+		<item id="200" genKey="PAPER_BOY_PEDAL_RIGHT_1_1" colorPartId="287475109" bindId="PEDAL_RIGHT" objectId="3031341801" shared="0" variationId="1"/>
+		<item id="201" genKey="PAPER_BOY_STEERING_1_1" colorPartId="760497672" bindId="STEERING" objectId="1245033302" shared="0" variationId="1"/>
+		<item id="202" genKey="PAPER_BOY_SUSPENSION_FRONT_1_1" colorPartId="25613802" bindId="SUSPENSION" objectId="3398940803" shared="0" variationId="1"/>
+		<item id="203" genKey="PAPER_BOY_TIRE_FRONT_1_1" colorPartId="101574553" bindId="FRONT_WHEEL" objectId="692509901" shared="0" variationId="1"/>
+		<item id="204" genKey="PAPER_BOY_TIRE_REAR_1_1" colorPartId="437260956" bindId="BACK_WHEEL" objectId="1434273319" shared="0" variationId="1"/>
+		<item id="205" genKey="PAPER_BOY_BACK_SWING_ARM_1" colorPartId="19482048" bindId="BACK_FRAME" objectId="3160227714" shared="0" variationId="1"/>
+		<item id="211" genKey="TRICKY_SUSPENSION_FRONT_1" bindId="SUSPENSION" objectId="205185974" shared="0" variationId="1"/>
+		<item id="212" genKey="TRICKY_SUSPENSION_FRONT_2" bindId="SUSPENSION" objectId="205185974" shared="0" variationId="2"/>
+		<item id="213" genKey="TRICKY_SUSPENSION_FRONT_4" bindId="SUSPENSION" objectId="205185974" shared="0" variationId="4"/>
+		<item id="214" genKey="TRICKY_SUSPENSION_FRONT_8" bindId="SUSPENSION" objectId="205185974" shared="0" variationId="8"/>
+		<item id="284" genKey="TRICKY_SUSPENSION_FRONT_16" bindId="SUSPENSION" objectId="205185974" shared="0" variationId="16"/>
+		<item id="210" genKey="TRICKY_TIRE_FRONT_1" bindId="FRONT_WHEEL" objectId="3346244497" shared="1" variationId="1"/>
+		<item id="216" genKey="TRICKY_EXHAUST_1" bindId="EXHAUST" objectId="3325608272" shared="0" variationId="1"/>
+		<item id="217" genKey="TRICKY_EXHAUST_2" bindId="EXHAUST" objectId="3325608272" shared="0" variationId="2"/>
+		<item id="218" genKey="TRICKY_EXHAUST_4" colorPartId="524638944" bindId="EXHAUST" objectId="3325608272" shared="0" variationId="4"/>
+		<item id="219" genKey="TRICKY_EXHAUST_8" bindId="EXHAUST" objectId="3325608272" shared="0" variationId="8"/>
+		<item id="285" genKey="TRICKY_EXHAUST_16" bindId="EXHAUST" objectId="3325608272" shared="0" variationId="16"/>
+		<item id="215" genKey="TRICKY_TIRE_REAR_1" bindId="BACK_WHEEL" objectId="2873515607" shared="1" variationId="1"/>
+		<item id="206" genKey="TRICKY_HEAD_LIGHT_1" bindId="FRONT_LIGHT" objectId="2216336871" shared="0" variationId="1"/>
+		<item id="207" genKey="TRICKY_HEAD_LIGHT_2" bindId="FRONT_LIGHT" objectId="2216336871" shared="0" variationId="2"/>
+		<item id="208" genKey="TRICKY_HEAD_LIGHT_4" bindId="FRONT_LIGHT" objectId="2216336871" shared="0" variationId="4"/>
+		<item id="209" genKey="TRICKY_HEAD_LIGHT_8" bindId="FRONT_LIGHT" objectId="2216336871" shared="0" variationId="8"/>
+		<item id="286" genKey="TRICKY_HEAD_LIGHT_16" bindId="FRONT_LIGHT" objectId="2216336871" shared="0" variationId="16"/>
+		<item id="225" genKey="TRICKY_BACK_SWING_ARM_1" bindId="BACK_FRAME" objectId="3039066993" shared="0" variationId="1"/>
+		<item id="226" genKey="TRICKY_BACK_SWING_ARM_2" colorPartId="26213160" bindId="BACK_FRAME" objectId="3039066993" shared="0" variationId="2"/>
+		<item id="227" genKey="TRICKY_BACK_SWING_ARM_4" bindId="BACK_FRAME" objectId="3039066993" shared="0" variationId="4"/>
+		<item id="228" genKey="TRICKY_BACK_SWING_ARM_8" colorPartId="292234800" bindId="BACK_FRAME" objectId="3039066993" shared="0" variationId="8"/>
+		<item id="287" genKey="TRICKY_BACK_SWING_ARM_16" bindId="BACK_FRAME" objectId="3039066993" shared="0" variationId="16"/>
+		<item id="224" genKey="TRICKY_TANK_1" bindId="TANK" objectId="942295527" shared="1" variationId="1"/>
+		<item id="288" genKey="TRICKY_TANK_2" bindId="TANK" objectId="942295527" shared="1" variationId="2"/>
+		<item id="220" genKey="TRICKY_FENDER_REAR_1" colorPartId="188854687" bindId="BACK_FENDER" objectId="86251510" shared="0" variationId="1"/>
+		<item id="221" genKey="TRICKY_FENDER_REAR_2" colorPartId="148138310" bindId="BACK_FENDER" objectId="86251510" shared="0" variationId="2"/>
+		<item id="222" genKey="TRICKY_FENDER_REAR_4" colorPartId="27355728" bindId="BACK_FENDER" objectId="86251510" shared="0" variationId="4"/>
+		<item id="223" genKey="TRICKY_FENDER_REAR_8" colorPartId="741597120" bindId="BACK_FENDER" objectId="86251510" shared="0" variationId="8"/>
+		<item id="289" genKey="TRICKY_FENDER_REAR_16" bindId="BACK_FENDER" objectId="86251510" shared="0" variationId="16"/>
+		<item id="229" genKey="TRICKY_FRAME_1" bindId="FRAME" objectId="3379846514" shared="0" variationId="1"/>
+		<item id="230" genKey="TRICKY_FRAME_2" bindId="FRAME" objectId="3379846514" shared="0" variationId="2"/>
+		<item id="231" genKey="TRICKY_FRAME_4" bindId="FRAME" objectId="3379846514" shared="0" variationId="4"/>
+		<item id="232" genKey="TRICKY_FRAME_8" bindId="FRAME" objectId="3379846514" shared="0" variationId="8"/>
+		<item id="290" genKey="TRICKY_FRAME_16" bindId="FRAME" objectId="3379846514" shared="0" variationId="16"/>
+		<item id="233" genKey="TRICKY_ENGINE_1" bindId="ENGINE" objectId="4234506618" shared="1" variationId="1"/>
+		<item id="235" genKey="TRICKY_STEERING_1" bindId="STEERING" objectId="3813411040" shared="1" variationId="1"/>
+		<item id="291" genKey="TRICKY_STEERING_2" bindId="STEERING" objectId="3813411040" shared="1" variationId="2"/>
+		<item id="234" genKey="TRICKY_RIM_FRONT_1" colorPartId="8623664" bindId="FRONT_RIM" objectId="3220069119" shared="0" variationId="1"/>
+		<item id="292" genKey="TRICKY_RIM_FRONT_2" colorPartId="572217414" bindId="FRONT_RIM" objectId="3220069119" shared="0" variationId="2"/>
+		<item id="299" genKey="TRICKY_RIM_FRONT_4" colorPartId="37358784" bindId="FRONT_RIM" objectId="3220069119" shared="0" variationId="4"/>
+		<item id="300" genKey="TRICKY_RIM_FRONT_8" colorPartId="123514272" bindId="FRONT_RIM" objectId="3220069119" shared="0" variationId="8"/>
+		<item id="301" genKey="TRICKY_RIM_FRONT_16" colorPartId="259174080" bindId="FRONT_RIM" objectId="3220069119" shared="0" variationId="16"/>
+		<item id="302" genKey="TRICKY_RIM_FRONT_32" colorPartId="254268840" bindId="FRONT_RIM" objectId="3220069119" shared="0" variationId="32"/>
+	    <item id="303" genKey="TRICKY_RIM_FRONT_64" colorPartId="117355420" bindId="FRONT_RIM" objectId="3220069119" shared="0" variationId="64"/>
+		<item id="304" genKey="TRICKY_RIM_FRONT_128" colorPartId="289339788" bindId="FRONT_RIM" objectId="3220069119" shared="0" variationId="128"/>
+		<item id="236" genKey="TRICKY_SEAT_1" colorPartId="525458600" bindId="BENCH" objectId="1292669201" shared="0" variationId="1"/>
+		<item id="237" genKey="TRICKY_SEAT_2" bindId="BENCH" objectId="1292669201" shared="0" variationId="2"/>
+		<item id="238" genKey="TRICKY_SEAT_4" bindId="BENCH" objectId="1292669201" shared="0" variationId="4"/>
+		<item id="239" genKey="TRICKY_SEAT_8" bindId="BENCH" objectId="1292669201" shared="0" variationId="8"/>
+		<item id="293" genKey="TRICKY_SEAT_16" bindId="BENCH" objectId="1292669201" shared="0" variationId="16"/>
+		<item id="240" genKey="TRICKY_ENGINE_FENDER_1" colorPartId="62743120" bindId="ENGINE_COVER" objectId="3404962538" shared="0" variationId="1"/>
+		<item id="241" genKey="TRICKY_ENGINE_FENDER_2" colorPartId="276998286" bindId="ENGINE_COVER" objectId="3404962538" shared="0" variationId="2"/>
+		<item id="242" genKey="TRICKY_ENGINE_FENDER_4" colorPartId="121595066" bindId="ENGINE_COVER" objectId="3404962538" shared="0" variationId="4"/>
+		<item id="243" genKey="TRICKY_ENGINE_FENDER_8" colorPartId="4806924" bindId="ENGINE_COVER" objectId="3404962538" shared="0" variationId="8"/>
+		<item id="294" genKey="TRICKY_ENGINE_FENDER_16" bindId="ENGINE_COVER" objectId="3404962538" shared="0" variationId="16" colorPartId="38049096"/>
+		<item id="245" genKey="TRICKY_FENDER_FRONT_1" colorPartId="652080968" bindId="FRONT_FENDER" objectId="614581813" shared="0" variationId="1"/>
+		<item id="246" genKey="TRICKY_FENDER_FRONT_2" colorPartId="302011664" bindId="FRONT_FENDER" objectId="614581813" shared="0" variationId="2"/>
+		<item id="247" genKey="TRICKY_FENDER_FRONT_4" colorPartId="648858945" bindId="FRONT_FENDER" objectId="614581813" shared="0" variationId="4"/>
+		<item id="248" genKey="TRICKY_FENDER_FRONT_8" colorPartId="200254272" bindId="FRONT_FENDER" objectId="614581813" shared="0" variationId="8"/>
+		<item id="295" genKey="TRICKY_FENDER_FRONT_16" bindId="FRONT_FENDER" objectId="614581813" shared="0" variationId="16"/>
+		<item id="244" genKey="TRICKY_RIM_REAR_1" colorPartId="23603140" bindId="BACK_RIM" objectId="2343495469" shared="0" variationId="1"/>
+		<item id="296" genKey="TRICKY_RIM_REAR_2"  colorPartId="709834476" bindId="BACK_RIM" objectId="2343495469" shared="0" variationId="2"/>
+		<item id="305" genKey="TRICKY_RIM_REAR_4"  colorPartId="301420016" bindId="BACK_RIM" objectId="2343495469" shared="0" variationId="4"/>
+		<item id="306" genKey="TRICKY_RIM_REAR_8" colorPartId="821985884" bindId="BACK_RIM" objectId="2343495469" shared="0" variationId="8"/>
+		<item id="307" genKey="TRICKY_RIM_REAR_16" colorPartId="360248652" bindId="BACK_RIM" objectId="2343495469" shared="0" variationId="16"/>
+		<item id="308" genKey="TRICKY_RIM_REAR_32" colorPartId="484596750" bindId="BACK_RIM" objectId="2343495469" shared="0" variationId="32"/>
+		<item id="309" genKey="TRICKY_RIM_REAR_64" colorPartId="9733040" bindId="BACK_RIM" objectId="2343495469" shared="0" variationId="64"/>
+		<item id="310" genKey="TRICKY_RIM_REAR_128" colorPartId="71006220" bindId="BACK_RIM" objectId="2343495469" shared="0" variationId="128"/>
+	</items>
+	<riderDefaults>
+		<defaultSets>
+			<defaultSet slot="0" setId="7"/>
+			<defaultSet slot="1" setId="1"/>
+			<defaultSet slot="2" setId="4"/>
+		</defaultSets>
+		<defaultColors>
+			<defaultColor slot="0" color="999999"/>
+			<defaultColor slot="1" color="48A2CF"/>
+			<defaultColor slot="2" color="616161"/>
+		</defaultColors>
+	</riderDefaults>
+	<bikeDefaults>
+		<bike bikeId="1">
+			<defaultSets>
+				<defaultSet slot="0" setId="75"/>
+				<defaultSet slot="1" setId="74"/>
+			</defaultSets>
+			<defaultColors>
+				<defaultColor slot="0" color="FFFFFF"/>
+				<defaultColor slot="1" color="4893CD"/>
+			</defaultColors>	
+		</bike>
+		<bike bikeId="2">
+			<defaultSets>
+				<defaultSet slot="0" setId="55"/>
+				<defaultSet slot="1" setId="50"/>
+			</defaultSets>
+			<defaultColors>
+				<defaultColor slot="0" color="FFFFFF"/>
+				<defaultColor slot="1" color="BA0800"/>
+			</defaultColors>
+		</bike>
+		<bike bikeId="3">
+			<defaultSets>
+				<defaultSet slot="0" setId="62"/>
+				<defaultSet slot="1" setId="63"/>
+			</defaultSets>
+			<defaultColors>
+				<defaultColor slot="0" color="FFFFFF"/>
+				<defaultColor slot="1" color="333333"/>
+			</defaultColors>
+		</bike>
+		<bike bikeId="4">
+			<defaultSets>
+				<defaultSet slot="0" setId="90"/>
+				<defaultSet slot="1" setId="86"/>
+			</defaultSets>
+			<defaultColors>
+				<defaultColor slot="0" color="FFFFFF"/>
+				<defaultColor slot="1" color="59902A"/>
+			</defaultColors>
+		</bike>
+		<bike bikeId="5">
+			<defaultSets>
+				<defaultSet slot="0" setId="83"/>
+				<defaultSet slot="1" setId="82"/>
+			</defaultSets>
+			<defaultColors>
+				<defaultColor slot="0" color="FFFFFF"/>
+				<defaultColor slot="1" color="FC7F22"/>
+			</defaultColors>
+		</bike>
+		<bike bikeId="6">
+			<defaultSets>
+				<defaultSet slot="0" setId="85"/>
+				<defaultSet slot="1" setId="84"/>
+			</defaultSets>
+			<defaultColors>
+				<defaultColor slot="0" color="FFFFFF"/>
+				<defaultColor slot="1" color="FFE80E"/>
+			</defaultColors>
+		</bike>
+	</bikeDefaults>
+	<regionalVariations/>
+	<localMP>
+		<rider>
+			<set setId="7" color="B22222"/>
+			<set setId="1" color="B22222"/>
+			<set setId="4" color="B22222"/>
+		</rider>				
+		<rider>
+			<set setId="47" color="0050C8"/>
+			<set setId="41" color="0050C8"/>
+			<set setId="43" color="0050C8"/>
+		</rider>		
+		<rider>
+			<set setId="38" color="FFA800"/>
+			<set setId="32" color="FFA800"/>
+			<set setId="35" color="FFA800"/>
+		</rider>		
+		<rider>
+			<set setId="20" color="13A11A"/>
+			<set setId="14" color="13A11A"/>
+			<set setId="17" color="13A11A"/>
+		</rider>
+		<bike>
+			<set slot="0" color="FFFFFF"/>
+			<set slot="1" color="B22222"/>
+		</bike>		
+		<bike>
+			<set slot="0" color="FFFFFF"/>
+			<set slot="1" color="0050C8"/>
+		</bike>		
+		<bike>
+			<set slot="0" color="FFFFFF"/>
+			<set slot="1" color="FFA800"/>
+		</bike>		
+		<bike>
+			<set slot="0" color="FFFFFF"/>
+			<set slot="1" color="13A11A"/>
+		</bike>
+	</localMP>
+</gear>

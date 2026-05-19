@@ -39,6 +39,21 @@ namespace BikeSwap {
     // Get the name of the current bike
     std::string GetCurrentBikeName();
 
+    // Copy the current 32-byte live appearance block from bike+0x9ec.
+    bool GetCurrentAppearanceData(uint16_t outAppearance[16]);
+
+    // Write the current bike's 32-byte live appearance block without rebuilding visuals.
+    bool WriteCurrentAppearanceData(const uint16_t appearanceData[16]);
+
+    // Queue a main-thread pass that writes the appearance block and reapplies tint slots only.
+    bool QueueCurrentAppearanceTintRefresh(const uint16_t appearanceData[16]);
+
+    // Queue a same-bike visual rebuild using caller-supplied appearance data.
+    bool QueueCurrentAppearanceReload(const uint16_t appearanceData[16]);
+
+    // Queue a narrower same-bike visual rebuild that skips settings/state/rider setup.
+    bool QueueCurrentVisualOnlyReload(const uint16_t appearanceData[16]);
+
     // Cooldown/status shown by the render overlay after a bike swap
     bool GetCooldownStatus(float* secondsRemaining, float* progress01, std::string* statusText);
 
