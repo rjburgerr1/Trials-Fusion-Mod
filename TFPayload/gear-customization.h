@@ -14,8 +14,12 @@ namespace GearCustomization {
     bool ApplyPendingHiddenObjectPayloadPatches();
     void RestoreActiveHiddenObjectPayloadPatches();
 
-    // Experimental one-off bike child-item override. Hides one child item and applies another.
-    bool QueueBikeChildItemOverride(uint16_t hideItemId, uint16_t applyItemId, uint32_t packedColor);
+    // Experimental one-off bike child-item override. Hides one child item and optionally applies another.
+    bool QueueBikeChildItemOverride(
+        uint16_t hideItemId,
+        uint16_t applyItemId,
+        uint32_t packedColor,
+        uint16_t extraHideItemId = 0);
 
     // Live 32-byte rider/bike appearance block helpers. QueueAppearanceUpdate applies
     // gear-set child visuals directly and never invokes the unsafe same-bike reload path.
@@ -28,6 +32,7 @@ namespace GearCustomization {
 
     // Experimental: copy the visual payload fields from one hidden-object entry onto another.
     bool CopyHiddenObjectVisualPayload(uint16_t targetItemId, uint16_t sourceItemId, bool* outQueued = nullptr);
+    bool RestoreHiddenObjectVisualPayload(uint16_t targetItemId);
 
     bool GetBikeGearSetChildren(uint16_t setId, std::vector<uint16_t>* outChildren);
     bool ReplaceCurrentBikeGearSetChild(uint16_t fromItemId, uint16_t toItemId);

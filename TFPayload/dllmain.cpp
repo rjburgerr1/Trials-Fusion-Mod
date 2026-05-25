@@ -1128,14 +1128,9 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
     }
 
     PrintHelpText();
+    LOG_INFO("[KeyMonitor] Thread running");
 
     while (isRunning) {
-        // Only process keypresses when the game window is focused
-        if (!IsGameWindowFocused()) {
-            Sleep(125);
-            continue;
-        }
-        
 #ifdef DEVELOPMENT_MODE
         if (KeyPress(VK_END)) {
             LOG_INFO("[END] Shutting down TFPayload...");
@@ -1143,6 +1138,21 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
             return 0;
         }
 #endif
+
+        // Keep core UI controls responsive even when the game's foreground-window
+        // focus check is confused by overlays or reload transitions.
+        HandleHomeImGuiMenu();
+        HandleKeybindingsMenu();
+        HandleToggleConsole();
+        if (g_DevMenu) {
+            g_DevMenu->UpdateRuntime();
+        }
+
+        // Only process keypresses when the game window is focused
+        if (!IsGameWindowFocused()) {
+            Sleep(125);
+            continue;
+        }
 
         HandleF5();
         HandleF6();
@@ -1157,11 +1167,8 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         HandleToggleVerbose();
         HandleShowHelp();
         HandleClearConsole();
-        HandleHomeImGuiMenu();
-        HandleKeybindingsMenu();
         HandleDebugGameState();
         HandleToggleLimitValidation();
-        HandleToggleConsole();
         
         LeaderboardScanner::CheckHotkey();
         LeaderboardDirect::CheckHotkey();
@@ -1170,10 +1177,15 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         Camera::CheckHotkey();
         Multiplayer::CheckHotkey();
         BikeSwap::CheckHotkey();
-        Fmod::Update();
+        // FMOD runtime discovery probes engine-owned pointers. Keep it out of
+        // the hotkey loop while bike/entity reload stability is being isolated.
+        // Fmod::Update();
         PreventFinish::Update();
-        
-        Sleep(80);
+
+        const bool editorScaleHeld =
+            Keybindings::IsActionDown(Keybindings::Action::EditorScaleDecrease) ||
+            Keybindings::IsActionDown(Keybindings::Action::EditorScaleIncrease);
+        Sleep(editorScaleHeld ? 16 : 80);
     }
     return 0;
 }
@@ -1186,6 +1198,10 @@ BOOL APIENTRY DllMain(HMODULE hModule,
     switch (ul_reason_for_call) {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hModule);
+
+        if (GetEnvironmentVariableA("TFPAYLOAD_PATCHER_MODE", nullptr, 0) != 0) {
+            break;
+        }
         
         // Check if we're being loaded standalone (not by proxy DLL)
         // The proxy DLL sets an environment variable before calling LoadLibrary

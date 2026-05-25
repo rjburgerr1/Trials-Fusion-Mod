@@ -57,6 +57,8 @@ public:
         SwapPrevBike,
         DebugBikeInfo,
         ToggleConsole,
+        EditorScaleDecrease,
+        EditorScaleIncrease,
     };
 
     static void Initialize();
@@ -68,12 +70,26 @@ public:
     // Set a new key for an action (and save to file).
     // Pass 0 to unbind the action.
     static void SetKey(Action action, int vkCode);
+
+    // Get/set the secondary gamepad button for an action.
+    // Pass 0 to unbind the action.
+    static int GetGamepadButton(Action action);
+    static void SetGamepadButton(Action action, int gamepadButton);
     
     // Check if a key is currently pressed for an action
     static bool IsActionPressed(Action action);
+
+    // Check if a key or gamepad button is currently held for an action
+    static bool IsActionDown(Action action);
     
     // Get the name of a virtual key code
     static std::string GetKeyName(int vkCode);
+
+    // Get the name of a gamepad button code
+    static std::string GetGamepadButtonName(int gamepadButton);
+
+    // Returns one currently pressed gamepad button, or 0 if none is pressed.
+    static int GetPressedGamepadButton();
     
     // Get the name of an action
     static std::string GetActionName(Action action);
@@ -89,6 +105,8 @@ public:
 
 private:
     static std::unordered_map<Action, int> s_keybindings;
+    static std::unordered_map<Action, int> s_gamepadBindings;
     static std::unordered_map<Action, bool> s_keyStates;
+    static std::unordered_map<Action, bool> s_gamepadStates;
     static bool s_initialized;
 };

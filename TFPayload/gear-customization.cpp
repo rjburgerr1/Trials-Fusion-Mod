@@ -70,6 +70,13 @@ namespace GearCustomization {
         HiddenObjectVisualPayload restorePayload = {};
     };
 
+    struct PendingBikeChildOverride {
+        uint16_t hideItemId = 0;
+        uint16_t extraHideItemId = 0;
+        uint16_t applyItemId = 0;
+        uint32_t packedColor = 0;
+    };
+
     static bool g_initialized = false;
     static uintptr_t g_baseAddress = 0;
     static void** g_globalStructPtr = nullptr;
@@ -99,9 +106,8 @@ namespace GearCustomization {
     static std::mutex g_pendingAppearanceMutex;
 
     static volatile LONG g_pendingBikeChildOverride = 0;
-    static uint16_t g_pendingHideBikeChildItemId = 0;
-    static uint16_t g_pendingApplyBikeChildItemId = 0;
-    static uint32_t g_pendingBikeChildPackedColor = 0;
+    static std::mutex g_pendingBikeChildOverrideMutex;
+    static std::vector<PendingBikeChildOverride> g_pendingBikeChildOverrides;
 
     static uintptr_t GetGlobalStructRVA() {
         return BaseAddress::IsSteamVersion() ? GLOBAL_STRUCT_RVA_STEAM : GLOBAL_STRUCT_RVA_UPLAY;
@@ -449,6 +455,10 @@ namespace GearCustomization {
         g_pendingBikeGearSetChildReplacement = 0;
         g_pendingAppearanceUpdate = 0;
         g_pendingBikeChildOverride = 0;
+        {
+            std::lock_guard<std::mutex> lock(g_pendingBikeChildOverrideMutex);
+            g_pendingBikeChildOverrides.clear();
+        }
     }
 
     bool HasPendingReloadMutation() {
@@ -594,6 +604,67 @@ namespace GearCustomization {
                 << " variant=0x" << restore.variant
                 << " payload=0x" << restore.payload);
         }
+    }
+
+    bool RestoreHiddenObjectVisualPayload(uint16_t targetItemId) {
+        if (targetItemId == 0 || !g_getHiddenObjectEntry) {
+            return false;
+        }
+
+        ActiveHiddenObjectPayloadPatch restorePatch = {};
+        bool found = false;
+        {
+            std::lock_guard<std::mutex> lock(g_catalogMutationMutex);
+            for (auto it = g_activeHiddenObjectPayloadPatches.begin();
+                it != g_activeHiddenObjectPayloadPatches.end();) {
+                if (it->targetItemId == targetItemId) {
+                    restorePatch = *it;
+                    found = true;
+                    it = g_activeHiddenObjectPayloadPatches.erase(it);
+                }
+                else {
+                    ++it;
+                }
+            }
+        }
+
+        if (!found) {
+            return true;
+        }
+
+        void* catalog = GetBikeVisualCatalog();
+        if (!catalog) {
+            LOG_WARNING("[GearCustomization] Could not restore hidden-object payload "
+                << targetItemId << ": catalog unavailable");
+            std::lock_guard<std::mutex> lock(g_catalogMutationMutex);
+            g_activeHiddenObjectPayloadPatches.push_back(restorePatch);
+            return false;
+        }
+
+        void* targetWrapper[2] = {};
+        if (!CallGetHiddenObjectEntry(catalog, targetWrapper, restorePatch.targetItemId)) {
+            LOG_WARNING("[GearCustomization] Could not restore hidden-object payload "
+                << targetItemId << ": target unavailable");
+            return false;
+        }
+
+        uint8_t* target = reinterpret_cast<uint8_t*>(targetWrapper[0]);
+        if (!target || IsBadWritePtr(target, 0x18)) {
+            LOG_WARNING("[GearCustomization] Could not restore hidden-object payload "
+                << targetItemId << ": target unwritable");
+            return false;
+        }
+
+        const HiddenObjectVisualPayload restore = restorePatch.restorePayload;
+        *reinterpret_cast<uint32_t*>(target + 0x0c) = restore.material;
+        *reinterpret_cast<uint32_t*>(target + 0x10) = restore.variant;
+        *reinterpret_cast<uint32_t*>(target + 0x14) = restore.payload;
+        LOG_INFO("[GearCustomization] Restored hidden-object visual payload "
+            << targetItemId
+            << " material=0x" << std::hex << restore.material
+            << " variant=0x" << restore.variant
+            << " payload=0x" << restore.payload);
+        return true;
     }
 
     static bool ReadHiddenObjectVisualPayload(uint16_t itemId, HiddenObjectVisualPayload* outPayload) {
@@ -1101,7 +1172,11 @@ namespace GearCustomization {
         return true;
     }
 
-    bool QueueBikeChildItemOverride(uint16_t hideItemId, uint16_t applyItemId, uint32_t packedColor) {
+    bool QueueBikeChildItemOverride(
+        uint16_t hideItemId,
+        uint16_t applyItemId,
+        uint32_t packedColor,
+        uint16_t extraHideItemId) {
         if (!g_initialized || !g_hideSceneObjectForGearVisual || !g_applyBikeHiddenObjectMeshTint) {
             LOG_ERROR("[GearCustomization] Bike child override unavailable because module is not ready");
             return false;
@@ -1112,17 +1187,18 @@ namespace GearCustomization {
             return false;
         }
 
-        if (InterlockedCompareExchange(&g_pendingBikeChildOverride, 0, 0) != 0) {
-            LOG_WARNING("[GearCustomization] Bike child override already pending");
-            return false;
+        PendingBikeChildOverride pending = {};
+        pending.hideItemId = hideItemId;
+        pending.extraHideItemId = extraHideItemId;
+        pending.applyItemId = applyItemId;
+        pending.packedColor = packedColor & 0x00ffffff;
+        {
+            std::lock_guard<std::mutex> lock(g_pendingBikeChildOverrideMutex);
+            g_pendingBikeChildOverrides.push_back(pending);
         }
-
-        g_pendingHideBikeChildItemId = hideItemId;
-        g_pendingApplyBikeChildItemId = applyItemId;
-        g_pendingBikeChildPackedColor = packedColor & 0x00ffffff;
         InterlockedExchange(&g_pendingBikeChildOverride, 1);
         LOG_INFO("[GearCustomization] Queued bike child override hide="
-            << hideItemId << " apply=" << applyItemId);
+            << hideItemId << " extraHide=" << extraHideItemId << " apply=" << applyItemId);
         return true;
     }
 
@@ -1159,6 +1235,15 @@ namespace GearCustomization {
         }
 
         if (InterlockedExchange(&g_pendingBikeChildOverride, 0) != 0) {
+            std::vector<PendingBikeChildOverride> pendingOverrides;
+            {
+                std::lock_guard<std::mutex> lock(g_pendingBikeChildOverrideMutex);
+                pendingOverrides.swap(g_pendingBikeChildOverrides);
+            }
+            if (pendingOverrides.empty()) {
+                return;
+            }
+
             void* bikeEntity = Respawn::GetBikePointer();
             if (!bikeEntity || IsBadReadPtr(bikeEntity, 0xb20)) {
                 LOG_ERROR("[GearCustomization] Bike child override skipped because the current bike is unavailable");
@@ -1177,20 +1262,29 @@ namespace GearCustomization {
                 return;
             }
 
-            LOG_INFO("[GearCustomization] Applying bike child item " << g_pendingApplyBikeChildItemId);
-            if (!CallApplyBikeHiddenObjectMeshTint(
-                    bikeEntity,
-                    g_pendingApplyBikeChildItemId,
-                    g_pendingBikeChildPackedColor)) {
-                LOG_WARNING("[GearCustomization] Bike child item " << g_pendingApplyBikeChildItemId << " could not be applied");
-                return;
-            }
+            for (const PendingBikeChildOverride& pending : pendingOverrides) {
+                if (pending.applyItemId != 0) {
+                    LOG_INFO("[GearCustomization] Applying bike child item " << pending.applyItemId);
+                    if (!CallApplyBikeHiddenObjectMeshTint(
+                            bikeEntity,
+                            pending.applyItemId,
+                            pending.packedColor)) {
+                        LOG_WARNING("[GearCustomization] Bike child item " << pending.applyItemId << " could not be applied");
+                        continue;
+                    }
+                }
 
-            if (g_pendingHideBikeChildItemId != 0
-                && g_pendingHideBikeChildItemId != g_pendingApplyBikeChildItemId) {
-                LOG_INFO("[GearCustomization] Replacement applied; hiding previous bike child item " << g_pendingHideBikeChildItemId);
-                if (!CallHideSceneObjectForGearVisual(sceneRoot, g_pendingHideBikeChildItemId)) {
-                    LOG_WARNING("[GearCustomization] Bike child item " << g_pendingHideBikeChildItemId << " could not be hidden");
+                const uint16_t hideItemIds[2] = {
+                    pending.hideItemId,
+                    pending.extraHideItemId
+                };
+                for (uint16_t hideItemId : hideItemIds) {
+                    if (hideItemId != 0 && hideItemId != pending.applyItemId) {
+                        LOG_INFO("[GearCustomization] Hiding bike child item " << hideItemId);
+                        if (!CallHideSceneObjectForGearVisual(sceneRoot, hideItemId)) {
+                            LOG_WARNING("[GearCustomization] Bike child item " << hideItemId << " could not be hidden");
+                        }
+                    }
                 }
             }
         }

@@ -15,10 +15,13 @@
 #include "prevent-finish.h"
 #include "fmod.h"
 #include "ui-view-explorer.h"
+#include "file-unlock.h"
 #include "bike-item-catalog.generated.h"
 #include "gear-set-catalog.generated.h"
+#include <MinHook.h>
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -26,6 +29,7 @@
 #include <sstream>
 #include <initializer_list>
 #include <Windows.h>
+#include <Xinput.h>
 
 // Global instance
 DevMenu* g_DevMenu = nullptr;
@@ -38,6 +42,10 @@ static std::shared_ptr<TweakableButton> g_preventFinishLabel = nullptr;
 // Global toggle buttons for limit controls (need to update labels when limits change)
 static std::shared_ptr<TweakableButton> g_toggleFaultLimitButton = nullptr;
 static std::shared_ptr<TweakableButton> g_toggleTimeLimitButton = nullptr;
+static bool g_waitingForGamepadBind = false;
+static bool g_gamepadCaptureReady = false;
+static Keybindings::Action g_waitingGamepadAction = Keybindings::Action::InstantFinish;
+static void UpdateGamepadBindingCapture();
 
 // Helper to check if an ID belongs to Bike folder
 static bool IsBikeId(int id) {
@@ -62,6 +70,3486 @@ static bool IsStartupGateId(int id) {
         || id == 491; // AllTracksUnlocked
 }
 
+namespace {
+    static constexpr uintptr_t GAME_MANAGER_GLOBAL_RVA_UPLAY = 0x104b308;
+    static constexpr uintptr_t GAME_MANAGER_GLOBAL_RVA_STEAM = 0x104d308;
+    static constexpr uintptr_t GAME_MANAGER_EDITOR_MANAGER_OFFSET = 0x104;
+    static constexpr uintptr_t COLLECT_SCENE_OBJECTS_BY_TYPE_RVA_UPLAY = 0x6a3000;
+    static constexpr uintptr_t COLLECT_SCENE_OBJECTS_BY_TYPE_RVA_STEAM = 0x6a19f0;
+    static constexpr uintptr_t UPDATE_OBJECT_VARIATION_TRANSFORM_RVA_UPLAY = 0x148250;
+    static constexpr uintptr_t UPDATE_OBJECT_VARIATION_TRANSFORM_RVA_STEAM = 0x147e80;
+    static constexpr uintptr_t CREATE_OBJECT_VARIATION_RVA_UPLAY = 0x14a570;
+    static constexpr uintptr_t CREATE_OBJECT_VARIATION_RVA_STEAM = 0x14a1a0;
+    static constexpr uintptr_t RENDER_GRAPHICS_AND_UPDATE_CAMERA_RVA_UPLAY = 0x2027d0;
+    static constexpr uintptr_t RENDER_GRAPHICS_AND_UPDATE_CAMERA_RVA_STEAM = 0x202180;
+    static constexpr uintptr_t APPLY_SCENE_OBJECT_TRANSFORM_RVA_UPLAY = 0x2028b0;
+    static constexpr uintptr_t APPLY_SCENE_OBJECT_TRANSFORM_RVA_STEAM = 0x202260;
+    static constexpr uintptr_t SCALE_SELECTED_OBJECTS_DELTA_RVA_UPLAY = 0x0f3db0;
+    static constexpr uintptr_t SCALE_SELECTED_OBJECTS_DELTA_RVA_STEAM = 0x0f3740;
+    static constexpr uintptr_t RESET_SELECTED_OBJECTS_SCALE_RVA_UPLAY = 0x0f3e20;
+    static constexpr uintptr_t RESET_SELECTED_OBJECTS_SCALE_RVA_STEAM = 0x0f37b0;
+    static constexpr uintptr_t SET_BACKING_OBJECT_SCALE_RVA_UPLAY = 0x1fdc10;
+    static constexpr uintptr_t SET_BACKING_OBJECT_SCALE_RVA_STEAM = 0x1fd570;
+    static constexpr uintptr_t SYNC_SCENE_OBJECT_TRANSFORM_RVA_UPLAY = 0x65c610;
+    static constexpr uintptr_t SYNC_SCENE_OBJECT_TRANSFORM_RVA_STEAM = 0x65b210;
+    static constexpr uintptr_t REFRESH_EDITOR_OBJECT_VISUAL_RVA_UPLAY = 0x096480;
+    static constexpr uintptr_t REFRESH_EDITOR_OBJECT_VISUAL_RVA_STEAM = 0x095fe0;
+    static constexpr uintptr_t REFRESH_SELECTION_CONSTRAINTS_RVA_UPLAY = 0x0c6b40;
+    static constexpr uintptr_t REFRESH_SELECTION_CONSTRAINTS_RVA_STEAM = 0x0c6760;
+    static constexpr uintptr_t REFRESH_SELECTION_BOUNDS_RVA_UPLAY = 0x138ee0;
+    static constexpr uintptr_t REFRESH_SELECTION_BOUNDS_RVA_STEAM = 0x138b10;
+    static constexpr uintptr_t PROCESS_SELECTION_CONSTRAINTS_RVA_UPLAY = 0x137c30;
+    static constexpr uintptr_t PROCESS_SELECTION_CONSTRAINTS_RVA_STEAM = 0x137860;
+    static constexpr uintptr_t CREATE_MESH_INSTANCES_RVA_UPLAY = 0x5428a0;
+    static constexpr uintptr_t CREATE_MESH_INSTANCES_RVA_STEAM = 0x541ea0;
+    static constexpr uintptr_t APPLY_MATERIAL_COLOR_OVERRIDES_RVA_UPLAY = 0x5424d0;
+    static constexpr uintptr_t APPLY_MATERIAL_COLOR_OVERRIDES_RVA_STEAM = 0x541ad0;
+    static constexpr uintptr_t TRACK_EVENT_APPLY_SCENE_OBJECT_RVA_UPLAY = 0x788f50;
+    static constexpr uintptr_t TRACK_EVENT_APPLY_SCENE_OBJECT_RVA_STEAM = 0x787d70;
+    static constexpr size_t EDITOR_MANAGER_SCAN_SIZE = 0x800;
+    static constexpr uint32_t MAX_EDITOR_SCENE_OBJECT_SNAPSHOT = 4092;
+
+    typedef void(__thiscall* CollectSceneObjectsByTypeFunc)(
+        void* sceneRoot,
+        void* outSnapshot,
+        uint32_t objectType,
+        uint32_t objectSubtype,
+        uint32_t useVirtualType,
+        uint32_t requiredFlags);
+
+    typedef void(__fastcall* UpdateObjectVariationTransformFunc)(int variationController);
+    typedef void(__thiscall* CreateObjectVariationFunc)(void* variationController, int variationIndex);
+    typedef void(__thiscall* RenderGraphicsAndUpdateCameraFunc)(void* sceneObject);
+    typedef void(__cdecl* ApplySceneObjectTransformFunc)(
+        void* sceneObject,
+        const float* position,
+        const float* rotation,
+        const float* scale);
+    typedef void(__thiscall* SceneObjectSetScaleFunc)(void* sceneObject, const float* scale);
+    typedef void(__thiscall* SceneObjectSetPositionFunc)(void* sceneObject, const float* position);
+    typedef void(__thiscall* ScaleSelectedObjectsDeltaFunc)(void* selectionManager, float delta);
+    typedef void(__fastcall* ResetSelectedObjectsScaleFunc)(int selectionManager);
+    typedef void(__thiscall* SetBackingObjectScaleFunc)(void* backingObject, float scale);
+    typedef void(__thiscall* SyncSceneObjectTransformFunc)(
+        void* sceneObject,
+        const float* position,
+        const float* transformBasis,
+        const float* rotationOrScale);
+    typedef void(__thiscall* RefreshEditorObjectVisualFunc)(void* editorManager, void* sceneObject);
+    typedef void(__fastcall* RefreshSelectionConstraintsFunc)(int selectionManager);
+    typedef void(__fastcall* RefreshSelectionBoundsFunc)(int selectionManager);
+    typedef void(__thiscall* ProcessSelectionConstraintsFunc)(void* selectionManager, char updatePhysics);
+    typedef void(__cdecl* CreateMeshInstancesFunc)(void* sceneObject, void* overrideVector, float blend);
+    typedef void(__cdecl* ApplyMaterialColorOverridesFunc)(void* sceneObject, void* overrideEntry, float blend);
+    typedef void(__thiscall* TrackEventApplySceneObjectFunc)(void* dispatcher, void* sceneObject, void* eventId, void* eventParam);
+    typedef bool(__thiscall* SceneObjectGetMaterialParameterFunc)(void* sceneObject, uint32_t parameterHash, void* outParameter, uint32_t selector);
+    typedef void(__thiscall* MaterialParameterSetBytesFunc)(void* parameterOwner, void* parameterHandle, const void* value, uint32_t size);
+
+    struct EditorSceneObjectSnapshot {
+        void* objects[MAX_EDITOR_SCENE_OBJECT_SNAPSHOT] = {};
+        uint32_t count = 0;
+    };
+
+    struct EditorObjectCandidate {
+        uintptr_t sourceOffset = 0;
+        uintptr_t object = 0;
+        uintptr_t vtable = 0;
+        uintptr_t sceneResource = 0;
+        uint32_t ownerValue18 = 0;
+        uint32_t ownerKey1c = 0;
+        int score = 0;
+    };
+
+    struct SelectedEditorObject {
+        int index = 0;
+        uintptr_t listNode = 0;
+        uintptr_t selectedObject = 0;
+        uintptr_t mappedObject = 0;
+        uintptr_t editorTransform = 0;
+        uintptr_t editorScaleBackingObject = 0;
+        uintptr_t parentObject = 0;
+        uintptr_t mappedParentObject = 0;
+        uintptr_t sceneHolder = 0;
+        uintptr_t resourceContainer = 0;
+        uintptr_t resourceSceneRoot = 0;
+        uintptr_t firstMeshSceneObject = 0;
+        uintptr_t firstVisibilitySceneObject = 0;
+        uintptr_t firstLightSceneObject = 0;
+        uint32_t meshSceneObjectCount = 0;
+        uint32_t visibilitySceneObjectCount = 0;
+        uint32_t lightSceneObjectCount = 0;
+        bool meshUsedReversedTypeSubtypeFallback = false;
+        bool visibilityUsedReversedTypeSubtypeFallback = false;
+        bool lightUsedReversedTypeSubtypeFallback = false;
+        uint32_t selectedObjectMovementState04 = 0;
+        uint16_t selectedObjectType = 0;
+        uint32_t selectedObjectChildMode = 0;
+        uintptr_t selectedObjectChildren = 0;
+        uint32_t selectedObjectFlags0c = 0;
+        uint32_t selectedObjectFlags = 0;
+        uint32_t childCount20 = 0;
+        uint32_t parentKey1c = 0;
+        uint32_t sceneHolderFlags08 = 0;
+        uint32_t sceneHolderVariationMask20 = 0;
+        float rotationRadians = 0.0f;
+        float unknownEcRaw = 0.0f;
+        float sceneHolderBuoyancyRaw = 0.0f;
+        float frictionRaw = 0.0f;
+        float objectGravityRaw = 0.0f;
+        float lightIntensityRaw = 0.0f;
+        float lightRangeRaw = 0.0f;
+        float meshOffset94Raw = 0.0f;
+        float meshOffset9cRaw = 0.0f;
+        bool hasRotation = false;
+        bool hasLightRange = false;
+        bool hasSceneHolderBuoyancy = false;
+        bool hasFriction = false;
+        bool hasObjectGravity = false;
+        bool hasLightIntensity = false;
+        bool hasMeshOffset94 = false;
+        bool hasMeshOffset9c = false;
+        bool visible = true;
+        bool hasVisible = false;
+        bool sceneHolderVisible = true;
+        bool hasSceneHolderVisible = false;
+        bool contactResponseEnabled = true;
+        bool shadowTypeDynamicCandidate = false;
+        bool hasShadowType = false;
+        bool lightEnabled = false;
+        bool hasLightEnabled = false;
+        bool selectedObjectPhysicsEnabled = false;
+        bool hasSelectedObjectPhysicsEnabled = false;
+        bool movingOrRotatingCandidate = false;
+        bool horizontalAlign = false;
+        bool verticalAlign = false;
+        bool sceneHolderBit0 = false;
+        bool lockedToDrivingLineCandidate = false;
+        bool sceneHolderBit3 = false;
+        bool sceneHolderBit5 = false;
+        bool sceneHolderBit6 = false;
+        bool fastObjectCandidate = false;
+        bool sceneHolderBit12 = false;
+    };
+
+    struct SceneNodeSnapshot {
+        uintptr_t address = 0;
+        uintptr_t via = 0;
+        int depth = 0;
+        uint16_t typeAndSubtype = 0;
+        uint32_t flags0c = 0;
+        uint32_t childMode = 0;
+        uintptr_t childStorage = 0;
+        uintptr_t vtable = 0;
+        float scaleEc = 0.0f;
+        uint8_t physicsByteC9 = 0;
+        bool readable = false;
+    };
+
+    struct PendingEditorNudgeRestore {
+        uintptr_t sceneObject = 0;
+        float position[3] = {};
+        uint32_t restoreAfterTick = 0;
+    };
+
+    struct MaterialColorOverrideEntry {
+        uint32_t selector = 0;
+        uint8_t pad04[12] = {};
+        uint8_t slot = 0;
+        uint8_t sourceMode = 0;
+        uint8_t pad12[14] = {};
+        float color[4] = {};
+        uint8_t overrideMode = 0;
+        uint8_t secondaryMode = 0;
+        uint8_t pad32[14] = {};
+        uint32_t extra[4] = {};
+        uint32_t colorCount = 0;
+        uint8_t pad54[12] = {};
+    };
+
+    struct MaterialColorOverrideVector {
+        uint32_t count = 0;
+        uint32_t capacity = 0;
+        MaterialColorOverrideEntry* entries = nullptr;
+    };
+
+    struct MaterialParameterLookup {
+        uint8_t found = 0;
+        uint8_t pad01[11] = {};
+        uint32_t count = 1;
+        float* value = nullptr;
+        void* owner = nullptr;
+        uint32_t unknown18 = 0;
+    };
+
+    static_assert(sizeof(MaterialColorOverrideEntry) == 0x60, "material override entry must match engine layout");
+    static_assert(sizeof(MaterialParameterLookup) == 0x1c, "material parameter lookup must match engine layout");
+
+    static PendingEditorNudgeRestore g_pendingEditorNudgeRestore = {};
+    static float g_editorInspectorAutoScale = 1.0f;
+    static float g_editorInspectorLastAppliedScale = -1.0f;
+    static float g_editorInspectorAxisScale[3] = { 1.0f, 1.0f, 1.0f };
+    static uintptr_t g_editorInspectorAxisScaleObject = 0;
+    static float g_editorMaterialTestColor[3] = { 1.0f, 0.0f, 1.0f };
+    static int g_editorMaterialTestSelector = 1;
+    static int g_editorMaterialTestSlot = 0;
+    static int g_editorMaterialTestSourceMode = 0;
+    static int g_editorMaterialTestOverrideMode = 0;
+    static int g_editorMaterialTestSecondaryMode = 0;
+    static bool g_editorMaterialTestRefreshAfterApply = true;
+    static bool g_editorMaterialStickyEnabled = false;
+    static bool g_editorMaterialStickyUseAutoSelectors = true;
+    static uint32_t g_editorMaterialStickyLastMonitorTick = 0;
+    static std::vector<uintptr_t> g_editorMaterialStickySceneObjects;
+    static bool g_editorMaterialCreateMeshHookInstalled = false;
+    static CreateMeshInstancesFunc g_originalCreateMeshInstances = nullptr;
+    static bool g_editorMaterialApplyOverrideHookInstalled = false;
+    static ApplyMaterialColorOverridesFunc g_originalApplyMaterialColorOverrides = nullptr;
+    static constexpr size_t MAX_STICKY_MATERIAL_PARAM_OWNERS = 64;
+    static uintptr_t g_editorMaterialStickyParamOwners[MAX_STICKY_MATERIAL_PARAM_OWNERS] = {};
+    static volatile LONG g_editorMaterialStickyParamOwnerCount = 0;
+    static bool g_editorMaterialParamSetterHookInstalled = false;
+    static uintptr_t g_editorMaterialParamSetterAddress = 0;
+    static MaterialParameterSetBytesFunc g_originalMaterialParameterSetBytes = nullptr;
+    static bool g_editorMaterialTrackEventHookInstalled = false;
+    static TrackEventApplySceneObjectFunc g_originalTrackEventApplySceneObject = nullptr;
+    static bool g_editorMaterialTrackEventTraceArmed = false;
+    static volatile LONG g_editorMaterialTrackEventTraceCount = 0;
+    static volatile LONG g_editorMaterialTrackEventAnyTraceCount = 0;
+    static volatile LONG g_editorMaterialParamSetterHookDepth = 0;
+    static bool g_editorMaterialTraceEnabled = false;
+    static uintptr_t g_editorMaterialTraceSceneObject = 0;
+    static uintptr_t g_editorMaterialTraceOwner = 0;
+    static uintptr_t g_editorMaterialTraceValuePtr = 0;
+    static uint32_t g_editorMaterialTraceSelector = 0;
+    static uint8_t g_editorMaterialTraceSlot = 0;
+    static float g_editorMaterialTraceLastValue[4] = {};
+    static uint32_t g_editorMaterialTraceLastMonitorTick = 0;
+    static int g_editorMaterialTraceChangeCount = 0;
+    static bool g_editorMaterialSetterHookWarningLogged = false;
+    static constexpr uint32_t EDITOR_MATERIAL_STICKY_MONITOR_INTERVAL_MS = 100;
+    static constexpr float EDITOR_AUTO_SCALE_MIN = 0.01f;
+    static constexpr float EDITOR_AUTO_SCALE_MAX = 50.0f;
+    static constexpr float EDITOR_AUTO_SCALE_NUDGE_EPSILON = 0.001f;
+    static constexpr uint32_t EDITOR_AUTO_SCALE_RESTORE_DELAY_MS = 75;
+    static constexpr float EDITOR_SCALE_HOTKEY_DOUBLINGS_PER_SECOND = 1.0f;
+
+    static bool SafeReadMemory(uintptr_t address, void* out, size_t size) {
+        if (address == 0 || out == nullptr || IsBadReadPtr(reinterpret_cast<void*>(address), size)) {
+            return false;
+        }
+
+        __try {
+            memcpy(out, reinterpret_cast<void*>(address), size);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool SafeWriteMemory(uintptr_t address, const void* value, size_t size) {
+        if (address == 0 || value == nullptr || IsBadWritePtr(reinterpret_cast<void*>(address), size)) {
+            return false;
+        }
+
+        __try {
+            memcpy(reinterpret_cast<void*>(address), value, size);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    template<typename T>
+    static bool SafeReadValue(uintptr_t address, T& out) {
+        return SafeReadMemory(address, &out, sizeof(T));
+    }
+
+    template<typename T>
+    static bool SafeWriteValue(uintptr_t address, const T& value) {
+        return SafeWriteMemory(address, &value, sizeof(T));
+    }
+
+    static bool IsReadableRange(uintptr_t address, size_t size) {
+        return address != 0 && !IsBadReadPtr(reinterpret_cast<void*>(address), size);
+    }
+
+    static std::string HexAddress(uintptr_t value) {
+        std::ostringstream ss;
+        ss << "0x" << std::hex << std::uppercase << value;
+        return ss.str();
+    }
+
+    static int VariationIndexFromMask(uint32_t mask) {
+        if (mask != 1 && mask != 2 && mask != 4 && mask != 8) {
+            return -1;
+        }
+
+        int index = 0;
+        while (mask > 1) {
+            mask >>= 1;
+            ++index;
+        }
+        return index;
+    }
+
+    static uintptr_t GetGameManagerGlobalRva() {
+        return BaseAddress::IsSteamVersion() ? GAME_MANAGER_GLOBAL_RVA_STEAM : GAME_MANAGER_GLOBAL_RVA_UPLAY;
+    }
+
+    static uintptr_t GetCollectSceneObjectsByTypeRva() {
+        return BaseAddress::IsSteamVersion()
+            ? COLLECT_SCENE_OBJECTS_BY_TYPE_RVA_STEAM
+            : COLLECT_SCENE_OBJECTS_BY_TYPE_RVA_UPLAY;
+    }
+
+    static uintptr_t GetUpdateObjectVariationTransformRva() {
+        return BaseAddress::IsSteamVersion()
+            ? UPDATE_OBJECT_VARIATION_TRANSFORM_RVA_STEAM
+            : UPDATE_OBJECT_VARIATION_TRANSFORM_RVA_UPLAY;
+    }
+
+    static uintptr_t GetCreateObjectVariationRva() {
+        return BaseAddress::IsSteamVersion()
+            ? CREATE_OBJECT_VARIATION_RVA_STEAM
+            : CREATE_OBJECT_VARIATION_RVA_UPLAY;
+    }
+
+    static uintptr_t GetRenderGraphicsAndUpdateCameraRva() {
+        return BaseAddress::IsSteamVersion()
+            ? RENDER_GRAPHICS_AND_UPDATE_CAMERA_RVA_STEAM
+            : RENDER_GRAPHICS_AND_UPDATE_CAMERA_RVA_UPLAY;
+    }
+
+    static uintptr_t GetApplySceneObjectTransformRva() {
+        return BaseAddress::IsSteamVersion()
+            ? APPLY_SCENE_OBJECT_TRANSFORM_RVA_STEAM
+            : APPLY_SCENE_OBJECT_TRANSFORM_RVA_UPLAY;
+    }
+
+    static uintptr_t GetScaleSelectedObjectsDeltaRva() {
+        return BaseAddress::IsSteamVersion()
+            ? SCALE_SELECTED_OBJECTS_DELTA_RVA_STEAM
+            : SCALE_SELECTED_OBJECTS_DELTA_RVA_UPLAY;
+    }
+
+    static uintptr_t GetResetSelectedObjectsScaleRva() {
+        return BaseAddress::IsSteamVersion()
+            ? RESET_SELECTED_OBJECTS_SCALE_RVA_STEAM
+            : RESET_SELECTED_OBJECTS_SCALE_RVA_UPLAY;
+    }
+
+    static uintptr_t GetSetBackingObjectScaleRva() {
+        return BaseAddress::IsSteamVersion()
+            ? SET_BACKING_OBJECT_SCALE_RVA_STEAM
+            : SET_BACKING_OBJECT_SCALE_RVA_UPLAY;
+    }
+
+    static uintptr_t GetSyncSceneObjectTransformRva() {
+        return BaseAddress::IsSteamVersion()
+            ? SYNC_SCENE_OBJECT_TRANSFORM_RVA_STEAM
+            : SYNC_SCENE_OBJECT_TRANSFORM_RVA_UPLAY;
+    }
+
+    static uintptr_t GetRefreshEditorObjectVisualRva() {
+        return BaseAddress::IsSteamVersion()
+            ? REFRESH_EDITOR_OBJECT_VISUAL_RVA_STEAM
+            : REFRESH_EDITOR_OBJECT_VISUAL_RVA_UPLAY;
+    }
+
+    static uintptr_t GetRefreshSelectionConstraintsRva() {
+        return BaseAddress::IsSteamVersion()
+            ? REFRESH_SELECTION_CONSTRAINTS_RVA_STEAM
+            : REFRESH_SELECTION_CONSTRAINTS_RVA_UPLAY;
+    }
+
+    static uintptr_t GetRefreshSelectionBoundsRva() {
+        return BaseAddress::IsSteamVersion()
+            ? REFRESH_SELECTION_BOUNDS_RVA_STEAM
+            : REFRESH_SELECTION_BOUNDS_RVA_UPLAY;
+    }
+
+    static uintptr_t GetProcessSelectionConstraintsRva() {
+        return BaseAddress::IsSteamVersion()
+            ? PROCESS_SELECTION_CONSTRAINTS_RVA_STEAM
+            : PROCESS_SELECTION_CONSTRAINTS_RVA_UPLAY;
+    }
+
+    static uintptr_t GetCreateMeshInstancesRva() {
+        return BaseAddress::IsSteamVersion()
+            ? CREATE_MESH_INSTANCES_RVA_STEAM
+            : CREATE_MESH_INSTANCES_RVA_UPLAY;
+    }
+
+    static uintptr_t GetApplyMaterialColorOverridesRva() {
+        return BaseAddress::IsSteamVersion()
+            ? APPLY_MATERIAL_COLOR_OVERRIDES_RVA_STEAM
+            : APPLY_MATERIAL_COLOR_OVERRIDES_RVA_UPLAY;
+    }
+
+    static uintptr_t GetTrackEventApplySceneObjectRva() {
+        return BaseAddress::IsSteamVersion()
+            ? TRACK_EVENT_APPLY_SCENE_OBJECT_RVA_STEAM
+            : TRACK_EVENT_APPLY_SCENE_OBJECT_RVA_UPLAY;
+    }
+
+    static uintptr_t ResolveGameManagerForEditorInspector() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        uintptr_t globalStruct = 0;
+        if (!SafeReadValue(baseAddress + GetGameManagerGlobalRva(), globalStruct)
+            || !IsReadableRange(globalStruct, 0x200)) {
+            return 0;
+        }
+
+        return globalStruct;
+    }
+
+    static uintptr_t ResolveEditorManagerForInspector() {
+        const uintptr_t gameManager = ResolveGameManagerForEditorInspector();
+        uintptr_t editorManager = 0;
+        if (gameManager == 0
+            || !SafeReadValue(gameManager + GAME_MANAGER_EDITOR_MANAGER_OFFSET, editorManager)
+            || !IsReadableRange(editorManager, EDITOR_MANAGER_SCAN_SIZE)) {
+            return 0;
+        }
+
+        return editorManager;
+    }
+
+    static uintptr_t ResolveEditorSelectionManagerForInspector() {
+        const uintptr_t editorManager = ResolveEditorManagerForInspector();
+        return editorManager != 0 ? editorManager + 0x28 : 0;
+    }
+
+    static uintptr_t ResolveEntityManagerForEditorInspector() {
+        const uintptr_t gameManager = ResolveGameManagerForEditorInspector();
+        uintptr_t entityManager = 0;
+        if (gameManager == 0
+            || !SafeReadValue(gameManager + 0xdc, entityManager)
+            || !IsReadableRange(entityManager, 0xf00)) {
+            return 0;
+        }
+        return entityManager;
+    }
+
+    static bool MarkEditorTransformDirty(uint32_t flags = 0x200) {
+        const uintptr_t editorManager = ResolveEditorManagerForInspector();
+        if (editorManager == 0 || !IsReadableRange(editorManager + 0x1fc, sizeof(uint32_t))) {
+            return false;
+        }
+
+        uint32_t currentFlags = 0;
+        if (!SafeReadValue(editorManager + 0x1f8, currentFlags)) {
+            return false;
+        }
+
+        const uint8_t clearPending = 0;
+        const uint32_t newFlags = currentFlags | flags;
+        const bool clearedPending = SafeWriteMemory(editorManager + 0x1f1, &clearPending, sizeof(clearPending));
+        const bool wroteFlags = SafeWriteValue(editorManager + 0x1f8, newFlags);
+        LOG_VERBOSE("[EditorInspector] MarkEditorTransformDirty editorManager="
+            << HexAddress(editorManager)
+            << " flags=0x" << std::hex << std::uppercase << currentFlags
+            << " -> 0x" << newFlags << std::dec
+            << " clearedPending=" << clearedPending
+            << " wroteFlags=" << wroteFlags);
+        return wroteFlags;
+    }
+
+    static CollectSceneObjectsByTypeFunc ResolveCollectSceneObjectsByType() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<CollectSceneObjectsByTypeFunc>(baseAddress + GetCollectSceneObjectsByTypeRva());
+    }
+
+    static UpdateObjectVariationTransformFunc ResolveUpdateObjectVariationTransform() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<UpdateObjectVariationTransformFunc>(
+            baseAddress + GetUpdateObjectVariationTransformRva());
+    }
+
+    static CreateObjectVariationFunc ResolveCreateObjectVariation() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<CreateObjectVariationFunc>(baseAddress + GetCreateObjectVariationRva());
+    }
+
+    static RenderGraphicsAndUpdateCameraFunc ResolveRenderGraphicsAndUpdateCamera() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<RenderGraphicsAndUpdateCameraFunc>(
+            baseAddress + GetRenderGraphicsAndUpdateCameraRva());
+    }
+
+    static ApplySceneObjectTransformFunc ResolveApplySceneObjectTransform() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<ApplySceneObjectTransformFunc>(
+            baseAddress + GetApplySceneObjectTransformRva());
+    }
+
+    static ScaleSelectedObjectsDeltaFunc ResolveScaleSelectedObjectsDelta() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<ScaleSelectedObjectsDeltaFunc>(
+            baseAddress + GetScaleSelectedObjectsDeltaRva());
+    }
+
+    static ResetSelectedObjectsScaleFunc ResolveResetSelectedObjectsScale() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<ResetSelectedObjectsScaleFunc>(
+            baseAddress + GetResetSelectedObjectsScaleRva());
+    }
+
+    static SetBackingObjectScaleFunc ResolveSetBackingObjectScale() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<SetBackingObjectScaleFunc>(baseAddress + GetSetBackingObjectScaleRva());
+    }
+
+    static SyncSceneObjectTransformFunc ResolveSyncSceneObjectTransform() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<SyncSceneObjectTransformFunc>(baseAddress + GetSyncSceneObjectTransformRva());
+    }
+
+    static RefreshEditorObjectVisualFunc ResolveRefreshEditorObjectVisual() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<RefreshEditorObjectVisualFunc>(baseAddress + GetRefreshEditorObjectVisualRva());
+    }
+
+    static RefreshSelectionConstraintsFunc ResolveRefreshSelectionConstraints() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<RefreshSelectionConstraintsFunc>(
+            baseAddress + GetRefreshSelectionConstraintsRva());
+    }
+
+    static RefreshSelectionBoundsFunc ResolveRefreshSelectionBounds() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<RefreshSelectionBoundsFunc>(
+            baseAddress + GetRefreshSelectionBoundsRva());
+    }
+
+    static ProcessSelectionConstraintsFunc ResolveProcessSelectionConstraints() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<ProcessSelectionConstraintsFunc>(
+            baseAddress + GetProcessSelectionConstraintsRva());
+    }
+
+    static CreateMeshInstancesFunc ResolveCreateMeshInstances() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<CreateMeshInstancesFunc>(baseAddress + GetCreateMeshInstancesRva());
+    }
+
+    static ApplyMaterialColorOverridesFunc ResolveApplyMaterialColorOverrides() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<ApplyMaterialColorOverridesFunc>(baseAddress + GetApplyMaterialColorOverridesRva());
+    }
+
+    static TrackEventApplySceneObjectFunc ResolveTrackEventApplySceneObject() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<TrackEventApplySceneObjectFunc>(
+            baseAddress + GetTrackEventApplySceneObjectRva());
+    }
+
+    static bool ForceSceneObjectVisualRefresh(uintptr_t sceneObject);
+
+    static const char* DescribeMaterialColorSlot(uint8_t slot) {
+        if (slot == 0) {
+            return "diffuse";
+        }
+        if (slot == 1) {
+            return "diffuse2";
+        }
+        return "colorN";
+    }
+
+    static uint32_t GetMaterialColorParameterHash(uint8_t slot) {
+        if (slot == 0) {
+            return 0x55e806b2; // diffuse
+        }
+        if (slot == 1) {
+            return 0x27d930b8; // diffuse2
+        }
+        return 0;
+    }
+
+    static bool ApplyMaterialColorOverrideToSceneObject(
+        uintptr_t sceneObject,
+        uint32_t selector,
+        uint8_t slot,
+        uint8_t sourceMode,
+        uint8_t overrideMode,
+        uint8_t secondaryMode,
+        const float color[3],
+        bool refreshAfterApply) {
+        if (sceneObject == 0 || color == nullptr || !IsReadableRange(sceneObject, sizeof(uintptr_t))) {
+            return false;
+        }
+
+        CreateMeshInstancesFunc createMeshInstances = ResolveCreateMeshInstances();
+        if (!createMeshInstances) {
+            return false;
+        }
+
+        MaterialColorOverrideEntry entry = {};
+        entry.selector = selector;
+        entry.slot = slot;
+        entry.sourceMode = sourceMode;
+        entry.color[0] = color[0];
+        entry.color[1] = color[1];
+        entry.color[2] = color[2];
+        entry.color[3] = 1.0f;
+        entry.overrideMode = overrideMode;
+        entry.secondaryMode = secondaryMode;
+        entry.colorCount = 1;
+
+        MaterialColorOverrideVector vector = {};
+        vector.count = 1;
+        vector.capacity = 1;
+        vector.entries = &entry;
+
+        __try {
+            createMeshInstances(
+                reinterpret_cast<void*>(sceneObject),
+                &vector,
+                1.0f);
+            if (refreshAfterApply) {
+                ForceSceneObjectVisualRefresh(sceneObject);
+            }
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static void CollectMaterialSelectorCandidates(uintptr_t sceneObject, std::vector<uint32_t>& selectors);
+    static void AppendRawDwordFields(std::ostringstream& ss, const char* title, uintptr_t baseAddress, uintptr_t byteCount);
+    static void AppendTrackEventMaterialBackingReport(std::ostringstream& ss, const SelectedEditorObject& selected);
+    static void EnsureMaterialParameterSetterHookInstalled(uintptr_t setterAddress);
+
+    static int ApplyMaterialColorOverrideToObjects(
+        const std::vector<uintptr_t>& sceneObjects,
+        uint32_t selector,
+        uint8_t slot,
+        uint8_t sourceMode,
+        uint8_t overrideMode,
+        uint8_t secondaryMode,
+        const float color[3],
+        bool refreshAfterApply) {
+        int appliedCount = 0;
+        for (uintptr_t sceneObject : sceneObjects) {
+            if (ApplyMaterialColorOverrideToSceneObject(
+                sceneObject,
+                selector,
+                slot,
+                sourceMode,
+                overrideMode,
+                secondaryMode,
+                color,
+                refreshAfterApply)) {
+                ++appliedCount;
+            }
+        }
+        return appliedCount;
+    }
+
+    static int ApplyMaterialColorAutoSelectorsToObjects(
+        const std::vector<uintptr_t>& sceneObjects,
+        uint32_t manualSelector,
+        uint8_t slot,
+        uint8_t sourceMode,
+        uint8_t overrideMode,
+        uint8_t secondaryMode,
+        const float color[3],
+        bool refreshAfterApply,
+        int* outAttempts = nullptr) {
+        int attempts = 0;
+        int appliedCount = 0;
+        for (uintptr_t sceneObject : sceneObjects) {
+            std::vector<uint32_t> selectors;
+            CollectMaterialSelectorCandidates(sceneObject, selectors);
+            if (manualSelector != 0
+                && std::find(selectors.begin(), selectors.end(), manualSelector) == selectors.end()) {
+                selectors.push_back(manualSelector);
+            }
+
+            for (uint32_t selector : selectors) {
+                ++attempts;
+                if (ApplyMaterialColorOverrideToSceneObject(
+                    sceneObject,
+                    selector,
+                    slot,
+                    sourceMode,
+                    overrideMode,
+                    secondaryMode,
+                    color,
+                    refreshAfterApply)) {
+                    ++appliedCount;
+                }
+            }
+        }
+
+        if (outAttempts) {
+            *outAttempts = attempts;
+        }
+        return appliedCount;
+    }
+
+    static bool SetSerializedMeshColorFields(uintptr_t meshSceneObject, const float color[3], bool refreshAfterApply) {
+        if (meshSceneObject == 0
+            || color == nullptr
+            || !IsReadableRange(meshSceneObject + 0x9c, sizeof(float))) {
+            return false;
+        }
+
+        const float rgba[4] = {
+            color[0],
+            color[1],
+            color[2],
+            1.0f,
+        };
+
+        const bool wrote = SafeWriteMemory(meshSceneObject + 0x90, rgba, sizeof(rgba));
+        if (wrote) {
+            MarkEditorTransformDirty();
+            if (refreshAfterApply) {
+                ForceSceneObjectVisualRefresh(meshSceneObject);
+            }
+        }
+        return wrote;
+    }
+
+    static int SetSerializedMeshColorFieldsOnObjects(
+        const std::vector<uintptr_t>& sceneObjects,
+        const float color[3],
+        bool refreshAfterApply) {
+        int appliedCount = 0;
+        for (uintptr_t sceneObject : sceneObjects) {
+            if (SetSerializedMeshColorFields(sceneObject, color, refreshAfterApply)) {
+                ++appliedCount;
+            }
+        }
+        return appliedCount;
+    }
+
+    static bool IsStickyMaterialSceneObject(uintptr_t sceneObject) {
+        return g_editorMaterialStickyEnabled
+            && sceneObject != 0
+            && std::find(
+                g_editorMaterialStickySceneObjects.begin(),
+                g_editorMaterialStickySceneObjects.end(),
+                sceneObject) != g_editorMaterialStickySceneObjects.end();
+    }
+
+    static bool IsStickyMaterialParameterOwner(uintptr_t parameterOwner) {
+        if (!g_editorMaterialStickyEnabled || parameterOwner == 0) {
+            return false;
+        }
+
+        const LONG count = g_editorMaterialStickyParamOwnerCount;
+        const LONG clampedCount = count < 0
+            ? 0
+            : (count > static_cast<LONG>(MAX_STICKY_MATERIAL_PARAM_OWNERS)
+                ? static_cast<LONG>(MAX_STICKY_MATERIAL_PARAM_OWNERS)
+                : count);
+        for (LONG i = 0; i < clampedCount; ++i) {
+            if (g_editorMaterialStickyParamOwners[i] == parameterOwner) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static bool Float4Different(const float a[4], const float b[4], float epsilon = 0.0001f) {
+        for (int i = 0; i < 4; ++i) {
+            if (std::fabs(a[i] - b[i]) > epsilon) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static bool LookupMaterialParameter(
+        uintptr_t sceneObject,
+        uint32_t selector,
+        uint8_t slot,
+        MaterialParameterLookup& outLookup,
+        uintptr_t& outOwner,
+        uintptr_t& outSetterAddress,
+        uintptr_t& outGetterAddress) {
+        outLookup = {};
+        outOwner = 0;
+        outSetterAddress = 0;
+        outGetterAddress = 0;
+        if (sceneObject == 0 || !IsReadableRange(sceneObject, sizeof(uintptr_t))) {
+            return false;
+        }
+
+        const uint32_t parameterHash = GetMaterialColorParameterHash(slot);
+        if (parameterHash == 0) {
+            return false;
+        }
+
+        uintptr_t vtable = 0;
+        uintptr_t getterAddress = 0;
+        if (!SafeReadValue(sceneObject, vtable)
+            || !IsReadableRange(vtable + 0x64, sizeof(uintptr_t))
+            || !SafeReadValue(vtable + 0x64, getterAddress)
+            || getterAddress == 0) {
+            return false;
+        }
+        outGetterAddress = getterAddress;
+
+        MaterialParameterLookup lookup = {};
+        lookup.count = 1;
+        __try {
+            SceneObjectGetMaterialParameterFunc getter =
+                reinterpret_cast<SceneObjectGetMaterialParameterFunc>(getterAddress);
+            if (!getter(reinterpret_cast<void*>(sceneObject), parameterHash, &lookup, selector)
+                || lookup.owner == nullptr) {
+                return false;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+
+        outLookup = lookup;
+        outOwner = reinterpret_cast<uintptr_t>(lookup.owner);
+        uintptr_t ownerVtable = 0;
+        return SafeReadValue(outOwner, ownerVtable)
+            && IsReadableRange(ownerVtable + 0x74, sizeof(uintptr_t))
+            && SafeReadValue(ownerVtable + 0x74, outSetterAddress)
+            && outSetterAddress != 0;
+    }
+
+    static bool LookupMaterialParameterOwner(
+        uintptr_t sceneObject,
+        uint32_t selector,
+        uint8_t slot,
+        uintptr_t& outOwner,
+        uintptr_t& outSetterAddress) {
+        MaterialParameterLookup lookup = {};
+        uintptr_t getterAddress = 0;
+        return LookupMaterialParameter(
+            sceneObject,
+            selector,
+            slot,
+            lookup,
+            outOwner,
+            outSetterAddress,
+            getterAddress);
+    }
+
+    static bool WriteMaterialParameterValuePtr(
+        uintptr_t sceneObject,
+        uint32_t selector,
+        uint8_t slot,
+        const float color[3],
+        bool refreshAfterApply) {
+        if (color == nullptr) {
+            return false;
+        }
+
+        MaterialParameterLookup lookup = {};
+        uintptr_t owner = 0;
+        uintptr_t setterAddress = 0;
+        uintptr_t getterAddress = 0;
+        if (!LookupMaterialParameter(
+            sceneObject,
+            selector,
+            slot,
+            lookup,
+            owner,
+            setterAddress,
+            getterAddress)
+            || lookup.value == nullptr
+            || !IsReadableRange(reinterpret_cast<uintptr_t>(lookup.value), sizeof(float) * 4)) {
+            return false;
+        }
+
+        const float rgba[4] = {
+            color[0],
+            color[1],
+            color[2],
+            1.0f,
+        };
+        const bool wrote = SafeWriteMemory(reinterpret_cast<uintptr_t>(lookup.value), rgba, sizeof(rgba));
+        if (wrote) {
+            MarkEditorTransformDirty();
+            if (refreshAfterApply) {
+                ForceSceneObjectVisualRefresh(sceneObject);
+            }
+            LOG_INFO("[EditorInspector] Material value pointer write sceneObject="
+                << HexAddress(sceneObject)
+                << " selector=0x" << std::hex << std::uppercase << selector << std::dec
+                << " slot=" << static_cast<uint32_t>(slot)
+                << " owner=" << HexAddress(owner)
+                << " valuePtr=" << HexAddress(reinterpret_cast<uintptr_t>(lookup.value)));
+        }
+        return wrote;
+    }
+
+    static int WriteMaterialParameterValuePtrsToObjects(
+        const std::vector<uintptr_t>& sceneObjects,
+        uint32_t manualSelector,
+        uint8_t slot,
+        const float color[3],
+        bool refreshAfterApply,
+        int* outAttempts = nullptr) {
+        int attempts = 0;
+        int appliedCount = 0;
+        for (uintptr_t sceneObject : sceneObjects) {
+            std::vector<uint32_t> selectors;
+            CollectMaterialSelectorCandidates(sceneObject, selectors);
+            if (manualSelector != 0
+                && std::find(selectors.begin(), selectors.end(), manualSelector) == selectors.end()) {
+                selectors.push_back(manualSelector);
+            }
+
+            for (uint32_t selector : selectors) {
+                ++attempts;
+                if (WriteMaterialParameterValuePtr(
+                    sceneObject,
+                    selector,
+                    slot,
+                    color,
+                    refreshAfterApply)) {
+                    ++appliedCount;
+                }
+            }
+        }
+        if (outAttempts) {
+            *outAttempts = attempts;
+        }
+        return appliedCount;
+    }
+
+    static bool ArmMaterialParameterTrace(
+        const std::vector<uintptr_t>& sceneObjects,
+        uint32_t manualSelector,
+        uint8_t slot) {
+        for (uintptr_t sceneObject : sceneObjects) {
+            std::vector<uint32_t> selectors;
+            CollectMaterialSelectorCandidates(sceneObject, selectors);
+            if (manualSelector != 0
+                && std::find(selectors.begin(), selectors.end(), manualSelector) == selectors.end()) {
+                selectors.push_back(manualSelector);
+            }
+
+            for (uint32_t selector : selectors) {
+                MaterialParameterLookup lookup = {};
+                uintptr_t owner = 0;
+                uintptr_t setterAddress = 0;
+                uintptr_t getterAddress = 0;
+                if (!LookupMaterialParameter(
+                    sceneObject,
+                    selector,
+                    slot,
+                    lookup,
+                    owner,
+                    setterAddress,
+                    getterAddress)
+                    || lookup.value == nullptr) {
+                    continue;
+                }
+
+                g_editorMaterialTraceEnabled = true;
+                g_editorMaterialTraceSceneObject = sceneObject;
+                g_editorMaterialTraceOwner = owner;
+                g_editorMaterialTraceValuePtr = reinterpret_cast<uintptr_t>(lookup.value);
+                g_editorMaterialTraceSelector = selector;
+                g_editorMaterialTraceSlot = slot;
+                g_editorMaterialTraceLastMonitorTick = 0;
+                g_editorMaterialTraceChangeCount = 0;
+                memset(g_editorMaterialTraceLastValue, 0, sizeof(g_editorMaterialTraceLastValue));
+                if (IsReadableRange(g_editorMaterialTraceValuePtr, sizeof(g_editorMaterialTraceLastValue))) {
+                    SafeReadMemory(
+                        g_editorMaterialTraceValuePtr,
+                        g_editorMaterialTraceLastValue,
+                        sizeof(g_editorMaterialTraceLastValue));
+                }
+
+                LOG_INFO("[EditorInspector] Material trace armed sceneObject="
+                    << HexAddress(sceneObject)
+                    << " selector=0x" << std::hex << std::uppercase << selector << std::dec
+                    << " slot=" << static_cast<uint32_t>(slot)
+                    << " owner=" << HexAddress(owner)
+                    << " valuePtr=" << HexAddress(g_editorMaterialTraceValuePtr)
+                    << " setter=" << HexAddress(setterAddress)
+                    << " current=(" << g_editorMaterialTraceLastValue[0]
+                    << "," << g_editorMaterialTraceLastValue[1]
+                    << "," << g_editorMaterialTraceLastValue[2]
+                    << "," << g_editorMaterialTraceLastValue[3]
+                    << ")");
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static void __fastcall Hook_MaterialParameterSetBytes(
+        void* parameterOwner,
+        void* edxUnused,
+        void* parameterHandle,
+        const void* value,
+        uint32_t size) {
+        (void)edxUnused;
+        if (!g_originalMaterialParameterSetBytes) {
+            return;
+        }
+
+        g_originalMaterialParameterSetBytes(parameterOwner, parameterHandle, value, size);
+    }
+
+    static void EnsureMaterialParameterSetterHookInstalled(uintptr_t setterAddress) {
+        (void)setterAddress;
+        if (!g_editorMaterialSetterHookWarningLogged) {
+            g_editorMaterialSetterHookWarningLogged = true;
+            LOG_INFO("[EditorInspector] Material parameter vtable+0x74 hook disabled; signature is not a simple value setter");
+        }
+    }
+
+    static void EnsureCreateMeshInstancesHookInstalled();
+    static void EnsureApplyMaterialColorOverridesHookInstalled();
+
+    static void UpdateStickyMaterialParameterOwners(const std::vector<uintptr_t>& sceneObjects) {
+        uintptr_t owners[MAX_STICKY_MATERIAL_PARAM_OWNERS] = {};
+        size_t ownerCount = 0;
+        for (uintptr_t sceneObject : sceneObjects) {
+            std::vector<uint32_t> selectors;
+            CollectMaterialSelectorCandidates(sceneObject, selectors);
+            const uint32_t manualSelector = static_cast<uint32_t>(g_editorMaterialTestSelector);
+            if (manualSelector != 0
+                && std::find(selectors.begin(), selectors.end(), manualSelector) == selectors.end()) {
+                selectors.push_back(manualSelector);
+            }
+
+            const uint8_t baseSlot = static_cast<uint8_t>(g_editorMaterialTestSlot);
+            for (uint32_t selector : selectors) {
+                for (uint32_t slotOffset = 0; slotOffset < 2; ++slotOffset) {
+                    uintptr_t owner = 0;
+                    uintptr_t setterAddress = 0;
+                    if (LookupMaterialParameterOwner(
+                        sceneObject,
+                        selector,
+                        static_cast<uint8_t>(baseSlot + slotOffset),
+                        owner,
+                        setterAddress)) {
+                        bool seen = false;
+                        for (size_t i = 0; i < ownerCount; ++i) {
+                            if (owners[i] == owner) {
+                                seen = true;
+                                break;
+                            }
+                        }
+                        if (!seen && ownerCount < MAX_STICKY_MATERIAL_PARAM_OWNERS) {
+                            owners[ownerCount++] = owner;
+                        }
+                        EnsureMaterialParameterSetterHookInstalled(setterAddress);
+                    }
+                }
+            }
+        }
+
+        InterlockedExchange(&g_editorMaterialStickyParamOwnerCount, 0);
+        for (size_t i = 0; i < ownerCount; ++i) {
+            g_editorMaterialStickyParamOwners[i] = owners[i];
+        }
+        for (size_t i = ownerCount; i < MAX_STICKY_MATERIAL_PARAM_OWNERS; ++i) {
+            g_editorMaterialStickyParamOwners[i] = 0;
+        }
+        InterlockedExchange(&g_editorMaterialStickyParamOwnerCount, static_cast<LONG>(ownerCount));
+    }
+
+    static int ApplyStickyMaterialColorOnce(const std::vector<uintptr_t>& sceneObjects, int* outAttempts) {
+        const uint32_t manualSelector = static_cast<uint32_t>(g_editorMaterialTestSelector);
+        return g_editorMaterialStickyUseAutoSelectors
+            ? ApplyMaterialColorAutoSelectorsToObjects(
+                sceneObjects,
+                manualSelector,
+                static_cast<uint8_t>(g_editorMaterialTestSlot),
+                static_cast<uint8_t>(g_editorMaterialTestSourceMode),
+                static_cast<uint8_t>(g_editorMaterialTestOverrideMode),
+                static_cast<uint8_t>(g_editorMaterialTestSecondaryMode),
+                g_editorMaterialTestColor,
+                g_editorMaterialTestRefreshAfterApply,
+                outAttempts)
+            : ApplyMaterialColorOverrideToObjects(
+                sceneObjects,
+                manualSelector,
+                static_cast<uint8_t>(g_editorMaterialTestSlot),
+                static_cast<uint8_t>(g_editorMaterialTestSourceMode),
+                static_cast<uint8_t>(g_editorMaterialTestOverrideMode),
+                static_cast<uint8_t>(g_editorMaterialTestSecondaryMode),
+                g_editorMaterialTestColor,
+                g_editorMaterialTestRefreshAfterApply);
+    }
+
+    static int ArmStickyEditorMaterialOverride(const std::vector<uintptr_t>& sceneObjects, int* outAttempts) {
+        if (outAttempts) {
+            *outAttempts = 0;
+        }
+        if (sceneObjects.empty()) {
+            g_editorMaterialStickyEnabled = false;
+            g_editorMaterialStickySceneObjects.clear();
+            InterlockedExchange(&g_editorMaterialStickyParamOwnerCount, 0);
+            return 0;
+        }
+
+        g_editorMaterialStickyEnabled = true;
+        g_editorMaterialStickySceneObjects = sceneObjects;
+        g_editorMaterialStickyLastMonitorTick = 0;
+        EnsureCreateMeshInstancesHookInstalled();
+        EnsureApplyMaterialColorOverridesHookInstalled();
+        UpdateStickyMaterialParameterOwners(sceneObjects);
+
+        return ApplyStickyMaterialColorOnce(sceneObjects, outAttempts);
+    }
+
+    static uint32_t BuildStickyMaterialOverrideEntries(void* sceneObject, MaterialColorOverrideEntry* entries, uint32_t maxEntries) {
+        if (!sceneObject || !entries || maxEntries == 0) {
+            return 0;
+        }
+
+        std::vector<uint32_t> selectors;
+        if (g_editorMaterialStickyUseAutoSelectors) {
+            CollectMaterialSelectorCandidates(reinterpret_cast<uintptr_t>(sceneObject), selectors);
+        }
+        const uint32_t manualSelector = static_cast<uint32_t>(g_editorMaterialTestSelector);
+        if (manualSelector != 0
+            && std::find(selectors.begin(), selectors.end(), manualSelector) == selectors.end()) {
+            selectors.push_back(manualSelector);
+        }
+        if (selectors.empty()) {
+            return 0;
+        }
+
+        uint32_t entryCount = 0;
+        const uint8_t baseSlot = static_cast<uint8_t>(g_editorMaterialTestSlot);
+        for (uint32_t selector : selectors) {
+            for (uint32_t slotOffset = 0; slotOffset < 2 && entryCount < maxEntries; ++slotOffset) {
+                MaterialColorOverrideEntry& entry = entries[entryCount++];
+                entry = {};
+                entry.selector = selector;
+                entry.slot = static_cast<uint8_t>(baseSlot + slotOffset);
+                entry.sourceMode = static_cast<uint8_t>(g_editorMaterialTestSourceMode);
+                entry.color[0] = g_editorMaterialTestColor[0];
+                entry.color[1] = g_editorMaterialTestColor[1];
+                entry.color[2] = g_editorMaterialTestColor[2];
+                entry.color[3] = 1.0f;
+                entry.overrideMode = static_cast<uint8_t>(g_editorMaterialTestOverrideMode);
+                entry.secondaryMode = static_cast<uint8_t>(g_editorMaterialTestSecondaryMode);
+                entry.colorCount = 1;
+            }
+        }
+        return entryCount;
+    }
+
+    static void ApplyMaterialOverrideInsideCreateMeshHook(void* sceneObject) {
+        if (!g_originalCreateMeshInstances || !IsStickyMaterialSceneObject(reinterpret_cast<uintptr_t>(sceneObject))) {
+            return;
+        }
+
+        MaterialColorOverrideEntry entries[16] = {};
+        const uint32_t entryCount = BuildStickyMaterialOverrideEntries(sceneObject, entries, 16);
+        if (entryCount == 0) {
+            return;
+        }
+
+        MaterialColorOverrideVector vector = {};
+        vector.count = entryCount;
+        vector.capacity = entryCount;
+        vector.entries = entries;
+
+        g_originalCreateMeshInstances(sceneObject, &vector, 1.0f);
+    }
+
+    static void ApplyMaterialOverrideInsideApplyOverrideHook(void* sceneObject) {
+        if (!g_originalApplyMaterialColorOverrides || !IsStickyMaterialSceneObject(reinterpret_cast<uintptr_t>(sceneObject))) {
+            return;
+        }
+
+        MaterialColorOverrideEntry entries[16] = {};
+        const uint32_t entryCount = BuildStickyMaterialOverrideEntries(sceneObject, entries, 16);
+        for (uint32_t i = 0; i < entryCount; ++i) {
+            g_originalApplyMaterialColorOverrides(sceneObject, &entries[i], 1.0f);
+        }
+    }
+
+    static void __cdecl Hook_CreateMeshInstances(void* sceneObject, void* overrideVector, float blend) {
+        if (g_originalCreateMeshInstances) {
+            g_originalCreateMeshInstances(sceneObject, overrideVector, blend);
+        }
+        ApplyMaterialOverrideInsideCreateMeshHook(sceneObject);
+    }
+
+    static void __cdecl Hook_ApplyMaterialColorOverrides(void* sceneObject, void* overrideEntry, float blend) {
+        if (g_originalApplyMaterialColorOverrides) {
+            g_originalApplyMaterialColorOverrides(sceneObject, overrideEntry, blend);
+        }
+        ApplyMaterialOverrideInsideApplyOverrideHook(sceneObject);
+    }
+
+    static void EnsureCreateMeshInstancesHookInstalled() {
+        if (g_editorMaterialCreateMeshHookInstalled) {
+            return;
+        }
+
+        CreateMeshInstancesFunc createMeshInstances = ResolveCreateMeshInstances();
+        if (!createMeshInstances) {
+            return;
+        }
+
+        MH_STATUS hookStatus = MH_CreateHook(
+            reinterpret_cast<LPVOID>(createMeshInstances),
+            reinterpret_cast<LPVOID>(&Hook_CreateMeshInstances),
+            reinterpret_cast<LPVOID*>(&g_originalCreateMeshInstances));
+        if (hookStatus == MH_OK || hookStatus == MH_ERROR_ALREADY_CREATED) {
+            hookStatus = MH_EnableHook(reinterpret_cast<LPVOID>(createMeshInstances));
+            if (hookStatus == MH_OK || hookStatus == MH_ERROR_ENABLED) {
+                g_editorMaterialCreateMeshHookInstalled = true;
+                LOG_INFO("[EditorInspector] create_mesh_instances hook installed for material color test");
+            }
+        }
+        else {
+            LOG_WARNING("[EditorInspector] Failed to create create_mesh_instances hook: "
+                << MH_StatusToString(hookStatus));
+        }
+    }
+
+    static void EnsureApplyMaterialColorOverridesHookInstalled() {
+        if (g_editorMaterialApplyOverrideHookInstalled) {
+            return;
+        }
+
+        ApplyMaterialColorOverridesFunc applyOverrides = ResolveApplyMaterialColorOverrides();
+        if (!applyOverrides) {
+            return;
+        }
+
+        MH_STATUS hookStatus = MH_CreateHook(
+            reinterpret_cast<LPVOID>(applyOverrides),
+            reinterpret_cast<LPVOID>(&Hook_ApplyMaterialColorOverrides),
+            reinterpret_cast<LPVOID*>(&g_originalApplyMaterialColorOverrides));
+        if (hookStatus == MH_OK || hookStatus == MH_ERROR_ALREADY_CREATED) {
+            hookStatus = MH_EnableHook(reinterpret_cast<LPVOID>(applyOverrides));
+            if (hookStatus == MH_OK || hookStatus == MH_ERROR_ENABLED) {
+                g_editorMaterialApplyOverrideHookInstalled = true;
+                LOG_INFO("[EditorInspector] MeshInstance_ApplyMaterialColorOverrides hook installed for material color test");
+            }
+        }
+        else {
+            LOG_WARNING("[EditorInspector] Failed to create MeshInstance_ApplyMaterialColorOverrides hook: "
+                << MH_StatusToString(hookStatus));
+        }
+    }
+
+    static bool CaptureEngineSceneObjects(
+        uintptr_t sceneRoot,
+        uint32_t objectType,
+        uint32_t objectSubtype,
+        uint32_t useVirtualType,
+        std::vector<uintptr_t>& outObjects) {
+        outObjects.clear();
+        if (sceneRoot == 0 || !IsReadableRange(sceneRoot, 0x24)) {
+            return false;
+        }
+
+        CollectSceneObjectsByTypeFunc collect = ResolveCollectSceneObjectsByType();
+        if (!collect) {
+            return false;
+        }
+
+        EditorSceneObjectSnapshot snapshot = {};
+        __try {
+            collect(
+                reinterpret_cast<void*>(sceneRoot),
+                &snapshot,
+                objectType,
+                objectSubtype,
+                useVirtualType,
+                0);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+
+        if (snapshot.count > MAX_EDITOR_SCENE_OBJECT_SNAPSHOT) {
+            snapshot.count = MAX_EDITOR_SCENE_OBJECT_SNAPSHOT;
+        }
+
+        for (uint32_t i = 0; i < snapshot.count; ++i) {
+            uintptr_t object = reinterpret_cast<uintptr_t>(snapshot.objects[i]);
+            if (object != 0 && IsReadableRange(object, 0x10)) {
+                outObjects.push_back(object);
+            }
+        }
+        return true;
+    }
+
+    static bool CaptureEngineSceneObjects(
+        uintptr_t sceneRoot,
+        uint32_t objectType,
+        uint32_t objectSubtype,
+        std::vector<uintptr_t>& outObjects) {
+        return CaptureEngineSceneObjects(sceneRoot, objectType, objectSubtype, 0, outObjects);
+    }
+
+    static void AppendUniqueSceneObjects(std::vector<uintptr_t>& target, const std::vector<uintptr_t>& source) {
+        for (uintptr_t sceneObject : source) {
+            if (sceneObject == 0) {
+                continue;
+            }
+            if (std::find(target.begin(), target.end(), sceneObject) == target.end()) {
+                target.push_back(sceneObject);
+            }
+        }
+    }
+
+    static void CollectMaterialColorTestSceneObjects(const SelectedEditorObject& selected, std::vector<uintptr_t>& outObjects) {
+        outObjects.clear();
+        const uintptr_t roots[] = {
+            selected.selectedObject,
+            selected.resourceSceneRoot,
+            selected.firstMeshSceneObject,
+        };
+
+        const struct {
+            uint32_t type;
+            uint32_t subtype;
+            uint32_t useVirtualType;
+        } queries[] = {
+            {1, 3, 0},
+            {3, 1, 0},
+            {1, 2, 1},
+            {1, 2, 0},
+            {1, 15, 0},
+            {1, 1, 0},
+        };
+
+        for (uintptr_t root : roots) {
+            for (const auto& query : queries) {
+                std::vector<uintptr_t> found;
+                CaptureEngineSceneObjects(root, query.type, query.subtype, query.useVirtualType, found);
+                AppendUniqueSceneObjects(outObjects, found);
+            }
+        }
+    }
+
+    static void CollectMaterialSelectorCandidates(uintptr_t sceneObject, std::vector<uint32_t>& selectors) {
+        const uintptr_t offsets[] = {
+            0x20,
+            0x24,
+            0x38,
+            0x58,
+        };
+
+        for (uintptr_t offset : offsets) {
+            uint32_t value = 0;
+            if (SafeReadValue(sceneObject + offset, value)
+                && value != 0
+                && std::find(selectors.begin(), selectors.end(), value) == selectors.end()) {
+                selectors.push_back(value);
+            }
+        }
+    }
+
+    static std::string BuildMaterialSelectorSummary(uintptr_t sceneObject) {
+        if (sceneObject == 0 || !IsReadableRange(sceneObject, 0x5c)) {
+            return "<unavailable>";
+        }
+
+        uint32_t value20 = 0;
+        uint32_t value24 = 0;
+        uint32_t value38 = 0;
+        uint32_t value58 = 0;
+        SafeReadValue(sceneObject + 0x20, value20);
+        SafeReadValue(sceneObject + 0x24, value24);
+        SafeReadValue(sceneObject + 0x38, value38);
+        SafeReadValue(sceneObject + 0x58, value58);
+
+        std::ostringstream ss;
+        ss << "+20=0x" << std::hex << std::uppercase << value20
+            << " +24=0x" << value24
+            << " +38=0x" << value38
+            << " +58=0x" << value58
+            << std::dec;
+        return ss.str();
+    }
+
+    static void AppendMaterialOwnerUpstreamSummary(std::ostringstream& ss, uintptr_t owner) {
+        if (owner == 0 || !IsReadableRange(owner, 0x1b4)) {
+            ss << "    ownerUpstream=<unavailable>\n";
+            return;
+        }
+
+        uintptr_t owner104 = 0;
+        uintptr_t owner174 = 0;
+        uintptr_t owner17c = 0;
+        uintptr_t owner1ac = 0;
+        uintptr_t owner1b0 = 0;
+        uint32_t owner1b4 = 0;
+        uintptr_t owner1d0 = 0;
+        uintptr_t owner1d4 = 0;
+        SafeReadValue(owner + 0x104, owner104);
+        SafeReadValue(owner + 0x174, owner174);
+        SafeReadValue(owner + 0x17c, owner17c);
+        SafeReadValue(owner + 0x1ac, owner1ac);
+        SafeReadValue(owner + 0x1b0, owner1b0);
+        SafeReadValue(owner + 0x1b4, owner1b4);
+        SafeReadValue(owner + 0x1d0, owner1d0);
+        SafeReadValue(owner + 0x1d4, owner1d4);
+
+        ss << "    ownerUpstream:"
+            << " +104=" << (owner104 ? HexAddress(owner104) : "<null>")
+            << " +174=" << (owner174 ? HexAddress(owner174) : "<null>")
+            << " +17c=" << (owner17c ? HexAddress(owner17c) : "<null>")
+            << " +1ac(ptr)=" << (owner1ac ? HexAddress(owner1ac) : "<null>")
+            << " +1b0(ptr)=" << (owner1b0 ? HexAddress(owner1b0) : "<null>")
+            << " +1b4(count?)=" << owner1b4
+            << " +1d0(ptr)=" << (owner1d0 ? HexAddress(owner1d0) : "<null>")
+            << " +1d4(ptr)=" << (owner1d4 ? HexAddress(owner1d4) : "<null>")
+            << "\n";
+
+        if (owner104 != 0 && IsReadableRange(owner104, 0x18)) {
+            uintptr_t owner104_0c = 0;
+            uintptr_t owner104_14 = 0;
+            SafeReadValue(owner104 + 0x0c, owner104_0c);
+            SafeReadValue(owner104 + 0x14, owner104_14);
+            ss << "    owner+104:"
+                << " [0c]=" << (owner104_0c ? HexAddress(owner104_0c) : "<null>")
+                << " [14]=" << (owner104_14 ? HexAddress(owner104_14) : "<null>");
+            if (owner104_0c != 0 && IsReadableRange(owner104_0c + 0x14, sizeof(uintptr_t))) {
+                uintptr_t owner104_0c_14 = 0;
+                SafeReadValue(owner104_0c + 0x14, owner104_0c_14);
+                ss << " [[0c]+14]=" << (owner104_0c_14 ? HexAddress(owner104_0c_14) : "<null>");
+                if (owner104_0c_14 != 0 && IsReadableRange(owner104_0c_14 + 0x90, sizeof(uintptr_t))) {
+                    uintptr_t owner104_0c_14_90 = 0;
+                    SafeReadValue(owner104_0c_14 + 0x90, owner104_0c_14_90);
+                    ss << " [[[0c]+14]+90]=" << (owner104_0c_14_90 ? HexAddress(owner104_0c_14_90) : "<null>");
+                }
+            }
+            ss << "\n";
+        }
+
+        if (owner1b0 != 0 && owner1b4 != 0 && owner1b4 < 4096 && IsReadableRange(owner1b0, owner1b4 * 8)) {
+            const uint32_t entryCount = owner1b4 < 8 ? owner1b4 : 8;
+            for (uint32_t i = 0; i < entryCount; ++i) {
+                const uintptr_t entry = owner1b0 + i * 8;
+                uintptr_t keyOrPtr = 0;
+                uintptr_t descriptor = 0;
+                SafeReadValue(entry, keyOrPtr);
+                SafeReadValue(entry + 4, descriptor);
+                ss << "    owner+1b0[" << i << "]:"
+                    << " a=" << (keyOrPtr ? HexAddress(keyOrPtr) : "<null>")
+                    << " b=" << (descriptor ? HexAddress(descriptor) : "<null>");
+                if (descriptor != 0 && IsReadableRange(descriptor, 0x1a0)) {
+                    uintptr_t descriptor10 = 0;
+                    uintptr_t descriptor48 = 0;
+                    uintptr_t descriptor154 = 0;
+                    uintptr_t descriptor15c = 0;
+                    SafeReadValue(descriptor + 0x10, descriptor10);
+                    SafeReadValue(descriptor + 0x48, descriptor48);
+                    SafeReadValue(descriptor + 0x154, descriptor154);
+                    SafeReadValue(descriptor + 0x15c, descriptor15c);
+                    ss << " b+10=" << (descriptor10 ? HexAddress(descriptor10) : "<null>")
+                        << " b+48=0x" << std::hex << std::uppercase << descriptor48 << std::dec
+                        << " b+154=" << (descriptor154 ? HexAddress(descriptor154) : "<null>")
+                        << " b+15c=" << (descriptor15c ? HexAddress(descriptor15c) : "<null>");
+                }
+                ss << "\n";
+            }
+        }
+
+        if (owner1ac != 0 && IsReadableRange(owner1ac, 0x80)) {
+            AppendRawDwordFields(ss, "    owner+1ac pointer target +0x000..0x07f", owner1ac, 0x80);
+        }
+        if (owner1b0 != 0 && IsReadableRange(owner1b0, 0x100)) {
+            AppendRawDwordFields(ss, "    owner+1b0 pointer target +0x000..0x0ff", owner1b0, 0x100);
+        }
+        if (owner1d0 != 0 && owner1d0 != owner1ac && IsReadableRange(owner1d0, 0x80)) {
+            AppendRawDwordFields(ss, "    owner+1d0 pointer target +0x000..0x07f", owner1d0, 0x80);
+        }
+        if (owner1d4 != 0 && owner1d4 != owner1b0 && IsReadableRange(owner1d4, 0x100)) {
+            AppendRawDwordFields(ss, "    owner+1d4 pointer target +0x000..0x0ff", owner1d4, 0x100);
+        }
+    }
+
+    static void AppendMaterialParameterLookupReport(
+        std::ostringstream& ss,
+        const SelectedEditorObject& selected) {
+        std::vector<uintptr_t> materialObjects;
+        CollectMaterialColorTestSceneObjects(selected, materialObjects);
+        ss << "\n[Material Parameter Lookup Candidates]\n";
+        ss << "materialObjectCount=" << materialObjects.size() << "\n";
+
+        int objectIndex = 0;
+        for (uintptr_t sceneObject : materialObjects) {
+            if (objectIndex >= 12) {
+                ss << "... truncated material object report after 12 objects\n";
+                break;
+            }
+
+            ss << "materialObject[" << objectIndex << "]=" << HexAddress(sceneObject)
+                << " selectors=" << BuildMaterialSelectorSummary(sceneObject) << "\n";
+
+            std::vector<uint32_t> selectors;
+            CollectMaterialSelectorCandidates(sceneObject, selectors);
+            const uint32_t manualSelector = static_cast<uint32_t>(g_editorMaterialTestSelector);
+            if (manualSelector != 0
+                && std::find(selectors.begin(), selectors.end(), manualSelector) == selectors.end()) {
+                selectors.push_back(manualSelector);
+            }
+
+            int selectorIndex = 0;
+            for (uint32_t selector : selectors) {
+                if (selectorIndex >= 8) {
+                    ss << "  ... truncated selector report after 8 selectors\n";
+                    break;
+                }
+                for (uint8_t slot = 0; slot < 2; ++slot) {
+                    MaterialParameterLookup lookup = {};
+                    uintptr_t owner = 0;
+                    uintptr_t setterAddress = 0;
+                    uintptr_t getterAddress = 0;
+                    const bool found = LookupMaterialParameter(
+                        sceneObject,
+                        selector,
+                        slot,
+                        lookup,
+                        owner,
+                        setterAddress,
+                        getterAddress);
+                    if (!found) {
+                        continue;
+                    }
+
+                    float value[4] = {};
+                    if (lookup.value != nullptr
+                        && IsReadableRange(reinterpret_cast<uintptr_t>(lookup.value), sizeof(value))) {
+                        SafeReadMemory(reinterpret_cast<uintptr_t>(lookup.value), value, sizeof(value));
+                    }
+
+                    ss << "  selector=0x" << std::hex << std::uppercase << selector
+                        << std::dec
+                        << " slot=" << static_cast<uint32_t>(slot)
+                        << "(" << DescribeMaterialColorSlot(slot) << ")"
+                        << " getter=" << HexAddress(getterAddress)
+                        << " owner=" << HexAddress(owner)
+                        << " setter=" << HexAddress(setterAddress)
+                        << " valuePtr=" << (lookup.value ? HexAddress(reinterpret_cast<uintptr_t>(lookup.value)) : "<null>")
+                        << " lookup.count=" << lookup.count
+                        << " lookup.unknown18=0x" << std::hex << std::uppercase << lookup.unknown18 << std::dec
+                        << " value=(" << value[0] << "," << value[1] << "," << value[2] << "," << value[3] << ")"
+                        << "\n";
+                    AppendMaterialOwnerUpstreamSummary(ss, owner);
+                    AppendRawDwordFields(ss, "    Material Parameter Owner Raw +0x000..0x23f", owner, 0x240);
+                    if (owner != 0 && IsReadableRange(owner + 0x240, 0x140)) {
+                        AppendRawDwordFields(ss, "    Material Parameter Owner Tail Raw +0x240..0x37f", owner + 0x240, 0x140);
+                    }
+                    if (lookup.value != nullptr) {
+                        const uintptr_t valueAddress = reinterpret_cast<uintptr_t>(lookup.value);
+                        const uintptr_t valueWindow = valueAddress >= 0x100 ? valueAddress - 0x100 : valueAddress;
+                        AppendRawDwordFields(ss, "    Material Value Pointer Surrounding Raw -0x100..+0xff", valueWindow, 0x200);
+                    }
+                }
+                ++selectorIndex;
+            }
+            ++objectIndex;
+        }
+    }
+
+    static uintptr_t ResolveTrackEventMaterialTargetForInspector() {
+        const uintptr_t gameManager = ResolveGameManagerForEditorInspector();
+        uintptr_t trackManager = 0;
+        uintptr_t target = 0;
+        if (gameManager == 0
+            || !SafeReadValue(gameManager + 0x108, trackManager)
+            || !IsReadableRange(trackManager + 0x178, sizeof(uintptr_t))
+            || !SafeReadValue(trackManager + 0x174, target)
+            || !IsReadableRange(target, 0x120)) {
+            return 0;
+        }
+        return target;
+    }
+
+    static uintptr_t FindTrackEventTreeMapNode(uintptr_t map, uintptr_t key) {
+        if (map == 0 || !IsReadableRange(map + 0x0c, sizeof(uintptr_t))) {
+            return 0;
+        }
+
+        uintptr_t node = 0;
+        uintptr_t candidate = 0;
+        SafeReadValue(map + 0x08, node);
+        int guard = 0;
+        while (node != 0 && IsReadableRange(node, 0x18) && guard++ < 4096) {
+            uintptr_t nodeKey = 0;
+            uintptr_t next = 0;
+            SafeReadValue(node + 0x10, nodeKey);
+            if (nodeKey < key) {
+                SafeReadValue(node + 0x04, next);
+            }
+            else {
+                candidate = node;
+                SafeReadValue(node, next);
+            }
+            node = next;
+        }
+
+        if (candidate != 0 && candidate != map && IsReadableRange(candidate + 0x14, sizeof(uintptr_t))) {
+            uintptr_t candidateKey = 0;
+            SafeReadValue(candidate + 0x10, candidateKey);
+            if (candidateKey <= key) {
+                return candidate;
+            }
+        }
+        return 0;
+    }
+
+    static void LogTrackEventMaterialMapState(
+        const char* phase,
+        uintptr_t dispatcher,
+        uintptr_t sceneObject,
+        uintptr_t eventId) {
+        if (dispatcher == 0 || sceneObject == 0 || phase == nullptr) {
+            return;
+        }
+
+        const uintptr_t materialMap = dispatcher + 0x4c;
+        const uintptr_t meshColorMap = dispatcher + 0x94;
+        uintptr_t materialRoot = 0;
+        uintptr_t meshColorRoot = 0;
+        SafeReadValue(materialMap + 0x08, materialRoot);
+        SafeReadValue(meshColorMap + 0x08, meshColorRoot);
+        const uintptr_t materialNode = FindTrackEventTreeMapNode(materialMap, sceneObject);
+        const uintptr_t meshColorNode = FindTrackEventTreeMapNode(meshColorMap, sceneObject);
+
+        uint32_t materialCount = 0;
+        uint32_t materialCapacity = 0;
+        uintptr_t materialEntries = 0;
+        if (materialNode != 0 && IsReadableRange(materialNode + 0x20, sizeof(uintptr_t))) {
+            SafeReadValue(materialNode + 0x14, materialCount);
+            SafeReadValue(materialNode + 0x18, materialCapacity);
+            SafeReadValue(materialNode + 0x1c, materialEntries);
+        }
+
+        float meshColor[4] = {};
+        bool hasMeshColor = false;
+        if (meshColorNode != 0 && IsReadableRange(meshColorNode + 0x30, sizeof(float) * 4)) {
+            hasMeshColor =
+                SafeReadValue(meshColorNode + 0x20, meshColor[0])
+                && SafeReadValue(meshColorNode + 0x24, meshColor[1])
+                && SafeReadValue(meshColorNode + 0x28, meshColor[2])
+                && SafeReadValue(meshColorNode + 0x2c, meshColor[3]);
+        }
+
+        LOG_INFO("[EditorInspector] TrackEvent material trace "
+            << phase
+            << " event=0x" << std::hex << std::uppercase << eventId << std::dec
+            << " dispatcher=" << HexAddress(dispatcher)
+            << " sceneObject=" << HexAddress(sceneObject)
+            << " materialRoot=" << (materialRoot ? HexAddress(materialRoot) : "<null>")
+            << " materialNode=" << (materialNode ? HexAddress(materialNode) : "<missing>")
+            << " materialCount=" << materialCount
+            << " materialCapacity=" << materialCapacity
+            << " materialEntries=" << (materialEntries ? HexAddress(materialEntries) : "<null>")
+            << " meshColorRoot=" << (meshColorRoot ? HexAddress(meshColorRoot) : "<null>")
+            << " meshColorNode=" << (meshColorNode ? HexAddress(meshColorNode) : "<missing>")
+            << " meshColor="
+            << (hasMeshColor ? "(" : "<missing>")
+            << (hasMeshColor ? std::to_string(meshColor[0]) : "")
+            << (hasMeshColor ? "," : "")
+            << (hasMeshColor ? std::to_string(meshColor[1]) : "")
+            << (hasMeshColor ? "," : "")
+            << (hasMeshColor ? std::to_string(meshColor[2]) : "")
+            << (hasMeshColor ? "," : "")
+            << (hasMeshColor ? std::to_string(meshColor[3]) : "")
+            << (hasMeshColor ? ")" : ""));
+    }
+
+    static void __fastcall Hook_TrackEventApplySceneObject(
+        void* dispatcher,
+        void* edxUnused,
+        void* sceneObject,
+        void* eventId,
+        void* eventParam) {
+        (void)edxUnused;
+
+        const uintptr_t eventValue = reinterpret_cast<uintptr_t>(eventId);
+        const bool traceArmed = g_editorMaterialTrackEventTraceArmed;
+        if (traceArmed) {
+            const LONG anyIndex = InterlockedIncrement(&g_editorMaterialTrackEventAnyTraceCount);
+            if (anyIndex <= 120) {
+                LOG_INFO("[EditorInspector] TrackEvent any trace event=0x"
+                    << std::hex << std::uppercase << eventValue << std::dec
+                    << " dispatcher=" << HexAddress(reinterpret_cast<uintptr_t>(dispatcher))
+                    << " sceneObject=" << HexAddress(reinterpret_cast<uintptr_t>(sceneObject))
+                    << " eventParam=" << HexAddress(reinterpret_cast<uintptr_t>(eventParam)));
+            }
+        }
+
+        const bool shouldTrace = traceArmed && (eventValue == 0x12 || eventValue == 0x13);
+        LONG traceIndex = 0;
+        if (shouldTrace) {
+            traceIndex = InterlockedIncrement(&g_editorMaterialTrackEventTraceCount);
+            if (traceIndex <= 80) {
+                LogTrackEventMaterialMapState(
+                    "before",
+                    reinterpret_cast<uintptr_t>(dispatcher),
+                    reinterpret_cast<uintptr_t>(sceneObject),
+                    eventValue);
+            }
+        }
+
+        if (g_originalTrackEventApplySceneObject) {
+            g_originalTrackEventApplySceneObject(dispatcher, sceneObject, eventId, eventParam);
+        }
+
+        if (shouldTrace && traceIndex <= 80) {
+            LogTrackEventMaterialMapState(
+                "after",
+                reinterpret_cast<uintptr_t>(dispatcher),
+                reinterpret_cast<uintptr_t>(sceneObject),
+                eventValue);
+            if (traceIndex == 80) {
+                g_editorMaterialTrackEventTraceArmed = false;
+                LOG_INFO("[EditorInspector] TrackEvent material trace stopped after 80 material/color events");
+            }
+        }
+
+        if (traceArmed && InterlockedCompareExchange(&g_editorMaterialTrackEventAnyTraceCount, 0, 0) >= 120) {
+            g_editorMaterialTrackEventTraceArmed = false;
+            LOG_INFO("[EditorInspector] TrackEvent material trace stopped after 120 total events");
+        }
+    }
+
+    static void EnsureTrackEventMaterialTraceHookInstalled() {
+        if (g_editorMaterialTrackEventHookInstalled) {
+            return;
+        }
+
+        TrackEventApplySceneObjectFunc target = ResolveTrackEventApplySceneObject();
+        if (!target) {
+            return;
+        }
+
+        MH_STATUS hookStatus = MH_CreateHook(
+            reinterpret_cast<LPVOID>(target),
+            reinterpret_cast<LPVOID>(&Hook_TrackEventApplySceneObject),
+            reinterpret_cast<LPVOID*>(&g_originalTrackEventApplySceneObject));
+        if (hookStatus == MH_OK || hookStatus == MH_ERROR_ALREADY_CREATED) {
+            hookStatus = MH_EnableHook(reinterpret_cast<LPVOID>(target));
+            if (hookStatus == MH_OK || hookStatus == MH_ERROR_ENABLED) {
+                g_editorMaterialTrackEventHookInstalled = true;
+                LOG_INFO("[EditorInspector] TrackEvent material trace hook installed address="
+                    << HexAddress(reinterpret_cast<uintptr_t>(target)));
+            }
+        }
+        else {
+            LOG_WARNING("[EditorInspector] Failed to create TrackEvent material trace hook: "
+                << MH_StatusToString(hookStatus));
+        }
+    }
+
+    static void AppendTrackEventMapNodeReport(
+        std::ostringstream& ss,
+        const char* label,
+        uintptr_t map,
+        uintptr_t key) {
+        uintptr_t root = 0;
+        uintptr_t node = FindTrackEventTreeMapNode(map, key);
+        SafeReadValue(map + 0x08, root);
+        ss << "  " << label
+            << " key=" << HexAddress(key)
+            << " map=" << (map ? HexAddress(map) : "<null>")
+            << " root=" << (root ? HexAddress(root) : "<null>")
+            << " node=" << (node ? HexAddress(node) : "<missing>")
+            << "\n";
+
+        if (node == 0) {
+            return;
+        }
+
+        std::ostringstream nodeTitle;
+        nodeTitle << "    " << label << " node raw +0x000..0x07f";
+        AppendRawDwordFields(ss, nodeTitle.str().c_str(), node, 0x80);
+
+        if (std::strcmp(label, "materialOverrideMap+0x4c") == 0
+            && IsReadableRange(node + 0x14, 0x0c)) {
+            uint32_t count = 0;
+            uint32_t capacity = 0;
+            uintptr_t entries = 0;
+            SafeReadValue(node + 0x14, count);
+            SafeReadValue(node + 0x18, capacity);
+            SafeReadValue(node + 0x1c, entries);
+            ss << "    material override vector:"
+                << " count=" << count
+                << " capacity=" << capacity
+                << " entries=" << (entries ? HexAddress(entries) : "<null>")
+                << "\n";
+            if (entries != 0 && count > 0 && count < 64 && IsReadableRange(entries, count * sizeof(MaterialColorOverrideEntry))) {
+                const uint32_t dumpCount = count < 4 ? count : 4;
+                for (uint32_t i = 0; i < dumpCount; ++i) {
+                    std::ostringstream entryTitle;
+                    entryTitle << "    material override entry[" << i << "] raw +0x000..0x05f";
+                    AppendRawDwordFields(ss, entryTitle.str().c_str(), entries + i * sizeof(MaterialColorOverrideEntry), sizeof(MaterialColorOverrideEntry));
+                }
+            }
+        }
+    }
+
+    static void AppendTrackEventMaterialBackingReport(std::ostringstream& ss, const SelectedEditorObject& selected) {
+        const uintptr_t target = ResolveTrackEventMaterialTargetForInspector();
+        ss << "\n[Track Event Material Backing Maps]\n";
+        ss << "trackEventMaterialTarget=" << (target ? HexAddress(target) : "<missing>") << "\n";
+        if (target == 0) {
+            return;
+        }
+
+        const uintptr_t materialOverrideMap = target + 0x4c;
+        const uintptr_t meshColorMap = target + 0x94;
+        std::vector<uintptr_t> keys;
+        auto addKey = [&keys](uintptr_t key) {
+            if (key != 0 && std::find(keys.begin(), keys.end(), key) == keys.end()) {
+                keys.push_back(key);
+            }
+        };
+
+        addKey(selected.selectedObject);
+        addKey(selected.firstMeshSceneObject);
+        addKey(selected.resourceSceneRoot);
+        std::vector<uintptr_t> materialObjects;
+        CollectMaterialColorTestSceneObjects(selected, materialObjects);
+        for (uintptr_t materialObject : materialObjects) {
+            addKey(materialObject);
+        }
+
+        for (uintptr_t key : keys) {
+            AppendTrackEventMapNodeReport(ss, "materialOverrideMap+0x4c", materialOverrideMap, key);
+            AppendTrackEventMapNodeReport(ss, "meshColorMap+0x94", meshColorMap, key);
+        }
+    }
+
+    static bool ApplyVariationControllerTransform(uintptr_t variationController) {
+        if (variationController == 0 || !IsReadableRange(variationController, 0x90)) {
+            return false;
+        }
+
+        UpdateObjectVariationTransformFunc updateTransform = ResolveUpdateObjectVariationTransform();
+        if (!updateTransform) {
+            return false;
+        }
+
+        __try {
+            updateTransform(static_cast<int>(variationController));
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool RebuildObjectVariation(uintptr_t variationController, int variationIndex) {
+        if (variationController == 0 || !IsReadableRange(variationController, 0x9c)) {
+            return false;
+        }
+
+        CreateObjectVariationFunc createVariation = ResolveCreateObjectVariation();
+        if (!createVariation) {
+            return false;
+        }
+
+        __try {
+            createVariation(reinterpret_cast<void*>(variationController), variationIndex);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool SetSceneObjectScaleVector(uintptr_t sceneObject, const float scale[3]);
+    static bool SetSceneObjectScaleVectorWithRefresh(uintptr_t sceneObject, const float scale[3], uintptr_t refreshObject);
+    static bool SetSceneObjectScaleVectorAndNudge(
+        uintptr_t sceneObject,
+        const float scale[3],
+        uintptr_t nudgeObject,
+        float epsilon);
+    static bool SetSceneObjectScaleVectorAndDeferredNudge(
+        uintptr_t sceneObject,
+        const float scale[3],
+        uintptr_t nudgeObject,
+        float epsilon,
+        uint32_t restoreDelayMs);
+    static void AppendRawDwordFields(std::ostringstream& ss, const char* title, uintptr_t baseAddress, uintptr_t byteCount);
+
+    static bool SetSceneObjectScaleVector(uintptr_t sceneObject, float uniformScale) {
+        float scale[3] = { uniformScale, uniformScale, uniformScale };
+        return SetSceneObjectScaleVector(sceneObject, scale);
+    }
+
+    static bool SetSceneObjectScaleVector(uintptr_t sceneObject, const float scale[3]) {
+        if (sceneObject == 0 || !IsReadableRange(sceneObject, sizeof(uintptr_t))) {
+            return false;
+        }
+        if (scale == nullptr) {
+            return false;
+        }
+
+        uintptr_t vtable = 0;
+        uintptr_t setScaleAddress = 0;
+        if (!SafeReadValue(sceneObject, vtable)
+            || !IsReadableRange(vtable + 0x1c, sizeof(uintptr_t))
+            || !SafeReadValue(vtable + 0x18, setScaleAddress)
+            || setScaleAddress == 0) {
+            return false;
+        }
+
+        uintptr_t transform = 0;
+        if (SafeReadValue(sceneObject + 0x28, transform)
+            && transform != 0
+            && IsReadableRange(transform + 0x30, sizeof(float) * 3)) {
+            SafeWriteMemory(transform + 0x30, scale, sizeof(float) * 3);
+        }
+
+        __try {
+            SceneObjectSetScaleFunc setScale = reinterpret_cast<SceneObjectSetScaleFunc>(setScaleAddress);
+            setScale(reinterpret_cast<void*>(sceneObject), scale);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool ReadSceneObjectScaleVector(uintptr_t sceneObject, float outScale[3]) {
+        if (sceneObject == 0 || outScale == nullptr || !IsReadableRange(sceneObject + 0x28, sizeof(uintptr_t))) {
+            return false;
+        }
+
+        uintptr_t transform = 0;
+        return SafeReadValue(sceneObject + 0x28, transform)
+            && transform != 0
+            && IsReadableRange(transform + 0x30, sizeof(float) * 3)
+            && SafeReadMemory(transform + 0x30, outScale, sizeof(float) * 3);
+    }
+
+    static bool SyncSceneObjectTransformForRefresh(uintptr_t sceneObject) {
+        if (sceneObject == 0 || !IsReadableRange(sceneObject + 0x2c, sizeof(uintptr_t))) {
+            return false;
+        }
+
+        uintptr_t transform = 0;
+        if (!SafeReadValue(sceneObject + 0x28, transform)
+            || transform == 0
+            || !IsReadableRange(transform + 0x14, sizeof(float) * 3)
+            || !IsReadableRange(transform + 0x20, sizeof(float) * 4)
+            || !IsReadableRange(transform + 0x30, sizeof(float) * 3)) {
+            return false;
+        }
+
+        SyncSceneObjectTransformFunc syncTransform = ResolveSyncSceneObjectTransform();
+        if (!syncTransform) {
+            return false;
+        }
+
+        __try {
+            syncTransform(
+                reinterpret_cast<void*>(sceneObject),
+                reinterpret_cast<const float*>(transform + 0x14),
+                reinterpret_cast<const float*>(transform + 0x30),
+                reinterpret_cast<const float*>(transform + 0x20));
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool ApplySceneObjectCurrentTransform(uintptr_t sceneObject) {
+        if (sceneObject == 0 || !IsReadableRange(sceneObject + 0x2c, sizeof(uintptr_t))) {
+            return false;
+        }
+
+        uintptr_t transform = 0;
+        if (!SafeReadValue(sceneObject + 0x28, transform)
+            || transform == 0
+            || !IsReadableRange(transform + 0x3c, sizeof(float) * 3)) {
+            return false;
+        }
+
+        ApplySceneObjectTransformFunc applyTransform = ResolveApplySceneObjectTransform();
+        if (!applyTransform) {
+            return false;
+        }
+
+        __try {
+            applyTransform(
+                reinterpret_cast<void*>(sceneObject),
+                reinterpret_cast<const float*>(transform + 0x14),
+                reinterpret_cast<const float*>(transform + 0x20),
+                reinterpret_cast<const float*>(transform + 0x30));
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool ForceSceneObjectVisualRefresh(uintptr_t sceneObject) {
+        bool refreshed = ApplySceneObjectCurrentTransform(sceneObject);
+        if (!refreshed) {
+            refreshed = SyncSceneObjectTransformForRefresh(sceneObject);
+        }
+
+        RefreshEditorObjectVisualFunc refreshEditorVisual = ResolveRefreshEditorObjectVisual();
+        const uintptr_t editorManager = ResolveEditorManagerForInspector();
+        if (refreshEditorVisual
+            && editorManager != 0
+            && sceneObject != 0
+            && IsReadableRange(editorManager, 0x670)
+            && IsReadableRange(sceneObject, sizeof(uintptr_t))) {
+            __try {
+                refreshEditorVisual(
+                    reinterpret_cast<void*>(editorManager),
+                    reinterpret_cast<void*>(sceneObject));
+                refreshed = true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+            }
+        }
+
+        RenderGraphicsAndUpdateCameraFunc renderUpdate = ResolveRenderGraphicsAndUpdateCamera();
+        if (renderUpdate && sceneObject != 0 && IsReadableRange(sceneObject, sizeof(uintptr_t))) {
+            __try {
+                renderUpdate(reinterpret_cast<void*>(sceneObject));
+                refreshed = true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+            }
+        }
+
+        return refreshed;
+    }
+
+    static bool SetSceneObjectScaleVectorWithRefresh(
+        uintptr_t sceneObject,
+        float uniformScale,
+        uintptr_t refreshObject) {
+        float scale[3] = { uniformScale, uniformScale, uniformScale };
+        return SetSceneObjectScaleVectorWithRefresh(sceneObject, scale, refreshObject);
+    }
+
+    static bool SetSceneObjectScaleVectorWithRefresh(
+        uintptr_t sceneObject,
+        const float scale[3],
+        uintptr_t refreshObject) {
+        const bool scaled = SetSceneObjectScaleVector(sceneObject, scale);
+        if (!scaled) {
+            return false;
+        }
+
+        const bool scaledObjectRefreshed = ForceSceneObjectVisualRefresh(sceneObject);
+        const bool refreshObjectRefreshed = refreshObject != 0 && refreshObject != sceneObject
+            ? ForceSceneObjectVisualRefresh(refreshObject)
+            : false;
+        return scaledObjectRefreshed || refreshObjectRefreshed;
+    }
+
+    static bool ReadSceneObjectPosition(uintptr_t sceneObject, float outPosition[3]) {
+        if (sceneObject == 0 || outPosition == nullptr || !IsReadableRange(sceneObject + 0x28, sizeof(uintptr_t))) {
+            return false;
+        }
+
+        uintptr_t transform = 0;
+        return SafeReadValue(sceneObject + 0x28, transform)
+            && transform != 0
+            && IsReadableRange(transform + 0x14, sizeof(float) * 3)
+            && SafeReadMemory(transform + 0x14, outPosition, sizeof(float) * 3);
+    }
+
+    static bool SetSceneObjectPositionVector(uintptr_t sceneObject, const float position[3]) {
+        if (sceneObject == 0 || position == nullptr || !IsReadableRange(sceneObject, sizeof(uintptr_t))) {
+            return false;
+        }
+
+        uintptr_t vtable = 0;
+        uintptr_t setPositionAddress = 0;
+        if (!SafeReadValue(sceneObject, vtable)
+            || !IsReadableRange(vtable + 0x10, sizeof(uintptr_t))
+            || !SafeReadValue(vtable + 0x0c, setPositionAddress)
+            || setPositionAddress == 0) {
+            return false;
+        }
+
+        RenderGraphicsAndUpdateCameraFunc renderUpdate = ResolveRenderGraphicsAndUpdateCamera();
+        __try {
+            SceneObjectSetPositionFunc setPosition = reinterpret_cast<SceneObjectSetPositionFunc>(setPositionAddress);
+            setPosition(reinterpret_cast<void*>(sceneObject), position);
+            if (renderUpdate) {
+                renderUpdate(reinterpret_cast<void*>(sceneObject));
+            }
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool NudgeSceneObjectPosition(uintptr_t sceneObject, float epsilon) {
+        float original[3] = {};
+        if (!ReadSceneObjectPosition(sceneObject, original)) {
+            return false;
+        }
+
+        float nudged[3] = { original[0] + epsilon, original[1], original[2] };
+        const bool moved = SetSceneObjectPositionVector(sceneObject, nudged);
+        const bool restored = moved && SetSceneObjectPositionVector(sceneObject, original);
+        return moved && restored;
+    }
+
+    static void ProcessPendingEditorNudgeRestore() {
+        if (g_pendingEditorNudgeRestore.sceneObject == 0) {
+            return;
+        }
+
+        const uint32_t now = GetTickCount();
+        if (static_cast<int32_t>(now - g_pendingEditorNudgeRestore.restoreAfterTick) < 0) {
+            return;
+        }
+
+        const uintptr_t sceneObject = g_pendingEditorNudgeRestore.sceneObject;
+        float original[3] = {
+            g_pendingEditorNudgeRestore.position[0],
+            g_pendingEditorNudgeRestore.position[1],
+            g_pendingEditorNudgeRestore.position[2],
+        };
+        g_pendingEditorNudgeRestore = {};
+
+        const bool restored = SetSceneObjectPositionVector(sceneObject, original);
+        ForceSceneObjectVisualRefresh(sceneObject);
+        LOG_INFO("[EditorInspector] Deferred nudge restore object="
+            << HexAddress(sceneObject)
+            << " restored=" << restored);
+    }
+
+    static bool QueueDeferredSceneObjectNudge(uintptr_t sceneObject, float epsilon, uint32_t delayMs) {
+        float original[3] = {};
+        if (!ReadSceneObjectPosition(sceneObject, original)) {
+            return false;
+        }
+
+        float nudged[3] = { original[0] + epsilon, original[1], original[2] };
+        if (!SetSceneObjectPositionVector(sceneObject, nudged)) {
+            return false;
+        }
+
+        g_pendingEditorNudgeRestore.sceneObject = sceneObject;
+        g_pendingEditorNudgeRestore.position[0] = original[0];
+        g_pendingEditorNudgeRestore.position[1] = original[1];
+        g_pendingEditorNudgeRestore.position[2] = original[2];
+        g_pendingEditorNudgeRestore.restoreAfterTick = GetTickCount() + delayMs;
+
+        ForceSceneObjectVisualRefresh(sceneObject);
+        return true;
+    }
+
+    static bool ScaleSelectedObjectsByEditorDelta(uintptr_t selectionManager, float delta) {
+        if (selectionManager == 0 || !IsReadableRange(selectionManager, 0x24)) {
+            return false;
+        }
+
+        ScaleSelectedObjectsDeltaFunc scaleSelected = ResolveScaleSelectedObjectsDelta();
+        if (!scaleSelected) {
+            return false;
+        }
+
+        __try {
+            scaleSelected(reinterpret_cast<void*>(selectionManager), delta);
+            MarkEditorTransformDirty();
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool ResetSelectedObjectsScaleViaEditor(uintptr_t selectionManager) {
+        if (selectionManager == 0 || !IsReadableRange(selectionManager, 0x24)) {
+            return false;
+        }
+
+        ResetSelectedObjectsScaleFunc resetScale = ResolveResetSelectedObjectsScale();
+        if (!resetScale) {
+            return false;
+        }
+
+        __try {
+            resetScale(static_cast<int>(selectionManager));
+            MarkEditorTransformDirty();
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool SetBackingObjectScale(uintptr_t backingObject, float scale) {
+        if (backingObject == 0 || !IsReadableRange(backingObject, 0x14)) {
+            return false;
+        }
+
+        SetBackingObjectScaleFunc setScale = ResolveSetBackingObjectScale();
+        if (!setScale) {
+            return false;
+        }
+
+        __try {
+            setScale(reinterpret_cast<void*>(backingObject), scale);
+            MarkEditorTransformDirty();
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool RunUnsafeSelectionPostScaleRefresh(uintptr_t selectionManager) {
+        if (selectionManager == 0 || !IsReadableRange(selectionManager, 0x68)) {
+            return false;
+        }
+
+        RefreshSelectionConstraintsFunc refreshConstraints = ResolveRefreshSelectionConstraints();
+        RefreshSelectionBoundsFunc refreshBounds = ResolveRefreshSelectionBounds();
+        ProcessSelectionConstraintsFunc processConstraints = ResolveProcessSelectionConstraints();
+        if (!refreshConstraints || !refreshBounds) {
+            return false;
+        }
+
+        __try {
+            refreshConstraints(static_cast<int>(selectionManager));
+            if (processConstraints) {
+                processConstraints(reinterpret_cast<void*>(selectionManager), 0);
+            }
+            refreshBounds(static_cast<int>(selectionManager));
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool SetSceneObjectScaleVectorAndNudge(
+        uintptr_t sceneObject,
+        float uniformScale,
+        uintptr_t nudgeObject,
+        float epsilon) {
+        float scale[3] = { uniformScale, uniformScale, uniformScale };
+        return SetSceneObjectScaleVectorAndNudge(sceneObject, scale, nudgeObject, epsilon);
+    }
+
+    static bool SetSceneObjectScaleVectorAndNudge(
+        uintptr_t sceneObject,
+        const float scale[3],
+        uintptr_t nudgeObject,
+        float epsilon) {
+        const bool scaled = SetSceneObjectScaleVectorWithRefresh(sceneObject, scale, nudgeObject);
+        const bool nudged = scaled && NudgeSceneObjectPosition(nudgeObject, epsilon);
+        return scaled && nudged;
+    }
+
+    static bool SetSceneObjectScaleVectorAndDeferredNudge(
+        uintptr_t sceneObject,
+        float uniformScale,
+        uintptr_t nudgeObject,
+        float epsilon,
+        uint32_t restoreDelayMs) {
+        float scale[3] = { uniformScale, uniformScale, uniformScale };
+        return SetSceneObjectScaleVectorAndDeferredNudge(sceneObject, scale, nudgeObject, epsilon, restoreDelayMs);
+    }
+
+    static bool SetSceneObjectScaleVectorAndDeferredNudge(
+        uintptr_t sceneObject,
+        const float scale[3],
+        uintptr_t nudgeObject,
+        float epsilon,
+        uint32_t restoreDelayMs) {
+        const bool scaled = SetSceneObjectScaleVectorWithRefresh(sceneObject, scale, nudgeObject);
+        const bool nudged = scaled && QueueDeferredSceneObjectNudge(nudgeObject, epsilon, restoreDelayMs);
+        return scaled && nudged;
+    }
+
+    static uint32_t HashEntityId(uint32_t entityId) {
+        uint32_t hash = entityId + ~(entityId << 15);
+        hash = (hash >> 10 ^ hash) * 9;
+        hash = hash ^ (hash >> 6);
+        hash = hash + ~(hash << 11);
+        return hash >> 16 ^ hash;
+    }
+
+    static uintptr_t LookupHashMapValue(uintptr_t map, uint32_t key, uintptr_t capacityOffset, uintptr_t entriesOffset) {
+        uint32_t capacity = 0;
+        uintptr_t entries = 0;
+        if (map == 0
+            || !SafeReadValue(map + capacityOffset, capacity)
+            || !SafeReadValue(map + entriesOffset, entries)
+            || capacity == 0
+            || (capacity & (capacity - 1)) != 0
+            || !IsReadableRange(entries, capacity * 0x0c)) {
+            return 0;
+        }
+
+        uint32_t slot = HashEntityId(key) & (capacity - 1);
+        for (uint32_t probe = 0; probe < capacity; ++probe) {
+            const uintptr_t entry = entries + slot * 0x0c;
+            uint32_t entryKey = 0;
+            uintptr_t value = 0;
+            uint8_t state = 0;
+            SafeReadValue(entry, entryKey);
+            SafeReadValue(entry + 0x04, value);
+            SafeReadValue(entry + 0x08, state);
+
+            if (state == 2 && entryKey == key) {
+                uintptr_t mappedValue = 0;
+                if (value != 0 && SafeReadValue(value + 0x08, mappedValue) && IsReadableRange(mappedValue, 0x20)) {
+                    return mappedValue;
+                }
+                return 0;
+            }
+            if (state != 1 && state != 2) {
+                return 0;
+            }
+            slot = (slot + 1) & (capacity - 1);
+        }
+
+        return 0;
+    }
+
+    struct EntityMapScanResult {
+        uintptr_t managerOffset = 0;
+        uintptr_t map = 0;
+        uintptr_t key = 0;
+        uintptr_t capacityOffset = 0;
+        uintptr_t entriesOffset = 0;
+        uint32_t capacity = 0;
+        uintptr_t entryValue = 0;
+        uintptr_t mappedValue = 0;
+        std::string keyName;
+    };
+
+    static bool LookupHashMapEntryDetails(
+        uintptr_t map,
+        uint32_t key,
+        uintptr_t capacityOffset,
+        uintptr_t entriesOffset,
+        EntityMapScanResult& result) {
+        uint32_t capacity = 0;
+        uintptr_t entries = 0;
+        if (map == 0
+            || !SafeReadValue(map + capacityOffset, capacity)
+            || !SafeReadValue(map + entriesOffset, entries)
+            || capacity == 0
+            || (capacity & (capacity - 1)) != 0
+            || !IsReadableRange(entries, capacity * 0x0c)) {
+            return false;
+        }
+
+        uint32_t slot = HashEntityId(key) & (capacity - 1);
+        for (uint32_t probe = 0; probe < capacity; ++probe) {
+            const uintptr_t entry = entries + slot * 0x0c;
+            uint32_t entryKey = 0;
+            uintptr_t value = 0;
+            uint8_t state = 0;
+            SafeReadValue(entry, entryKey);
+            SafeReadValue(entry + 0x04, value);
+            SafeReadValue(entry + 0x08, state);
+
+            if (state == 2 && entryKey == key) {
+                uintptr_t mappedValue = 0;
+                if (value != 0 && IsReadableRange(value, 0x0c)) {
+                    SafeReadValue(value + 0x08, mappedValue);
+                }
+                result.capacity = capacity;
+                result.entryValue = value;
+                result.mappedValue = mappedValue;
+                return value != 0 || mappedValue != 0;
+            }
+            if (state != 1 && state != 2) {
+                return false;
+            }
+            slot = (slot + 1) & (capacity - 1);
+        }
+
+        return false;
+    }
+
+    static std::vector<EntityMapScanResult> ScanEntityManagerMapsForSelectedObject(const SelectedEditorObject& selected) {
+        std::vector<EntityMapScanResult> results;
+        const uintptr_t entityManager = ResolveEntityManagerForEditorInspector();
+        if (entityManager == 0 || selected.selectedObject == 0 || !IsReadableRange(entityManager, 0x10)) {
+            return results;
+        }
+
+        struct CandidateKey {
+            const char* name;
+            uintptr_t value;
+        };
+        const CandidateKey keys[] = {
+            {"selectedObject", selected.selectedObject},
+            {"mappedObjectE74", selected.mappedObject},
+            {"editorTransformEA8", selected.editorTransform},
+            {"editorScaleBackingE90", selected.editorScaleBackingObject},
+            {"parentKey1c", selected.parentObject},
+            {"mappedParent", selected.mappedParentObject},
+            {"sceneHolder44", selected.sceneHolder},
+            {"resourceContainer", selected.resourceContainer},
+            {"resourceSceneRoot", selected.resourceSceneRoot},
+            {"firstMeshSceneObject", selected.firstMeshSceneObject},
+        };
+        const uintptr_t layouts[][2] = {
+            {0x0c, 0x10},
+            {0x04, 0x08},
+            {0x08, 0x0c},
+        };
+
+        for (uintptr_t offset = 0xc00; offset < 0x1400; offset += sizeof(uintptr_t)) {
+            uintptr_t map = 0;
+            if (!SafeReadValue(entityManager + offset, map) || !IsReadableRange(map, 0x14)) {
+                continue;
+            }
+
+            for (const CandidateKey& key : keys) {
+                if (key.value == 0) {
+                    continue;
+                }
+                for (const auto& layout : layouts) {
+                    EntityMapScanResult result = {};
+                    result.managerOffset = offset;
+                    result.map = map;
+                    result.key = key.value;
+                    result.keyName = key.name;
+                    result.capacityOffset = layout[0];
+                    result.entriesOffset = layout[1];
+                    if (LookupHashMapEntryDetails(
+                        map,
+                        static_cast<uint32_t>(key.value),
+                        layout[0],
+                        layout[1],
+                        result)) {
+                        bool duplicate = false;
+                        for (const EntityMapScanResult& existing : results) {
+                            if (existing.managerOffset == result.managerOffset
+                                && existing.key == result.key
+                                && existing.capacityOffset == result.capacityOffset
+                                && existing.entriesOffset == result.entriesOffset
+                                && existing.entryValue == result.entryValue
+                                && existing.mappedValue == result.mappedValue) {
+                                duplicate = true;
+                                break;
+                            }
+                        }
+                        if (!duplicate) {
+                            results.push_back(result);
+                        }
+                    }
+                }
+            }
+        }
+
+        return results;
+    }
+
+    static uintptr_t LookupEditorObjectMapValue(uintptr_t selectedObject) {
+        const uintptr_t entityManager = ResolveEntityManagerForEditorInspector();
+        uintptr_t objectMap = 0;
+        if (entityManager == 0
+            || !SafeReadValue(entityManager + 0xe74, objectMap)
+            || !IsReadableRange(objectMap, 0x14)) {
+            return 0;
+        }
+
+        return LookupHashMapValue(objectMap, static_cast<uint32_t>(selectedObject), 0x0c, 0x10);
+    }
+
+    static uintptr_t LookupEntityManagerSimpleMapValue(uintptr_t managerOffset, uintptr_t selectedObject) {
+        const uintptr_t entityManager = ResolveEntityManagerForEditorInspector();
+        uintptr_t map = 0;
+        if (entityManager == 0
+            || !SafeReadValue(entityManager + managerOffset, map)
+            || !IsReadableRange(map, 0x14)) {
+            return 0;
+        }
+
+        return LookupHashMapValue(map, static_cast<uint32_t>(selectedObject), 0x0c, 0x10);
+    }
+
+    static void AddSceneNodeCandidate(
+        uintptr_t sceneObject,
+        uintptr_t via,
+        int depth,
+        std::vector<SceneNodeSnapshot>& outNodes,
+        std::vector<uintptr_t>& visited);
+
+    static void AddSceneChildCandidate(
+        uintptr_t childCandidate,
+        uintptr_t via,
+        int depth,
+        std::vector<SceneNodeSnapshot>& outNodes,
+        std::vector<uintptr_t>& visited) {
+        if (childCandidate != 0 && IsReadableRange(childCandidate, 0x24)) {
+            AddSceneNodeCandidate(childCandidate, via, depth, outNodes, visited);
+        }
+    }
+
+    static void AddSceneNodeCandidate(
+        uintptr_t sceneObject,
+        uintptr_t via,
+        int depth,
+        std::vector<SceneNodeSnapshot>& outNodes,
+        std::vector<uintptr_t>& visited) {
+        if (depth > 12 || sceneObject == 0 || outNodes.size() >= 160 || !IsReadableRange(sceneObject, 0x24)) {
+            return;
+        }
+
+        if (std::find(visited.begin(), visited.end(), sceneObject) != visited.end()) {
+            return;
+        }
+        visited.push_back(sceneObject);
+
+        SceneNodeSnapshot node = {};
+        node.address = sceneObject;
+        node.via = via;
+        node.depth = depth;
+        node.readable = true;
+        SafeReadValue(sceneObject, node.vtable);
+        SafeReadValue(sceneObject + 0x08, node.typeAndSubtype);
+        SafeReadValue(sceneObject + 0x0c, node.flags0c);
+        SafeReadValue(sceneObject + 0x10, node.childMode);
+        SafeReadValue(sceneObject + 0x18, node.childStorage);
+        SafeReadValue(sceneObject + 0xec, node.scaleEc);
+        SafeReadValue(sceneObject + 0xc9, node.physicsByteC9);
+        outNodes.push_back(node);
+
+        if (node.childMode == 0 || node.childStorage == 0 || node.childMode > 4096) {
+            return;
+        }
+
+        // Engine traversal dereferences +0x18 as child storage, but some editor
+        // objects also make the direct pointer interesting. Follow both for discovery.
+        AddSceneChildCandidate(node.childStorage, sceneObject + 0x18, depth + 1, outNodes, visited);
+
+        if (IsReadableRange(node.childStorage, sizeof(uintptr_t))) {
+            uintptr_t indirectChild = 0;
+            SafeReadValue(node.childStorage, indirectChild);
+            AddSceneChildCandidate(indirectChild, node.childStorage, depth + 1, outNodes, visited);
+        }
+
+        const uint32_t childSlots = node.childMode <= 2 ? node.childMode : node.childMode - 1;
+        if (childSlots > 1 && IsReadableRange(node.childStorage, sizeof(uintptr_t) * childSlots)) {
+            for (uint32_t i = 0; i < childSlots && outNodes.size() < 160; ++i) {
+                uintptr_t child = 0;
+                SafeReadValue(node.childStorage + sizeof(uintptr_t) * i, child);
+                AddSceneChildCandidate(child, node.childStorage + sizeof(uintptr_t) * i, depth + 1, outNodes, visited);
+            }
+        }
+    }
+
+    static std::vector<SceneNodeSnapshot> BuildSceneNodeSnapshot(uintptr_t root) {
+        std::vector<SceneNodeSnapshot> nodes;
+        std::vector<uintptr_t> visited;
+        AddSceneNodeCandidate(root, 0, 0, nodes, visited);
+        return nodes;
+    }
+
+    static void CollectSceneObjectsByTypeLocal(
+        uintptr_t sceneObject,
+        uint8_t wantedType,
+        uint8_t wantedSubtype,
+        std::vector<uintptr_t>& outObjects,
+        int depth = 0) {
+        if (depth > 64 || sceneObject == 0 || outObjects.size() >= 128 || !IsReadableRange(sceneObject, 0x24)) {
+            return;
+        }
+
+        uint16_t typeAndSubtype = 0;
+        uint32_t childMode = 0;
+        uintptr_t children = 0;
+        SafeReadValue(sceneObject + 0x08, typeAndSubtype);
+        SafeReadValue(sceneObject + 0x10, childMode);
+        SafeReadValue(sceneObject + 0x18, children);
+
+        const uint8_t type = static_cast<uint8_t>(typeAndSubtype & 0xff);
+        const uint8_t subtype = static_cast<uint8_t>(typeAndSubtype >> 8);
+        if (type == wantedType && subtype == wantedSubtype) {
+            outObjects.push_back(sceneObject);
+        }
+
+        uint8_t virtualSubtype = subtype;
+        SafeReadValue(sceneObject + 0x09, virtualSubtype);
+        if (type == wantedType && virtualSubtype == wantedSubtype) {
+            outObjects.push_back(sceneObject);
+        }
+
+        if (childMode == 0 || children == 0 || childMode > 4096 || !IsReadableRange(children, sizeof(uintptr_t))) {
+            return;
+        }
+
+        if (IsReadableRange(children, 0x24)) {
+            CollectSceneObjectsByTypeLocal(children, wantedType, wantedSubtype, outObjects, depth + 1);
+        }
+
+        if (childMode == 1) {
+            uintptr_t child = 0;
+            SafeReadValue(children, child);
+            CollectSceneObjectsByTypeLocal(child, wantedType, wantedSubtype, outObjects, depth + 1);
+            return;
+        }
+
+        const uint32_t childCount = childMode - 1;
+        if (!IsReadableRange(children, sizeof(uintptr_t) * childCount)) {
+            return;
+        }
+
+        for (uint32_t i = 0; i < childCount && outObjects.size() < 128; ++i) {
+            uintptr_t child = 0;
+            SafeReadValue(children + sizeof(uintptr_t) * i, child);
+            CollectSceneObjectsByTypeLocal(child, wantedType, wantedSubtype, outObjects, depth + 1);
+        }
+    }
+
+    static std::vector<SelectedEditorObject> ReadSelectedEditorObjects() {
+        std::vector<SelectedEditorObject> objects;
+        const uintptr_t selectionManager = ResolveEditorSelectionManagerForInspector();
+        if (!IsReadableRange(selectionManager, 0x24)) {
+            return objects;
+        }
+
+        uint32_t count = 0;
+        uintptr_t node = 0;
+        SafeReadValue(selectionManager + 0x20, count);
+        SafeReadValue(selectionManager + 0x18, node);
+        if (count > 256) {
+            count = 256;
+        }
+
+        for (uint32_t i = 0; i < count && node != 0 && IsReadableRange(node, 0x0c); ++i) {
+            SelectedEditorObject selected = {};
+            selected.index = static_cast<int>(i);
+            selected.listNode = node;
+            SafeReadValue(node + 0x08, selected.selectedObject);
+            selected.mappedObject = LookupEditorObjectMapValue(selected.selectedObject);
+            selected.editorTransform = LookupEntityManagerSimpleMapValue(0xea8, selected.selectedObject);
+            selected.editorScaleBackingObject = LookupEntityManagerSimpleMapValue(0xe90, selected.selectedObject);
+            if (selected.editorTransform != 0 && IsReadableRange(selected.editorTransform, 0x20)) {
+                selected.hasRotation = SafeReadValue(selected.editorTransform + 0x1c, selected.rotationRadians);
+            }
+            if (selected.selectedObject != 0 && IsReadableRange(selected.selectedObject, 0x48)) {
+                SafeReadValue(selected.selectedObject + 0x1c, selected.parentKey1c);
+                SafeReadValue(selected.selectedObject + 0x20, selected.childCount20);
+                SafeReadValue(selected.selectedObject + 0x44, selected.sceneHolder);
+                SafeReadValue(selected.selectedObject + 0x04, selected.selectedObjectMovementState04);
+                SafeReadValue(selected.selectedObject + 0x08, selected.selectedObjectType);
+                SafeReadValue(selected.selectedObject + 0x0c, selected.selectedObjectFlags0c);
+                SafeReadValue(selected.selectedObject + 0x10, selected.selectedObjectChildMode);
+                SafeReadValue(selected.selectedObject + 0x18, selected.selectedObjectChildren);
+                SafeReadValue(selected.selectedObject + 0x20, selected.selectedObjectFlags);
+                selected.movingOrRotatingCandidate = selected.selectedObjectMovementState04 == 2;
+                selected.selectedObjectPhysicsEnabled = (selected.selectedObjectFlags0c & 0x00010000) != 0;
+                selected.hasSelectedObjectPhysicsEnabled = true;
+                if (selected.sceneHolder != 0 && IsReadableRange(selected.sceneHolder, 0x20)) {
+                    SafeReadValue(selected.sceneHolder, selected.resourceContainer);
+                    SafeReadValue(selected.sceneHolder + 0x08, selected.sceneHolderFlags08);
+                    SafeReadValue(selected.sceneHolder + 0x20, selected.sceneHolderVariationMask20);
+                    selected.hasSceneHolderBuoyancy = SafeReadValue(selected.sceneHolder + 0x1c, selected.sceneHolderBuoyancyRaw);
+                    selected.horizontalAlign = ((selected.sceneHolderFlags08 >> 4) & 1) != 0;
+                    selected.verticalAlign = ((selected.sceneHolderFlags08 >> 2) & 1) != 0;
+                    selected.sceneHolderBit0 = (selected.sceneHolderFlags08 & 0x00000001) != 0;
+                    selected.lockedToDrivingLineCandidate = (selected.sceneHolderFlags08 & 0x00000004) != 0;
+                    selected.sceneHolderBit3 = (selected.sceneHolderFlags08 & 0x00000008) != 0;
+                    selected.sceneHolderBit5 = (selected.sceneHolderFlags08 & 0x00000020) != 0;
+                    selected.sceneHolderBit6 = (selected.sceneHolderFlags08 & 0x00000040) != 0;
+                    selected.fastObjectCandidate = (selected.sceneHolderFlags08 & 0x00000400) != 0;
+                    selected.sceneHolderBit12 = (selected.sceneHolderFlags08 & 0x00001000) != 0;
+                    selected.sceneHolderVisible = !selected.sceneHolderBit3;
+                    selected.contactResponseEnabled = !selected.sceneHolderBit6;
+                    selected.hasSceneHolderVisible = true;
+                }
+                if (selected.resourceContainer != 0 && IsReadableRange(selected.resourceContainer, 0x6c)) {
+                    SafeReadValue(selected.resourceContainer + 0x68, selected.resourceSceneRoot);
+                }
+                selected.parentObject = static_cast<uintptr_t>(selected.parentKey1c);
+                if (selected.parentObject != 0) {
+                    selected.mappedParentObject = LookupEditorObjectMapValue(selected.parentObject);
+                }
+
+                std::vector<uintptr_t> meshObjects;
+                CaptureEngineSceneObjects(selected.selectedObject, 1, 3, meshObjects);
+                if (meshObjects.empty()) {
+                    CaptureEngineSceneObjects(selected.resourceSceneRoot, 1, 3, meshObjects);
+                }
+                if (meshObjects.empty()) {
+                    CaptureEngineSceneObjects(selected.selectedObject, 3, 1, meshObjects);
+                    if (meshObjects.empty()) {
+                        CaptureEngineSceneObjects(selected.resourceSceneRoot, 3, 1, meshObjects);
+                    }
+                    selected.meshUsedReversedTypeSubtypeFallback = !meshObjects.empty();
+                }
+                selected.meshSceneObjectCount = static_cast<uint32_t>(meshObjects.size());
+                if (!meshObjects.empty()) {
+                    selected.firstMeshSceneObject = meshObjects.front();
+                    selected.hasFriction = SafeReadValue(selected.firstMeshSceneObject + 0x90, selected.frictionRaw);
+                    selected.hasMeshOffset94 = SafeReadValue(selected.firstMeshSceneObject + 0x94, selected.meshOffset94Raw);
+                    selected.hasObjectGravity = SafeReadValue(selected.firstMeshSceneObject + 0x98, selected.objectGravityRaw);
+                    selected.hasMeshOffset9c = SafeReadValue(selected.firstMeshSceneObject + 0x9c, selected.meshOffset9cRaw);
+                    selected.hasLightRange = SafeReadValue(selected.firstMeshSceneObject + 0xa4, selected.lightRangeRaw);
+                    selected.hasLightIntensity = SafeReadValue(selected.firstMeshSceneObject + 0xb4, selected.lightIntensityRaw);
+                    SafeReadValue(selected.firstMeshSceneObject + 0xec, selected.unknownEcRaw);
+                    uint8_t physicsByte = 0;
+                    if (SafeReadValue(selected.firstMeshSceneObject + 0xc9, physicsByte)) {
+                        selected.shadowTypeDynamicCandidate = physicsByte != 0;
+                        selected.hasShadowType = true;
+                    }
+                    uint8_t lightEnabledByte = 0;
+                    if (SafeReadValue(selected.firstMeshSceneObject + 0xca, lightEnabledByte)) {
+                        selected.lightEnabled = lightEnabledByte != 0;
+                        selected.hasLightEnabled = true;
+                    }
+                }
+
+                std::vector<uintptr_t> visibilityObjects;
+                if (selected.editorTransform != 0 && IsReadableRange(selected.editorTransform, sizeof(uintptr_t))) {
+                    uintptr_t visibilityRoot = 0;
+                    SafeReadValue(selected.editorTransform, visibilityRoot);
+                    CaptureEngineSceneObjects(visibilityRoot, 1, 0x0c, visibilityObjects);
+                }
+                if (visibilityObjects.empty()) {
+                    CaptureEngineSceneObjects(selected.selectedObject, 1, 0x0c, visibilityObjects);
+                }
+                if (visibilityObjects.empty()) {
+                    CaptureEngineSceneObjects(selected.resourceSceneRoot, 1, 0x0c, visibilityObjects);
+                }
+                if (visibilityObjects.empty()) {
+                    CaptureEngineSceneObjects(selected.selectedObject, 0x0c, 1, visibilityObjects);
+                    if (visibilityObjects.empty()) {
+                        CaptureEngineSceneObjects(selected.resourceSceneRoot, 0x0c, 1, visibilityObjects);
+                    }
+                    selected.visibilityUsedReversedTypeSubtypeFallback = !visibilityObjects.empty();
+                }
+                selected.visibilitySceneObjectCount = static_cast<uint32_t>(visibilityObjects.size());
+                if (!visibilityObjects.empty()) {
+                    selected.firstVisibilitySceneObject = visibilityObjects.front();
+                    uint32_t visibilityFlags = 0;
+                    if (SafeReadValue(selected.firstVisibilitySceneObject + 0x0c, visibilityFlags)) {
+                        selected.visible = ((visibilityFlags >> 5) & 1) == 0;
+                        selected.hasVisible = true;
+                    }
+                }
+
+                std::vector<uintptr_t> lightObjects;
+                CaptureEngineSceneObjects(selected.selectedObject, 1, 9, lightObjects);
+                if (lightObjects.empty()) {
+                    CaptureEngineSceneObjects(selected.resourceSceneRoot, 1, 9, lightObjects);
+                }
+                if (lightObjects.empty()) {
+                    CaptureEngineSceneObjects(selected.selectedObject, 9, 1, lightObjects);
+                    if (lightObjects.empty()) {
+                        CaptureEngineSceneObjects(selected.resourceSceneRoot, 9, 1, lightObjects);
+                    }
+                    selected.lightUsedReversedTypeSubtypeFallback = !lightObjects.empty();
+                }
+                selected.lightSceneObjectCount = static_cast<uint32_t>(lightObjects.size());
+                if (!lightObjects.empty()) {
+                    selected.firstLightSceneObject = lightObjects.front();
+                }
+            }
+            objects.push_back(selected);
+            SafeReadValue(node + 0x04, node);
+        }
+
+        return objects;
+    }
+
+    static float ClampEditorAutoScale(float scale) {
+        if (scale < EDITOR_AUTO_SCALE_MIN) {
+            return EDITOR_AUTO_SCALE_MIN;
+        }
+        if (scale > EDITOR_AUTO_SCALE_MAX) {
+            return EDITOR_AUTO_SCALE_MAX;
+        }
+        return scale;
+    }
+
+    static bool ApplyEditorVisualScaleFactorToPrimarySelection(float scaleFactor) {
+        const std::vector<SelectedEditorObject> selectedObjects = ReadSelectedEditorObjects();
+        if (selectedObjects.empty()) {
+            return false;
+        }
+
+        const SelectedEditorObject& primary = selectedObjects.front();
+        if (primary.firstMeshSceneObject == 0 || primary.selectedObject == 0) {
+            return false;
+        }
+
+        if (primary.firstMeshSceneObject != g_editorInspectorAxisScaleObject) {
+            g_editorInspectorAxisScaleObject = primary.firstMeshSceneObject;
+            float liveScale[3] = {};
+            if (ReadSceneObjectScaleVector(primary.firstMeshSceneObject, liveScale)) {
+                g_editorInspectorAxisScale[0] = ClampEditorAutoScale(liveScale[0]);
+                g_editorInspectorAxisScale[1] = ClampEditorAutoScale(liveScale[1]);
+                g_editorInspectorAxisScale[2] = ClampEditorAutoScale(liveScale[2]);
+            }
+            g_editorInspectorLastAppliedScale = 1.0f;
+            g_editorInspectorAutoScale = 1.0f;
+        }
+
+        float scaledAxis[3] = {
+            ClampEditorAutoScale(g_editorInspectorAxisScale[0] * scaleFactor),
+            ClampEditorAutoScale(g_editorInspectorAxisScale[1] * scaleFactor),
+            ClampEditorAutoScale(g_editorInspectorAxisScale[2] * scaleFactor),
+        };
+        const float clampedScale = ClampEditorAutoScale(g_editorInspectorAutoScale * scaleFactor);
+
+        const bool applied = SetSceneObjectScaleVectorWithRefresh(
+            primary.firstMeshSceneObject,
+            scaledAxis,
+            0);
+        if (applied) {
+            g_editorInspectorAutoScale = clampedScale;
+            g_editorInspectorLastAppliedScale = clampedScale;
+            g_editorInspectorAxisScale[0] = scaledAxis[0];
+            g_editorInspectorAxisScale[1] = scaledAxis[1];
+            g_editorInspectorAxisScale[2] = scaledAxis[2];
+        }
+        return applied;
+    }
+
+    static void ProcessEditorScaleKeybinds() {
+        const bool decreaseHeld = Keybindings::IsActionDown(Keybindings::Action::EditorScaleDecrease);
+        const bool increaseHeld = Keybindings::IsActionDown(Keybindings::Action::EditorScaleIncrease);
+
+        static uint32_t lastTick = 0;
+        const uint32_t now = GetTickCount();
+        if (!decreaseHeld && !increaseHeld) {
+            lastTick = now;
+            return;
+        }
+
+        if (lastTick == 0) {
+            lastTick = now;
+            return;
+        }
+
+        const uint32_t elapsedMs = now - lastTick;
+        lastTick = now;
+        if (elapsedMs == 0 || decreaseHeld == increaseHeld) {
+            return;
+        }
+
+        const float dt = static_cast<float>(elapsedMs) / 1000.0f;
+        const float direction = increaseHeld ? 1.0f : -1.0f;
+        const float factor = std::pow(2.0f, direction * EDITOR_SCALE_HOTKEY_DOUBLINGS_PER_SECOND * dt);
+        const float newScale = ClampEditorAutoScale(g_editorInspectorAutoScale * factor);
+        if (std::fabs(newScale - g_editorInspectorAutoScale) <= 0.0001f) {
+            return;
+        }
+
+        const bool applied = ApplyEditorVisualScaleFactorToPrimarySelection(factor);
+        LOG_VERBOSE("[EditorInspector] Hotkey visual scale scale="
+            << newScale
+            << " increaseHeld=" << increaseHeld
+            << " decreaseHeld=" << decreaseHeld
+            << " applied=" << applied);
+    }
+
+    static void ProcessStickyEditorMaterialOverride() {
+        if (!g_editorMaterialStickyEnabled) {
+            g_editorMaterialStickySceneObjects.clear();
+            InterlockedExchange(&g_editorMaterialStickyParamOwnerCount, 0);
+            return;
+        }
+
+        const uint32_t now = GetTickCount();
+        if (g_editorMaterialStickyLastMonitorTick != 0
+            && now - g_editorMaterialStickyLastMonitorTick < EDITOR_MATERIAL_STICKY_MONITOR_INTERVAL_MS) {
+            return;
+        }
+        g_editorMaterialStickyLastMonitorTick = now;
+
+        const std::vector<SelectedEditorObject> selectedObjects = ReadSelectedEditorObjects();
+        if (selectedObjects.empty()) {
+            return;
+        }
+
+        if (selectedObjects.front().movingOrRotatingCandidate) {
+            g_editorMaterialStickyEnabled = false;
+            g_editorMaterialStickySceneObjects.clear();
+            InterlockedExchange(&g_editorMaterialStickyParamOwnerCount, 0);
+            LOG_INFO("[EditorInspector] Sticky material color override disabled while selected object is moving");
+            return;
+        }
+    }
+
+    static void ProcessMaterialParameterTrace() {
+        if (!g_editorMaterialTraceEnabled || g_editorMaterialTraceValuePtr == 0) {
+            return;
+        }
+
+        const uint32_t now = GetTickCount();
+        if (g_editorMaterialTraceLastMonitorTick != 0
+            && now - g_editorMaterialTraceLastMonitorTick < 100) {
+            return;
+        }
+        g_editorMaterialTraceLastMonitorTick = now;
+
+        if (!IsReadableRange(g_editorMaterialTraceValuePtr, sizeof(float) * 4)) {
+            LOG_INFO("[EditorInspector] Material trace disabled; valuePtr no longer readable "
+                << HexAddress(g_editorMaterialTraceValuePtr));
+            g_editorMaterialTraceEnabled = false;
+            return;
+        }
+
+        float current[4] = {};
+        if (!SafeReadMemory(g_editorMaterialTraceValuePtr, current, sizeof(current))) {
+            return;
+        }
+
+        if (Float4Different(current, g_editorMaterialTraceLastValue)) {
+            LOG_INFO("[EditorInspector] Material value pointer changed sceneObject="
+                << HexAddress(g_editorMaterialTraceSceneObject)
+                << " selector=0x" << std::hex << std::uppercase << g_editorMaterialTraceSelector << std::dec
+                << " slot=" << static_cast<uint32_t>(g_editorMaterialTraceSlot)
+                << " owner=" << HexAddress(g_editorMaterialTraceOwner)
+                << " valuePtr=" << HexAddress(g_editorMaterialTraceValuePtr)
+                << " old=(" << g_editorMaterialTraceLastValue[0]
+                << "," << g_editorMaterialTraceLastValue[1]
+                << "," << g_editorMaterialTraceLastValue[2]
+                << "," << g_editorMaterialTraceLastValue[3]
+                << ") new=(" << current[0]
+                << "," << current[1]
+                << "," << current[2]
+                << "," << current[3]
+                << ")");
+            memcpy(g_editorMaterialTraceLastValue, current, sizeof(current));
+            ++g_editorMaterialTraceChangeCount;
+            if (g_editorMaterialTraceChangeCount >= 20) {
+                g_editorMaterialTraceEnabled = false;
+                LOG_INFO("[EditorInspector] Material value pointer trace stopped after 20 changes");
+            }
+        }
+    }
+
+    static bool LooksLikeEditorObject(uintptr_t object, EditorObjectCandidate& candidate) {
+        if (!IsReadableRange(object, 0x70)) {
+            return false;
+        }
+
+        uintptr_t vtable = 0;
+        SafeReadValue(object, vtable);
+        if (vtable != 0 && IsReadableRange(vtable, sizeof(uintptr_t))) {
+            candidate.score += 2;
+            candidate.vtable = vtable;
+        }
+
+        uint32_t ownerValue18 = 0;
+        uint32_t ownerKey1c = 0;
+        uintptr_t sceneResource = 0;
+        if (SafeReadValue(object + 0x18, ownerValue18)) {
+            candidate.ownerValue18 = ownerValue18;
+        }
+        if (SafeReadValue(object + 0x1c, ownerKey1c)) {
+            candidate.ownerKey1c = ownerKey1c;
+            if (ownerKey1c != 0) {
+                candidate.score += 1;
+            }
+        }
+        if (SafeReadValue(object + 0x68, sceneResource)) {
+            candidate.sceneResource = sceneResource;
+            if (sceneResource != 0 && IsReadableRange(sceneResource, 0x20)) {
+                candidate.score += 4;
+            }
+        }
+
+        if (ownerValue18 != 0 && ownerValue18 < 512) {
+            candidate.score += 1;
+        }
+
+        return candidate.score >= 3;
+    }
+
+    static std::vector<EditorObjectCandidate> FindEditorObjectCandidates(uintptr_t editorManager) {
+        std::vector<EditorObjectCandidate> candidates;
+        if (!IsReadableRange(editorManager, EDITOR_MANAGER_SCAN_SIZE)) {
+            return candidates;
+        }
+
+        for (uintptr_t offset = 0; offset + sizeof(uintptr_t) <= EDITOR_MANAGER_SCAN_SIZE; offset += sizeof(uintptr_t)) {
+            uintptr_t object = 0;
+            if (!SafeReadValue(editorManager + offset, object)) {
+                continue;
+            }
+
+            EditorObjectCandidate candidate = {};
+            candidate.sourceOffset = offset;
+            candidate.object = object;
+            if (LooksLikeEditorObject(object, candidate)) {
+                candidates.push_back(candidate);
+            }
+        }
+
+        std::sort(candidates.begin(), candidates.end(), [](const EditorObjectCandidate& left, const EditorObjectCandidate& right) {
+            if (left.score != right.score) {
+                return left.score > right.score;
+            }
+            return left.sourceOffset < right.sourceOffset;
+        });
+
+        constexpr size_t MAX_CANDIDATES = 12;
+        if (candidates.size() > MAX_CANDIDATES) {
+            candidates.resize(MAX_CANDIDATES);
+        }
+        return candidates;
+    }
+
+    static void RenderPointerCopyText(const char* label, uintptr_t value) {
+        ImGui::Text("%s: %s", label, value ? HexAddress(value).c_str() : "<none>");
+        if (value != 0 && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Click to copy");
+        }
+        if (value != 0 && ImGui::IsItemClicked()) {
+            ImGui::SetClipboardText(HexAddress(value).c_str());
+        }
+    }
+
+    static void AppendRawDwordFields(std::ostringstream& ss, const char* title, uintptr_t baseAddress, uintptr_t byteCount) {
+        ss << "\n[" << title << "]\n";
+        if (baseAddress == 0 || !IsReadableRange(baseAddress, 0x04)) {
+            ss << "<unavailable>\n";
+            return;
+        }
+
+        for (uintptr_t offset = 0; offset < byteCount; offset += 4) {
+            uint32_t dwordValue = 0;
+            if (!SafeReadValue(baseAddress + offset, dwordValue)) {
+                continue;
+            }
+
+            float floatValue = 0.0f;
+            memcpy(&floatValue, &dwordValue, sizeof(floatValue));
+
+            uintptr_t pointerValue = 0;
+            if (offset + sizeof(uintptr_t) <= byteCount) {
+                SafeReadValue(baseAddress + offset, pointerValue);
+            }
+
+            ss << "+0x";
+            ss << std::hex << std::uppercase;
+            ss.width(2);
+            ss.fill('0');
+            ss << offset;
+            ss.fill(' ');
+            ss << " dword=0x";
+            ss.width(8);
+            ss.fill('0');
+            ss << dwordValue;
+            ss.fill(' ');
+            ss << std::dec;
+
+            if (std::isfinite(floatValue) && std::fabs(floatValue) < 1000000.0f) {
+                ss << " float=" << floatValue;
+            }
+            if (pointerValue != 0 && IsReadableRange(pointerValue, 0x10)) {
+                ss << " ptr=" << HexAddress(pointerValue);
+            }
+            ss << "\n";
+        }
+    }
+
+    struct OffsetWatchField {
+        const char* name;
+        uintptr_t offset;
+    };
+
+    static void AppendWatchedOffsetFields(
+        std::ostringstream& ss,
+        const char* title,
+        uintptr_t baseAddress,
+        const OffsetWatchField* fields,
+        size_t fieldCount) {
+        ss << "\n[" << title << "]\n";
+        if (baseAddress == 0 || !IsReadableRange(baseAddress, 0x04)) {
+            ss << "<unavailable>\n";
+            return;
+        }
+
+        for (size_t i = 0; i < fieldCount; ++i) {
+            uint32_t dwordValue = 0;
+            if (!SafeReadValue(baseAddress + fields[i].offset, dwordValue)) {
+                continue;
+            }
+
+            float floatValue = 0.0f;
+            memcpy(&floatValue, &dwordValue, sizeof(floatValue));
+
+            ss << fields[i].name << " +0x"
+                << std::hex << std::uppercase << fields[i].offset
+                << " dword=0x";
+            ss.width(8);
+            ss.fill('0');
+            ss << dwordValue;
+            ss.fill(' ');
+            ss << std::dec;
+            if (std::isfinite(floatValue) && std::fabs(floatValue) < 1000000.0f) {
+                ss << " float=" << floatValue;
+            }
+            ss << "\n";
+        }
+    }
+
+    static void AppendSceneHolderFlags08Decode(std::ostringstream& ss, const SelectedEditorObject& selected) {
+        ss << "\n[Scene Holder +0x08 Flag Decode]\n";
+        if (selected.sceneHolder == 0 || !IsReadableRange(selected.sceneHolder + 0x08, 0x04)) {
+            ss << "<unavailable>\n";
+            return;
+        }
+
+        ss << "flags=0x" << std::hex << std::uppercase << selected.sceneHolderFlags08 << std::dec << "\n";
+        ss << "bit0 0x0001 observedUnknown=" << (selected.sceneHolderBit0 ? "true" : "false") << "\n";
+        ss << "bit2 0x0004 lockedToDrivingLineCandidate="
+            << (selected.lockedToDrivingLineCandidate ? "true" : "false")
+            << " / verticalAlignByGhidraCommand="
+            << (selected.verticalAlign ? "true" : "false") << "\n";
+        ss << "bit3 0x0008 hiddenCandidatePartOfVisibilityMask="
+            << (selected.sceneHolderBit3 ? "true" : "false") << "\n";
+        ss << "bit4 0x0010 horizontalAlignByGhidraCommand="
+            << (selected.horizontalAlign ? "true" : "false") << "\n";
+        ss << "bit5 0x0020 observedUnknown=" << (selected.sceneHolderBit5 ? "true" : "false") << "\n";
+        ss << "bit6 0x0040 noContactResponseDecorationCandidate="
+            << (selected.sceneHolderBit6 ? "true" : "false") << "\n";
+        ss << "bit10 0x0400 fastObjectCandidate="
+            << (selected.fastObjectCandidate ? "true" : "false") << "\n";
+        ss << "bit12 0x1000 baselineEditorFlag="
+            << (selected.sceneHolderBit12 ? "true" : "false") << "\n";
+        ss << "visibleCandidateBit0x08Clear="
+            << (selected.sceneHolderVisible ? "true" : "false") << "\n";
+        ss << "contactResponseCandidateBit0x40Clear="
+            << (selected.contactResponseEnabled ? "true" : "false") << "\n";
+    }
+
+    static void AppendSceneTreeSnapshot(std::ostringstream& ss, const char* title, uintptr_t root) {
+        ss << "\n[" << title << "]\n";
+        if (root == 0 || !IsReadableRange(root, 0x24)) {
+            ss << "<unavailable>\n";
+            return;
+        }
+
+        const std::vector<SceneNodeSnapshot> nodes = BuildSceneNodeSnapshot(root);
+        ss << "nodeCount=" << nodes.size() << "\n";
+        for (const SceneNodeSnapshot& node : nodes) {
+            const uint32_t type = static_cast<uint32_t>(node.typeAndSubtype & 0xff);
+            const uint32_t subtype = static_cast<uint32_t>(node.typeAndSubtype >> 8);
+            ss << "depth=" << node.depth
+                << " node=" << HexAddress(node.address)
+                << " via=" << (node.via ? HexAddress(node.via) : "<root>")
+                << " type=" << type
+                << " subtype=" << subtype
+                << " flags0c=0x" << std::hex << std::uppercase << node.flags0c << std::dec
+                << " childMode=" << node.childMode
+                << " childStorage=" << (node.childStorage ? HexAddress(node.childStorage) : "<null>")
+                << " scaleEc=" << node.scaleEc
+                << " physicsC9=" << static_cast<uint32_t>(node.physicsByteC9)
+                << "\n";
+        }
+    }
+
+    static std::string BuildEditorInspectorReport(
+        uintptr_t gameManager,
+        uintptr_t editorManager,
+        uintptr_t selectionManager,
+        uintptr_t entityManager,
+        const std::vector<SelectedEditorObject>& selectedObjects) {
+        std::ostringstream ss;
+        ss << "Trials Fusion Mod - Editor Selected Object Inspector\n";
+        ss << "gameManager=" << (gameManager ? HexAddress(gameManager) : "<none>") << "\n";
+        ss << "editorManager=" << (editorManager ? HexAddress(editorManager) : "<none>") << "\n";
+        ss << "selectionManager=" << (selectionManager ? HexAddress(selectionManager) : "<none>") << "\n";
+        ss << "entityManager=" << (entityManager ? HexAddress(entityManager) : "<none>") << "\n";
+        ss << "selectedCount=" << selectedObjects.size() << "\n";
+        if (selectionManager != 0 && IsReadableRange(selectionManager, 0x9c)) {
+            uintptr_t liveVariationObject = 0;
+            uintptr_t variationSource0 = 0;
+            uintptr_t variationSource1 = 0;
+            uintptr_t variationSource2 = 0;
+            float variationScaleFactor = 0.0f;
+            SafeReadValue(selectionManager + 0x64, variationScaleFactor);
+            SafeReadValue(selectionManager + 0x8c, liveVariationObject);
+            SafeReadValue(selectionManager + 0x90, variationSource0);
+            SafeReadValue(selectionManager + 0x94, variationSource1);
+            SafeReadValue(selectionManager + 0x98, variationSource2);
+            ss << "selectionManager+0x64(selectionBoundingRadius/gizmoScale)=" << variationScaleFactor << "\n";
+            ss << "selectionManager+0x8c(liveVariationObject)="
+                << (liveVariationObject ? HexAddress(liveVariationObject) : "<null>") << "\n";
+            ss << "selectionManager+0x90/94/98(variationSources)="
+                << (variationSource0 ? HexAddress(variationSource0) : "<null>") << ", "
+                << (variationSource1 ? HexAddress(variationSource1) : "<null>") << ", "
+                << (variationSource2 ? HexAddress(variationSource2) : "<null>") << "\n";
+        }
+
+        for (const SelectedEditorObject& selected : selectedObjects) {
+            ss << "\n[Selected " << selected.index << "]\n";
+            ss << "listNode=" << (selected.listNode ? HexAddress(selected.listNode) : "<null>") << "\n";
+            ss << "selectedObject=" << (selected.selectedObject ? HexAddress(selected.selectedObject) : "<null>") << "\n";
+            ss << "mappedObjectFromEntityManagerE74=" << (selected.mappedObject ? HexAddress(selected.mappedObject) : "<missing>") << "\n";
+            ss << "editorTransformFromEntityManagerEA8=" << (selected.editorTransform ? HexAddress(selected.editorTransform) : "<missing>") << "\n";
+            ss << "editorScaleBackingObjectFromEntityManagerE90=" << (selected.editorScaleBackingObject ? HexAddress(selected.editorScaleBackingObject) : "<missing>") << "\n";
+            if (selected.editorScaleBackingObject != 0 && IsReadableRange(selected.editorScaleBackingObject, 0x14)) {
+                float backingScale = 0.0f;
+                SafeReadValue(selected.editorScaleBackingObject + 0x10, backingScale);
+                ss << "[editorScaleBackingObject]+0x10(scaleScalar)=" << backingScale << "\n";
+            }
+            const std::vector<EntityMapScanResult> entityMapResults =
+                ScanEntityManagerMapsForSelectedObject(selected);
+            ss << "entityManagerMapScanC00To13FC.matchCount=" << entityMapResults.size() << "\n";
+            for (const EntityMapScanResult& result : entityMapResults) {
+                ss << "  entityManager+0x" << std::hex << std::uppercase << result.managerOffset
+                    << std::dec
+                    << " key=" << result.keyName << "(" << HexAddress(result.key) << ")"
+                    << " layout(cap+0x" << std::hex << result.capacityOffset
+                    << " entries+0x" << result.entriesOffset << std::dec << ")"
+                    << " map=" << HexAddress(result.map)
+                    << " capacity=" << result.capacity
+                    << " entryValue=" << (result.entryValue ? HexAddress(result.entryValue) : "<null>")
+                    << " mappedValue=" << (result.mappedValue ? HexAddress(result.mappedValue) : "<null>")
+                    << "\n";
+            }
+            ss << "selectedObject+0x1c(parentKey)=" << (selected.parentObject ? HexAddress(selected.parentObject) : "<null>") << "\n";
+            ss << "mappedParentObject=" << (selected.mappedParentObject ? HexAddress(selected.mappedParentObject) : "<missing>") << "\n";
+            ss << "selectedObject.type=" << static_cast<uint32_t>(selected.selectedObjectType & 0xff)
+                << " subtype=" << static_cast<uint32_t>(selected.selectedObjectType >> 8) << "\n";
+            ss << "selectedObject.movementState04=0x" << std::hex << std::uppercase
+                << selected.selectedObjectMovementState04 << std::dec
+                << " movingOrRotatingCandidate="
+                << (selected.movingOrRotatingCandidate ? "true" : "false") << "\n";
+            ss << "selectedObject.flags0c=0x" << std::hex << std::uppercase
+                << selected.selectedObjectFlags0c << std::dec
+                << " physicsBit0x10000="
+                << (selected.selectedObjectPhysicsEnabled ? "true" : "false") << "\n";
+            ss << "selectedObject.childModeOrCount=" << selected.selectedObjectChildMode << "\n";
+            ss << "selectedObject.children=" << (selected.selectedObjectChildren ? HexAddress(selected.selectedObjectChildren) : "<null>") << "\n";
+            ss << "selectedObject.flags=0x" << std::hex << std::uppercase << selected.selectedObjectFlags << std::dec << "\n";
+            ss << "selectedObject+0x44(sceneHolder)=" << (selected.sceneHolder ? HexAddress(selected.sceneHolder) : "<null>") << "\n";
+            ss << "[sceneHolder]+0x00(resourceContainer)=" << (selected.resourceContainer ? HexAddress(selected.resourceContainer) : "<null>") << "\n";
+            ss << "[resourceContainer]+0x68(resourceSceneRoot)=" << (selected.resourceSceneRoot ? HexAddress(selected.resourceSceneRoot) : "<null>") << "\n";
+
+            if (selected.sceneHolder != 0 && IsReadableRange(selected.sceneHolder, 0x20)) {
+                uint32_t holder1c = 0;
+                float holder1cFloat = 0.0f;
+                SafeReadValue(selected.sceneHolder + 0x1c, holder1c);
+                memcpy(&holder1cFloat, &holder1c, sizeof(holder1cFloat));
+                ss << "[sceneHolder]+0x08(flags)=0x" << std::hex << std::uppercase << selected.sceneHolderFlags08 << std::dec
+                    << " horizontalAlign=" << (selected.horizontalAlign ? "true" : "false")
+                    << " bit2VerticalOrDrivingLine=" << (selected.verticalAlign ? "true" : "false")
+                    << " lockedToDrivingLineCandidate=" << (selected.lockedToDrivingLineCandidate ? "true" : "false")
+                    << "\n";
+                ss << "[sceneHolder]+0x1c=0x" << std::hex << std::uppercase << holder1c
+                    << std::dec << " float=" << holder1cFloat << "\n";
+            }
+
+            ss << "\n[Named Editor Properties]\n";
+            if (selected.hasRotation) {
+                ss << "rotationRadians=" << selected.rotationRadians << "\n";
+                ss << "rotationDegrees=" << (selected.rotationRadians * 57.2957795f) << "\n";
+            }
+            else {
+                ss << "rotation=<unavailable>\n";
+            }
+            ss << "variationMaskFromSceneHolder+0x20=0x" << std::hex << std::uppercase
+                << selected.sceneHolderVariationMask20 << std::dec
+                << " variationIndexCandidate=";
+            if (selected.sceneHolderVariationMask20 == 1 || selected.sceneHolderVariationMask20 == 2
+                || selected.sceneHolderVariationMask20 == 4 || selected.sceneHolderVariationMask20 == 8) {
+                ss << (VariationIndexFromMask(selected.sceneHolderVariationMask20) + 1);
+            }
+            else {
+                ss << "<unknown>";
+            }
+            ss << "\n";
+            if (selected.hasLightRange) {
+                ss << "lightRangeFromFirstMesh+0xa4=" << selected.lightRangeRaw << "\n";
+            }
+            if (selected.hasSceneHolderBuoyancy) {
+                ss << "buoyancyFromSceneHolder+0x1c=" << selected.sceneHolderBuoyancyRaw << "\n";
+            }
+            if (selected.hasFriction) {
+                ss << "unknownFirstMesh+0x90=" << selected.frictionRaw << "\n";
+            }
+            if (selected.hasObjectGravity) {
+                ss << "unknownFirstMesh+0x98=" << selected.objectGravityRaw << "\n";
+            }
+            if (selected.hasLightIntensity) {
+                ss << "lightIntensityFromFirstMesh+0xb4=" << selected.lightIntensityRaw << "\n";
+            }
+            ss << "unknownFirstMesh+0xec=" << selected.unknownEcRaw << "\n";
+            if (selected.hasMeshOffset94) {
+                ss << "unknownFirstMesh+0x94=" << selected.meshOffset94Raw << "\n";
+            }
+            if (selected.hasMeshOffset9c) {
+                ss << "unknownFirstMesh+0x9c=" << selected.meshOffset9cRaw << "\n";
+            }
+            if (selected.hasVisible) {
+                ss << "visible=" << (selected.visible ? "true" : "false") << "\n";
+            }
+            else {
+                ss << "visible=<unavailable>\n";
+            }
+            if (selected.hasSceneHolderVisible) {
+                ss << "visibleCandidate=" << (selected.sceneHolderVisible ? "true" : "false")
+                    << " derivedFromSceneHolder+0x08Mask0x08Clear\n";
+                ss << "contactResponseCandidate=" << (selected.contactResponseEnabled ? "enabled" : "disabled")
+                    << " derivedFromSceneHolder+0x08Mask0x40Clear\n";
+                ss << "fastObjectCandidate=" << (selected.fastObjectCandidate ? "true" : "false")
+                    << " derivedFromSceneHolder+0x08Mask0x0400\n";
+                ss << "lockedToDrivingLineCandidate=" << (selected.lockedToDrivingLineCandidate ? "true" : "false")
+                    << " derivedFromSceneHolder+0x08Mask0x04\n";
+            }
+            if (selected.hasShadowType) {
+                ss << "shadowTypeCandidate=" << (selected.shadowTypeDynamicCandidate ? "dynamic" : "static")
+                    << " derivedFromFirstMesh+0xc9\n";
+            }
+            else {
+                ss << "shadowTypeCandidate=<unavailable>\n";
+            }
+            if (selected.hasSelectedObjectPhysicsEnabled) {
+                ss << "selectedObjectPhysics=" << (selected.selectedObjectPhysicsEnabled ? "enabled" : "disabled")
+                    << " derivedFromSelectedObject+0x0cMask0x10000\n";
+            }
+            if (selected.hasLightEnabled) {
+                ss << "lightEnabled=" << (selected.lightEnabled ? "true" : "false")
+                    << " derivedFromFirstMesh+0xca\n";
+            }
+            ss << "firstMeshSceneObject=" << (selected.firstMeshSceneObject ? HexAddress(selected.firstMeshSceneObject) : "<missing>") << "\n";
+            ss << "meshSceneObjectCount=" << selected.meshSceneObjectCount << "\n";
+            ss << "meshUsedReversedTypeSubtypeFallback="
+                << (selected.meshUsedReversedTypeSubtypeFallback ? "true" : "false") << "\n";
+            ss << "firstVisibilitySceneObject=" << (selected.firstVisibilitySceneObject ? HexAddress(selected.firstVisibilitySceneObject) : "<missing>") << "\n";
+            ss << "visibilitySceneObjectCount=" << selected.visibilitySceneObjectCount << "\n";
+            ss << "visibilityUsedReversedTypeSubtypeFallback="
+                << (selected.visibilityUsedReversedTypeSubtypeFallback ? "true" : "false") << "\n";
+            ss << "firstLightSceneObject=" << (selected.firstLightSceneObject ? HexAddress(selected.firstLightSceneObject) : "<missing>") << "\n";
+            ss << "lightSceneObjectCount=" << selected.lightSceneObjectCount << "\n";
+            ss << "lightUsedReversedTypeSubtypeFallback="
+                << (selected.lightUsedReversedTypeSubtypeFallback ? "true" : "false") << "\n";
+            AppendMaterialParameterLookupReport(ss, selected);
+            AppendTrackEventMaterialBackingReport(ss, selected);
+        }
+
+        if (!selectedObjects.empty()) {
+            const SelectedEditorObject& primary = selectedObjects.front();
+            static const OffsetWatchField selectedWatch[] = {
+                {"typeSubtype", 0x08},
+                {"flags0c", 0x0c},
+                {"childMode", 0x10},
+                {"childStorage", 0x18},
+                {"parentKey", 0x1c},
+                {"flags20", 0x20},
+                {"float24", 0x24},
+                {"sceneHolder", 0x44},
+                {"candidateB0", 0xb0},
+                {"scaleEc", 0xec},
+            };
+            static const OffsetWatchField holderWatch[] = {
+                {"resourceContainer", 0x00},
+                {"flags", 0x08},
+                {"visibilityAlignFlags", 0x08},
+                {"float1c", 0x1c},
+                {"variationMask", 0x20},
+                {"candidate34", 0x34},
+                {"candidate38", 0x38},
+                {"candidate40", 0x40},
+                {"candidate44", 0x44},
+            };
+            static const OffsetWatchField meshWatch[] = {
+                {"flags0c", 0x0c},
+                {"childMode", 0x10},
+                {"parent", 0x1c},
+                {"meshParentOrBuoyancyOld", 0x1c},
+                {"unknown90_gizmoDetachOnWrite", 0x90},
+                {"unknown94_gizmoDetachOnWrite", 0x94},
+                {"unknown98_gizmoDetachOnWrite", 0x98},
+                {"unknown9c_gizmoDetachOnWrite", 0x9c},
+                {"lightRangeRaw", 0xa4},
+                {"lightIntensityRaw", 0xb4},
+                {"shadowTypeByte", 0xc9},
+                {"lightEnabledByte", 0xca},
+                {"unknownEc", 0xec},
+            };
+            AppendWatchedOffsetFields(
+                ss,
+                "Primary Selected Object Attribute Candidates",
+                primary.selectedObject,
+                selectedWatch,
+                sizeof(selectedWatch) / sizeof(selectedWatch[0]));
+            AppendWatchedOffsetFields(
+                ss,
+                "Primary Scene Holder Attribute Candidates",
+                primary.sceneHolder,
+                holderWatch,
+                sizeof(holderWatch) / sizeof(holderWatch[0]));
+            AppendSceneHolderFlags08Decode(ss, primary);
+            AppendWatchedOffsetFields(
+                ss,
+                "Primary First Mesh Attribute Candidates",
+                primary.firstMeshSceneObject,
+                meshWatch,
+                sizeof(meshWatch) / sizeof(meshWatch[0]));
+            static const OffsetWatchField selectionManagerWatch[] = {
+                {"listHead", 0x18},
+                {"selectedCount", 0x20},
+                {"positionVec3", 0x48},
+                {"rotationQuat", 0x54},
+                {"selectionBoundingRadius", 0x64},
+                {"liveVariationObject", 0x8c},
+                {"variationSource0", 0x90},
+                {"variationSource1", 0x94},
+                {"variationSource2", 0x98},
+            };
+            AppendWatchedOffsetFields(
+                ss,
+                "Selection Manager Variation Controller Candidates",
+                selectionManager,
+                selectionManagerWatch,
+                sizeof(selectionManagerWatch) / sizeof(selectionManagerWatch[0]));
+            AppendRawDwordFields(ss, "Primary Selected Object Raw +0x000..0x0ff", primary.selectedObject, 0x100);
+            AppendRawDwordFields(ss, "Primary Mapped Object Raw +0x000..0x0ff", primary.mappedObject, 0x100);
+            AppendRawDwordFields(ss, "Primary Editor Transform EA8 Raw +0x000..0x07f", primary.editorTransform, 0x80);
+            AppendRawDwordFields(ss, "Primary Editor Scale Backing E90 Raw +0x000..0x07f", primary.editorScaleBackingObject, 0x80);
+            const std::vector<EntityMapScanResult> primaryMapResults =
+                ScanEntityManagerMapsForSelectedObject(primary);
+            int dumpedMapBackings = 0;
+            for (const EntityMapScanResult& result : primaryMapResults) {
+                if (result.mappedValue == 0
+                    || result.mappedValue == primary.mappedObject
+                    || result.mappedValue == primary.editorTransform
+                    || result.mappedValue == primary.editorScaleBackingObject) {
+                    continue;
+                }
+                std::ostringstream title;
+                title << "Primary EntityManager+0x" << std::hex << std::uppercase
+                    << result.managerOffset << std::dec << " Mapped Backing Raw +0x000..0x07f";
+                AppendRawDwordFields(ss, title.str().c_str(), result.mappedValue, 0x80);
+                if (++dumpedMapBackings >= 8) {
+                    break;
+                }
+            }
+            AppendRawDwordFields(ss, "Primary Scene Holder Raw +0x000..0x0bf", primary.sceneHolder, 0xc0);
+            AppendRawDwordFields(ss, "Selection Manager Raw +0x000..0x0bf", selectionManager, 0xc0);
+            AppendRawDwordFields(ss, "Primary Resource Container Raw +0x000..0x0ff", primary.resourceContainer, 0x100);
+            AppendRawDwordFields(ss, "Primary Resource Scene Root Raw +0x000..0x0ff", primary.resourceSceneRoot, 0x100);
+            AppendRawDwordFields(ss, "Primary First Mesh Scene Object Raw +0x000..0x12f", primary.firstMeshSceneObject, 0x130);
+            AppendSceneTreeSnapshot(ss, "Selected Object Scene Tree Snapshot", primary.selectedObject);
+            AppendSceneTreeSnapshot(ss, "Resource Scene Tree Snapshot", primary.resourceSceneRoot);
+        }
+
+        return ss.str();
+    }
+}
+
 static std::string GetKeybindingCategory(Keybindings::Action action) {
     switch (action) {
     case Keybindings::Action::ToggleDevMenu:
@@ -74,7 +3562,7 @@ static std::string GetKeybindingCategory(Keybindings::Action action) {
     case Keybindings::Action::DumpTweakables:
         return "General Controls";
     case Keybindings::Action::CycleHUD:
-        return "Camera Controls";
+        return "Replay Controls";
     case Keybindings::Action::RespawnAtCheckpoint:
     case Keybindings::Action::RespawnPrevCheckpoint:
     case Keybindings::Action::RespawnNextCheckpoint:
@@ -123,6 +3611,9 @@ static std::string GetKeybindingCategory(Keybindings::Action action) {
     case Keybindings::Action::SwapPrevBike:
     case Keybindings::Action::DebugBikeInfo:
         return "Bike Swap Controls";
+    case Keybindings::Action::EditorScaleDecrease:
+    case Keybindings::Action::EditorScaleIncrease:
+        return "Editor Controls";
     case Keybindings::Action::DebugGameState:
         return "Bike / Game Debug Controls";
     default:
@@ -143,7 +3634,7 @@ std::shared_ptr<TweakableFloat> CreateSyncedFloat(int id, const std::string& nam
         }
         else {
             LOG_VERBOSE("Successfully wrote Float ID=" << id << " to game memory");
-            
+
             // Notify prevent-finish if this is a Bike or Rider value
             if (IsBikeId(id)) {
                 PreventFinish::NotifyBikeModification();
@@ -169,7 +3660,7 @@ std::shared_ptr<TweakableInt> CreateSyncedInt(int id, const std::string& name,
         }
         else {
             LOG_VERBOSE("Successfully wrote Int ID=" << id << " to game memory");
-            
+
             // Notify prevent-finish if this is a Bike or Rider value
             if (IsBikeId(id)) {
                 PreventFinish::NotifyBikeModification();
@@ -202,7 +3693,7 @@ std::shared_ptr<TweakableBool> CreateSyncedBool(int id, const std::string& name,
         }
         else {
             LOG_VERBOSE("Successfully wrote Bool ID=" << id << " to game memory");
-            
+
             // Notify prevent-finish if this is a Bike or Rider value
             if (IsBikeId(id)) {
                 PreventFinish::NotifyBikeModification();
@@ -348,31 +3839,31 @@ void TweakableBool::Render() {
 // TweakableButton Implementation
 void TweakableButton::Render() {
     std::string label = m_name + "##" + std::to_string(m_id);
-    
+
     // If this button should render inline, use SameLine before rendering
     if (m_renderInline) {
         ImGui::SameLine();
     }
-    
+
     // Apply custom colors if set
     if (m_useCustomColors) {
         ImGui::PushStyleColor(ImGuiCol_Button, m_buttonColor);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, m_buttonHoveredColor);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, m_buttonActiveColor);
     }
-    
+
     // Determine button size
     ImVec2 buttonSize(0, 0);
     if (m_fixedWidth > 0.0f) {
         buttonSize.x = m_fixedWidth;
     }
-    
+
     if (ImGui::Button(label.c_str(), buttonSize)) {
         if (m_onClick) {
             m_onClick();
         }
     }
-    
+
     // Pop custom colors if they were set
     if (m_useCustomColors) {
         ImGui::PopStyleColor(3);
@@ -550,10 +4041,10 @@ bool TweakableTireColor::WriteBrightness(float brightness) const {
 }
 
 void TweakableTireColor::Render() {
-    static constexpr float kTireColorSwatchColumnX = 115.0f;
-    static constexpr float kTireColorResetColumnX = 145.0f;
-    static constexpr float kTireBrightnessLabelColumnX = 205.0f;
-    static constexpr float kTireBrightnessSliderColumnX = 285.0f;
+    static constexpr float kTireColorSwatchColumnX = 205.0f;
+    static constexpr float kTireColorResetColumnX = 235.0f;
+    static constexpr float kTireBrightnessLabelColumnX = 295.0f;
+    static constexpr float kTireBrightnessSliderColumnX = 385.0f;
 
     float liveColor[3] = {};
     float liveBrightness = 1.0f;
@@ -661,11 +4152,13 @@ void TweakableTireColor::ResetToDefault() {
 
 namespace {
     static constexpr int kBikePartMaxColorParts = 3;
-    static constexpr float kGearEditorControlColumnX = 165.0f;
-    static constexpr float kGearEditorControlWidth = 190.0f;
-    static constexpr float kGearEditorColorColumnX = 375.0f;
-    static constexpr float kGearEditorVariantColumnX = 470.0f;
+    static constexpr float kGearEditorControlColumnX = 190.0f;
+    static constexpr float kGearEditorControlWidth = 175.0f;
+    static constexpr float kGearEditorColorColumnX = 380.0f;
+    static constexpr float kGearEditorVisibilityColumnX = 475.0f;
+    static constexpr float kGearEditorVariantColumnX = 570.0f;
     static constexpr float kGearEditorColorSwatchSize = 22.0f;
+    static constexpr float kGearEditorVisibilityButtonSize = 24.0f;
 
     static const BikeItemCatalogEntry* FindBikeCatalogEntry(uint16_t itemId) {
         for (size_t i = 0; i < kBikeItemCatalogCount; ++i) {
@@ -683,6 +4176,35 @@ namespace {
             }
         }
         return nullptr;
+    }
+
+    static std::string BikeKeyFromGearSetId(int setId) {
+        if (setId <= 0 || setId > 0xffff) {
+            return "";
+        }
+
+        const GearSetCatalogEntry* entry = FindGearSetCatalogEntry(static_cast<uint16_t>(setId));
+        if (!entry || entry->kind != GearSetKind::Bike) {
+            return "";
+        }
+
+        const std::string genKey(entry->genKey);
+        static const char* kBikeKeys[] = {
+            "CHEETAH",
+            "KINGCOBRA",
+            "MINX",
+            "TRICKY",
+            "FAT",
+            "PAPER",
+            "UNICORN"
+        };
+        for (const char* bikeKey : kBikeKeys) {
+            if (genKey.find(bikeKey) != std::string::npos) {
+                return bikeKey;
+            }
+        }
+
+        return "";
     }
 
     static int GearSetVariantIndexFromSuffix(const std::string& suffix) {
@@ -715,7 +4237,76 @@ namespace {
         if (family == "ULCCLOWN") return "CLOWN";
         if (family == "ULCDRINK") return "DRINK";
         if (family == "ULCRHINO") return "RHINO";
+        if (family == "ROACH") return "ROACH";
+        if (family == "RABBIT") return "RABBIT";
+        if (family == "PITVIPER") return "PIT-VIPER";
+        if (family == "RAYMAN") return "RAYMAN";
+        if (family == "AC") return "ASSASSIN'S CREED";
+        if (family == "BOUNTY") return "BOUNTY HUNTER";
+        if (family == "BOUNTY_HUNTER") return "BOUNTY HUNTER";
+        if (family == "DAPPER_PUG") return "SPACE PUG";
+        if (family == "DAPPER") return "DAPPER";
+        if (family == "LUMITECH") return "LUMI-TECH";
+        if (family == "LUMITECH_FEMALE") return "LUMI-TECH";
+        if (family == "POST_APO") return "SURVIVOR";
+        if (family == "POSTAPO") return "RUSTLANDER";
+        if (family == "POSTAPO_FEMALE") return "RUSTLANDER";
+        if (family == "MALE") return "ELIMINATOR";
+        if (family == "MALE_ASSASSIN") return "ELIMINATOR";
+        if (family == "FEMALE") return "AVIATRIX";
+        if (family == "FEMALE_OUTFIT_1") return "AVIATRIX";
+        if (family == "FEMALE_BARBARA") return "BARBARA";
+        if (family == "FEMALE_INDIAN") return "APACHE";
+        if (family == "FEMALE_ASSASSIN") return "ASSASSIN";
+        if (family == "AC_ELISE") return "ASSASSIN'S CREED";
+        if (family == "AC_ARNO") return "ASSASSIN'S CREED";
+        if (family == "WD") return "WATCH DOGS";
+        if (family == "WD_CLARA") return "WATCH DOGS";
+        if (family == "WD_AIDEN") return "WATCH DOGS";
+        if (family == "DONKEY") return "DONKEY";
+        if (family == "UNICORN") return "UNICORN";
+        if (family == "MINDSCREW") return "MINDSCREW";
+        if (family == "COMPONENTIAL") return "COMPONENTIAL";
+        if (family == "EVILITY") return "EVILITY";
+        if (family == "GRINDER") return "GRINDER";
+        if (family == "HOLOGRAPH") return "HOLOGRAPH";
+        if (family == "SUMIE") return "SUMIE";
+        if (family == "CLOCKWORK") return "CLOCKWORK";
+        if (family == "SPITTING") return "SPITTING IMAGE";
+        if (family == "EVO") return "EVO";
+        if (family == "GOLD") return "GOLD";
+        if (family == "WILDCAT") return "WILDCAT";
+        if (family == "STICKER") return "STICKER";
+        if (family == "COMIC") return "COMIC";
+        if (family == "WASP") return "WASP";
+        if (family == "PLAGUEDOCTOR") return "PLAGUE DOCTOR";
+        if (family == "TKO_PANDA") return "TKO PANDA CROWN";
+        if (family == "BAGGIE") return "BAGGIE CROWN";
+        if (family == "CYBORG") return "TITANIUM CRANIUM";
         return nullptr;
+    }
+
+    static const char* GearSetExactAlias(const std::string& genKey) {
+        if (genKey == "BOUNTY_HUNTER_HELMET") return "BOUNTY HUNTER";
+        if (genKey == "POST_APO_HELMET_1") return "SURVIVOR";
+        if (genKey == "TKO_PANDA_HELMET_1") return "TKO PANDA CROWN";
+        if (genKey == "BAGGIE_HELMET_1") return "BAGGIE CROWN";
+        if (genKey == "PLAGUEDOCTOR_HELMET_1") return "PLAGUE DOCTOR";
+        if (genKey == "RABBIT_HELMET_1") return "RABBIT CROWN";
+        if (genKey == "CYBORG_HELMET_1") return "TITANIUM CRANIUM";
+        return nullptr;
+    }
+
+    static std::string GearSetFallbackName(const GearSetCatalogEntry& entry) {
+        std::string name(entry.genKey);
+        std::replace(name.begin(), name.end(), '_', ' ');
+        return name;
+    }
+
+    static std::string GearSetFallbackFamilyName(const std::string& family) {
+        std::string name(family);
+        std::replace(name.begin(), name.end(), '_', ' ');
+        return name;
     }
 
     static const char* GearSetSlotSingular(GearSetSlot slot) {
@@ -737,6 +4328,55 @@ namespace {
 
     static bool ParseGearSetFamilyAndVariant(const GearSetCatalogEntry& entry, std::string& family, int& variant) {
         const std::string genKey(entry.genKey);
+        static const char* kSlotTokens[] = {
+            "_HELMETS_",
+            "_HELMET_",
+            "_BOTTOMS_",
+            "_BOTTOM_",
+            "_TOPS_",
+            "_TOP_",
+            "_FAIRINGS_",
+            "_WHEELS_",
+            "_RIM_"
+        };
+
+        for (const char* token : kSlotTokens) {
+            const std::string slotToken(token);
+            const size_t slotPos = genKey.rfind(slotToken);
+            if (slotPos == std::string::npos || slotPos == 0) {
+                continue;
+            }
+
+            family = genKey.substr(0, slotPos);
+            variant = GearSetVariantIndexFromSuffix(genKey.substr(slotPos + slotToken.length()));
+            return variant > 0;
+        }
+
+        static const char* kTerminalSlotTokens[] = {
+            "_HELMETS",
+            "_HELMET",
+            "_BOTTOMS",
+            "_BOTTOM",
+            "_TOPS",
+            "_TOP",
+            "_FAIRINGS",
+            "_WHEELS"
+        };
+
+        for (const char* token : kTerminalSlotTokens) {
+            const std::string slotToken(token);
+            if (genKey.length() <= slotToken.length()) {
+                continue;
+            }
+
+            const size_t slotPos = genKey.length() - slotToken.length();
+            if (genKey.compare(slotPos, slotToken.length(), slotToken) == 0 && slotPos > 0) {
+                family = genKey.substr(0, slotPos);
+                variant = 1;
+                return true;
+            }
+        }
+
         const size_t firstUnderscore = genKey.find('_');
         const size_t lastUnderscore = genKey.rfind('_');
         if (firstUnderscore == std::string::npos || lastUnderscore == std::string::npos || lastUnderscore <= firstUnderscore) {
@@ -749,6 +4389,10 @@ namespace {
     }
 
     static std::string GearSetDisplayName(const GearSetCatalogEntry& entry) {
+        if (const char* exactAlias = GearSetExactAlias(entry.genKey)) {
+            return exactAlias;
+        }
+
         std::string family;
         int variant = 0;
         if (ParseGearSetFamilyAndVariant(entry, family, variant)) {
@@ -756,7 +4400,9 @@ namespace {
             if (familyAlias) {
                 const bool numberedSingleItem =
                     (family == "EVEL" || family == "HAZMASUIT" || family == "SUPERHERO" ||
-                        family == "SQUIRREL" || family == "ULCCLOWN" || family == "ULCDRINK" || family == "ULCRHINO") &&
+                        family == "SQUIRREL" || family == "ULCCLOWN" || family == "ULCDRINK" || family == "ULCRHINO" ||
+                        family == "BOUNTY_HUNTER" || family == "POST_APO" || family == "PLAGUEDOCTOR" ||
+                        family == "TKO_PANDA" || family == "BAGGIE" || family == "CYBORG") &&
                     variant == 1;
 
                 std::ostringstream aliasStream;
@@ -769,7 +4415,7 @@ namespace {
         }
 
         std::ostringstream stream;
-        stream << entry.id << " - " << entry.genKey;
+        stream << entry.id << " - " << GearSetFallbackName(entry);
         return stream.str();
     }
 
@@ -784,6 +4430,10 @@ namespace {
     };
 
     static std::string GearSetGroupLabel(const GearSetCatalogEntry& entry) {
+        if (const char* exactAlias = GearSetExactAlias(entry.genKey)) {
+            return exactAlias;
+        }
+
         std::string family;
         int variant = 0;
         if (ParseGearSetFamilyAndVariant(entry, family, variant)) {
@@ -793,9 +4443,11 @@ namespace {
                 stream << familyAlias;
                 return stream.str();
             }
+
+            return GearSetFallbackFamilyName(family);
         }
 
-        return entry.category;
+        return GearSetFallbackName(entry);
     }
 
     static std::vector<GearSetGroup> BuildGearSetGroups(GearSetSlot slot) {
@@ -844,7 +4496,7 @@ namespace {
 
     static std::string PrettyPartName(const std::string& partKey) {
         static const std::map<std::string, std::string> kAliases = {
-            { "BACKSWING", "Back Swing" },
+            { "BACKSWING", "Back Swing Arm" },
             { "BACK_SWING_ARM", "Back Swing Arm" },
             { "BOY_FRAME", "Frame" },
             { "BOY_PEDAL_ARMS", "Pedal Arms" },
@@ -874,20 +4526,20 @@ namespace {
             { "GRIZZLY_SUSPENSION_REAR", "Rear Suspension" },
             { "HEAD_LIGHT", "Headlight" },
             { "HEADLIGHT", "Headlight" },
-            { "REAR_FENDER", "Rear Fender" },
-            { "REAR_RIM", "Rear Rim" },
-            { "REAR_TIRE", "Rear Tire" },
+            { "REAR_FENDER", "Back Fender" },
+            { "REAR_RIM", "Back Rim" },
+            { "REAR_TIRE", "Back Wheel" },
             { "RIM_FRONT", "Front Rim" },
-            { "RIM_REAR", "Rear Rim" },
+            { "RIM_REAR", "Back Rim" },
             { "SEAT", "Seat" },
             { "STEERING", "Steering" },
             { "SUSPENSION_FRONT", "Front Suspension" },
-            { "SWING_ARM", "Swing Arm" },
+            { "SWING_ARM", "Back Swing Arm" },
             { "TANK", "Tank" },
             { "TIRE_FRONT", "Front Tire" },
-            { "TIRE_REAR", "Rear Tire" },
+            { "TIRE_REAR", "Back Wheel" },
             { "WHEEL_FRONT", "Front Wheel" },
-            { "WHEEL_REAR", "Rear Wheel" },
+            { "WHEEL_REAR", "Back Wheel" },
         };
 
         const auto aliasIt = kAliases.find(partKey);
@@ -921,17 +4573,456 @@ namespace {
         return variant > 0 ? variant : 1;
     }
 
-    static std::string BikeItemGroupLabel(const BikeItemCatalogEntry& entry) {
+    static std::string BikeItemFamilyLabel(const BikeItemCatalogEntry& entry) {
         const char* familyAlias = GearSetFamilyAlias(entry.bikeKey);
+        return familyAlias ? familyAlias : entry.bikeKey;
+    }
+
+    static bool IsSpecialRimFamily(const std::string& bikeKey) {
+        return bikeKey == "MINDSCREW"
+            || bikeKey == "COMPONENTIAL"
+            || bikeKey == "SUMIE"
+            || bikeKey == "HOLOGRAPH"
+            || bikeKey == "GRINDER"
+            || bikeKey == "CLOCKWORK"
+            || bikeKey == "SPITTING"
+            || bikeKey == "EVILITY";
+    }
+
+    static int SpecialRimFamilyOrder(const std::string& bikeKey) {
+        if (bikeKey == "MINDSCREW") return 0;
+        if (bikeKey == "COMPONENTIAL") return 1;
+        if (bikeKey == "SUMIE") return 2;
+        if (bikeKey == "HOLOGRAPH") return 3;
+        if (bikeKey == "GRINDER") return 4;
+        if (bikeKey == "CLOCKWORK") return 5;
+        if (bikeKey == "SPITTING") return 6;
+        if (bikeKey == "EVILITY") return 7;
+        return 100;
+    }
+
+    static bool IsRimPart(const std::string& partKey) {
+        return partKey == "FRONT_RIM"
+            || partKey == "RIM_FRONT"
+            || partKey == "REAR_RIM"
+            || partKey == "RIM_REAR";
+    }
+
+    static bool IsFrontRimPart(const std::string& partKey) {
+        return partKey == "FRONT_RIM" || partKey == "RIM_FRONT";
+    }
+
+    static bool IsRearRimPart(const std::string& partKey) {
+        return partKey == "REAR_RIM" || partKey == "RIM_REAR";
+    }
+
+    static bool SpecialRimEntryMatchesTarget(
+        const BikeItemCatalogEntry& entry,
+        const std::string& targetBikeKey,
+        const std::string& targetPartKey) {
+        if (!IsRimPart(entry.partKey) || !IsSpecialRimFamily(entry.bikeKey)) {
+            return true;
+        }
+        if (targetBikeKey.empty() || !IsRimPart(targetPartKey)) {
+            return false;
+        }
+        if (IsFrontRimPart(targetPartKey) != IsFrontRimPart(entry.partKey)
+            || IsRearRimPart(targetPartKey) != IsRearRimPart(entry.partKey)) {
+            return false;
+        }
+
+        const std::string genKey(entry.genKey);
+        static const char* kBikeKeyTokens[] = {
+            "CHEETAH",
+            "KINGCOBRA",
+            "MINX",
+            "TRICKY"
+        };
+        for (const char* bikeKey : kBikeKeyTokens) {
+            if (genKey.find(bikeKey) != std::string::npos && targetBikeKey != bikeKey) {
+                return false;
+            }
+        }
+
+        // The generic *_RIM_BACK_KINGCOBRA_* entries are alternate rear-rim
+        // payloads for Kingcobra only. Keeping them off other bikes prevents
+        // duplicate back-rim choices while preserving the generic rear entry.
+        if (genKey.find("RIM_BACK_KINGCOBRA") != std::string::npos && targetBikeKey != "KINGCOBRA") {
+            return false;
+        }
+
+        return true;
+    }
+
+    static std::string BikePartGroupLabelForEntry(const BikeItemCatalogEntry& entry, const std::string& targetBikeKey) {
+        if (IsRimPart(entry.partKey) && IsSpecialRimFamily(entry.bikeKey) && !targetBikeKey.empty()) {
+            const char* familyAlias = GearSetFamilyAlias(targetBikeKey);
+            return familyAlias ? familyAlias : targetBikeKey;
+        }
+
+        return BikeItemFamilyLabel(entry);
+    }
+
+    static std::string BikeItemGroupLabel(const BikeItemCatalogEntry& entry) {
         std::ostringstream stream;
-        stream << (familyAlias ? familyAlias : entry.bikeKey) << ' ' << PrettyPartName(entry.partKey);
+        stream << BikeItemFamilyLabel(entry) << ' ' << PrettyPartName(entry.partKey);
         return stream.str();
     }
 
+    static std::string BikeItemCatalogName(const BikeItemCatalogEntry& entry) {
+        std::string name;
+        if (GearCustomization::GetHiddenObjectName(entry.id, &name) && !name.empty()) {
+            return name;
+        }
+
+        name = entry.genKey;
+        std::replace(name.begin(), name.end(), '_', ' ');
+        return name;
+    }
+
+    static bool IsBikeItemAliasBikeToken(const std::string& token) {
+        return token == "CHEETAH"
+            || token == "KINGCOBRA"
+            || token == "MINX"
+            || token == "TRICKY"
+            || token == "FAT"
+            || token == "PAPER"
+            || token == "RABBIT"
+            || token == "GRIZZLY"
+            || token == "PITVIPER";
+    }
+
+    static bool IsBikeItemAliasPartToken(const std::string& token) {
+        return token == "BACK"
+            || token == "BACKSWING"
+            || token == "BODY"
+            || token == "BOY"
+            || token == "CHASSIS"
+            || token == "ENGINE"
+            || token == "EXHAUST"
+            || token == "FENDER"
+            || token == "FRAME"
+            || token == "FRONT"
+            || token == "GRIZZLY"
+            || token == "HEAD"
+            || token == "HEADLIGHT"
+            || token == "LIGHT"
+            || token == "PEDAL"
+            || token == "REAR"
+            || token == "RIM"
+            || token == "SEAT"
+            || token == "STEERING"
+            || token == "SUSPENSION"
+            || token == "SWING"
+            || token == "TANK"
+            || token == "TIRE"
+            || token == "WHEEL";
+    }
+
+    static bool IsBikeItemAliasVariantToken(const std::string& token) {
+        return token == "1"
+            || token == "2"
+            || token == "4"
+            || token == "8"
+            || token == "16"
+            || token == "32"
+            || token == "64"
+            || token == "128";
+    }
+
+    static std::string TitleCaseAliasName(const std::string& alias) {
+        std::string result;
+        bool capitalizeNext = true;
+        for (char ch : alias) {
+            if (ch == ' ' || ch == '-' || ch == '_') {
+                result.push_back(ch == '_' ? ' ' : ch);
+                capitalizeNext = true;
+                continue;
+            }
+
+            const unsigned char unsignedCh = static_cast<unsigned char>(ch);
+            const char lower = static_cast<char>(tolower(unsignedCh));
+            result.push_back(capitalizeNext ? static_cast<char>(toupper(static_cast<unsigned char>(lower))) : lower);
+            capitalizeNext = false;
+        }
+        return result;
+    }
+
+    static std::string BikeItemAssociatedAliasName(const BikeItemCatalogEntry& entry) {
+        switch (entry.id) {
+        case 105:
+        case 128:
+            return "Standard Issue";
+        case 106:
+        case 129:
+            return "Shuriken";
+        case 107:
+        case 130:
+            return "Blade";
+        case 108:
+        case 131:
+            return "Renaissance";
+        case 109:
+        case 132:
+            return "Grind";
+        case 110:
+        case 133:
+            return "Chroma";
+        case 111:
+        case 134:
+            return "Fusion";
+        case 795:
+        case 796:
+            return "Ghost Shell";
+        default:
+            break;
+        }
+
+        std::vector<std::string> aliasTokens;
+        std::istringstream stream(entry.genKey);
+        std::string token;
+        while (std::getline(stream, token, '_')) {
+            if (token.empty()
+                || IsBikeItemAliasBikeToken(token)
+                || IsBikeItemAliasPartToken(token)
+                || IsBikeItemAliasVariantToken(token)) {
+                continue;
+            }
+
+            aliasTokens.push_back(token);
+        }
+
+        if (aliasTokens.empty()) {
+            return "";
+        }
+
+        std::string aliasKey;
+        for (size_t i = 0; i < aliasTokens.size(); ++i) {
+            if (i > 0) {
+                aliasKey += '_';
+            }
+            aliasKey += aliasTokens[i];
+        }
+
+        const char* mappedAlias = GearSetFamilyAlias(aliasKey);
+        return TitleCaseAliasName(mappedAlias ? mappedAlias : aliasKey);
+    }
+
     static std::string BikeItemDisplayName(const BikeItemCatalogEntry& entry) {
+        const std::string associatedAlias = BikeItemAssociatedAliasName(entry);
+        if (!associatedAlias.empty()) {
+            return associatedAlias;
+        }
+
         std::ostringstream stream;
-        stream << BikeItemGroupLabel(entry) << ' ' << BikeItemVariantIndex(entry);
+        stream << BikeItemCatalogName(entry) << " (" << BikeItemFamilyLabel(entry)
+            << " " << PrettyPartName(entry.partKey) << ")";
         return stream.str();
+    }
+
+    static std::string BikeItemVariationTooltip(const BikeItemCatalogEntry& entry) {
+        std::string tooltip = BikeItemAssociatedAliasName(entry);
+        if (tooltip.empty()) {
+            tooltip = BikeItemFamilyLabel(entry);
+        }
+
+#ifdef DEVELOPMENT_MODE
+        std::ostringstream stream;
+        stream << tooltip << "\nItem ID: " << entry.id;
+        return stream.str();
+#else
+        return tooltip;
+#endif
+    }
+
+    static const char* BikePartCompatibilityKey(const std::string& partKey) {
+        if (partKey == "FRONT_TIRE" || partKey == "TIRE_FRONT" || partKey == "WHEEL_FRONT") return "FRONT_WHEEL";
+        if (partKey == "REAR_TIRE" || partKey == "TIRE_REAR" || partKey == "WHEEL_REAR") return "REAR_WHEEL";
+        if (partKey == "FRONT_RIM" || partKey == "RIM_FRONT") return "FRONT_RIM";
+        if (partKey == "REAR_RIM" || partKey == "RIM_REAR") return "REAR_RIM";
+        if (partKey == "FRONT_FENDER" || partKey == "FENDER_FRONT") return "FRONT_FENDER";
+        if (partKey == "REAR_FENDER" || partKey == "FENDER_REAR") return "REAR_FENDER";
+        if (partKey == "FRONT_SUSPENSION" || partKey == "SUSPENSION_FRONT" || partKey == "GRIZZLY_SUSPENSION_FRONT") return "FRONT_SUSPENSION";
+        if (partKey == "SWING_ARM" || partKey == "BACKSWING" || partKey == "BACK_SWING_ARM" || partKey == "GRIZZLY_SUSPENSION_REAR") return "BACK_SWING_ARM";
+        if (partKey == "HEAD_LIGHT" || partKey == "HEADLIGHT" || partKey == "GRIZZLY_HEADLIGHT") return "HEADLIGHT";
+        if (partKey == "EXHAUST" || partKey == "EXHAUST_PIPE" || partKey == "GRIZZLY_EXHAUST") return "EXHAUST";
+        if (partKey == "ENGINE_FENDER" || partKey == "GRIZZLY_BODY") return "ENGINE_FENDER";
+        if (partKey == "FRAME" || partKey == "BOY_FRAME" || partKey == "GRIZZLY_CHASSIS") return "FRAME";
+        if (partKey == "STEERING" || partKey == "BOY_STEERING" || partKey == "GRIZZLY_STEERING") return "STEERING";
+        if (partKey == "SEAT") return "SEAT";
+        if (partKey == "TANK") return "TANK";
+        if (partKey == "ENGINE") return "ENGINE";
+        return partKey.c_str();
+    }
+
+    static bool AreBikePartsCompatible(const std::string& targetPartKey, const std::string& candidatePartKey) {
+        return std::strcmp(BikePartCompatibilityKey(targetPartKey), BikePartCompatibilityKey(candidatePartKey)) == 0;
+    }
+
+    static int BikePartSortRank(const std::string& partKey) {
+        const std::string key = BikePartCompatibilityKey(partKey);
+        if (key == "FRONT_RIM") return 0;
+        if (key == "REAR_RIM") return 1;
+        if (key == "FRONT_WHEEL") return 2;
+        if (key == "REAR_WHEEL") return 3;
+        if (key == "FRONT_FENDER") return 4;
+        if (key == "ENGINE_FENDER") return 5;
+        if (key == "REAR_FENDER") return 6;
+        if (key == "BACK_SWING_ARM") return 7;
+        return 100;
+    }
+
+    static void RenderGearEditorColumnHeader() {
+        ImGui::TextDisabled("Gear");
+        ImGui::SameLine(kGearEditorControlColumnX);
+        ImGui::TextDisabled("Type");
+        ImGui::SameLine(kGearEditorColorColumnX);
+        ImGui::TextDisabled("Color");
+        ImGui::SameLine(kGearEditorVisibilityColumnX);
+        ImGui::TextDisabled("Visibility");
+        ImGui::SameLine(kGearEditorVariantColumnX);
+        ImGui::TextDisabled("Variation");
+    }
+
+    static void RenderGearEditorSectionHeader(const char* label) {
+        ImGui::SetWindowFontScale(1.08f);
+        ImGui::TextDisabled("%s", label);
+        ImGui::SetWindowFontScale(1.0f);
+    }
+
+    static bool RenderVisibilityButton(const char* id, bool hidden) {
+        if (hidden) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.42f, 0.16f, 0.16f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.52f, 0.20f, 0.20f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.62f, 0.24f, 0.24f, 1.0f));
+        }
+        else {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        }
+
+        const std::string label = std::string("X##") + id;
+        const bool clicked = ImGui::Button(label.c_str(), ImVec2(kGearEditorVisibilityButtonSize, 0.0f));
+        if (hidden) {
+            ImGui::PopStyleColor(3);
+        }
+        else {
+            ImGui::PopStyleColor();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Hide this bike subpart");
+        }
+        return clicked;
+    }
+
+    struct BikePartGroupOption {
+        const BikeItemCatalogEntry* entry;
+        int variant;
+        size_t candidateIndex;
+    };
+
+    struct BikePartGroup {
+        std::string label;
+        std::vector<BikePartGroupOption> options;
+    };
+
+    static void SortBikePartGroupOptionsByItemId(BikePartGroup& group) {
+        std::stable_sort(group.options.begin(), group.options.end(), [](const BikePartGroupOption& left, const BikePartGroupOption& right) {
+            return left.entry->id < right.entry->id;
+        });
+    }
+
+    static bool TryBuildExactPitViperFrontRimGroup(
+        const std::vector<uint16_t>& candidateItemIds,
+        const std::string& targetBikeKey,
+        const std::string& targetPartKey,
+        std::vector<BikePartGroup>& outGroups) {
+        if (targetBikeKey != "CHEETAH" || !IsFrontRimPart(targetPartKey)) {
+            return false;
+        }
+
+        static const uint16_t kPitViperFrontRimVariations[] = {
+            128,
+            129,
+            130,
+            131,
+            132,
+            133,
+            134,
+            795,
+            909,
+            918,
+            787,
+            851,
+            847,
+            804,
+            801,
+            798
+        };
+
+        BikePartGroup group = {};
+        group.label = "Pit-Viper";
+        for (uint16_t itemId : kPitViperFrontRimVariations) {
+            const auto candidateIt = std::find(candidateItemIds.begin(), candidateItemIds.end(), itemId);
+            if (candidateIt == candidateItemIds.end()) {
+                continue;
+            }
+
+            const BikeItemCatalogEntry* entry = FindBikeCatalogEntry(itemId);
+            if (!entry) {
+                continue;
+            }
+
+            group.options.push_back({
+                entry,
+                BikeItemVariantIndex(*entry),
+                static_cast<size_t>(candidateIt - candidateItemIds.begin())
+            });
+        }
+
+        if (!group.options.empty()) {
+            SortBikePartGroupOptionsByItemId(group);
+            outGroups.push_back(group);
+        }
+        return true;
+    }
+
+    static std::vector<BikePartGroup> BuildBikePartGroups(
+        const std::vector<uint16_t>& candidateItemIds,
+        const std::string& targetBikeKey,
+        const std::string& targetPartKey,
+        uint16_t targetItemId) {
+        std::vector<BikePartGroup> groups;
+        if (TryBuildExactPitViperFrontRimGroup(candidateItemIds, targetBikeKey, targetPartKey, groups)) {
+            return groups;
+        }
+
+        for (size_t i = 0; i < candidateItemIds.size(); ++i) {
+            const BikeItemCatalogEntry* entry = FindBikeCatalogEntry(candidateItemIds[i]);
+            if (!entry) {
+                continue;
+            }
+
+            if (!SpecialRimEntryMatchesTarget(*entry, targetBikeKey, targetPartKey)) {
+                continue;
+            }
+
+            const std::string groupLabel = BikePartGroupLabelForEntry(*entry, targetBikeKey);
+            auto groupIt = std::find_if(groups.begin(), groups.end(), [&groupLabel](const BikePartGroup& group) {
+                return group.label == groupLabel;
+            });
+            if (groupIt == groups.end()) {
+                groups.push_back({ groupLabel, {} });
+                groupIt = groups.end() - 1;
+            }
+
+            groupIt->options.push_back({ entry, BikeItemVariantIndex(*entry), i });
+        }
+
+        for (BikePartGroup& group : groups) {
+            SortBikePartGroupOptionsByItemId(group);
+        }
+
+        return groups;
     }
 
     static bool RenderGearSetCombo(
@@ -1061,10 +5152,94 @@ namespace {
     static void WriteAppearanceColor(uint16_t appearance[16], int wordIndex, uint32_t color) {
         memcpy(appearance + wordIndex, &color, sizeof(color));
     }
+
+    static std::string GetGearPresetConfigPath() {
+        char path[MAX_PATH] = {};
+        HMODULE hModule = NULL;
+        GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCSTR>(&GetGearPresetConfigPath),
+            &hModule);
+
+        if (hModule && GetModuleFileNameA(hModule, path, MAX_PATH) > 0) {
+            std::string fullPath(path);
+            const size_t lastSlash = fullPath.find_last_of("\\/");
+            if (lastSlash != std::string::npos) {
+                return fullPath.substr(0, lastSlash + 1) + "tfpayload_gear_presets.cfg";
+            }
+        }
+
+        return "tfpayload_gear_presets.cfg";
+    }
+
+    static void AddUniqueItemId(std::vector<uint16_t>* itemIds, uint16_t itemId) {
+        if (!itemIds || itemId == 0) {
+            return;
+        }
+
+        if (std::find(itemIds->begin(), itemIds->end(), itemId) == itemIds->end()) {
+            itemIds->push_back(itemId);
+        }
+    }
+
+    static bool AddSupplementalBikeGearSetChildren(uint16_t setId, std::vector<uint16_t>* children) {
+        if (!children) {
+            return false;
+        }
+
+        const uint16_t* supplementalChildren = nullptr;
+        size_t supplementalChildCount = 0;
+
+        switch (setId) {
+        case 55: { static const uint16_t ids[] = { 61, 62, 92, 99 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 56: { static const uint16_t ids[] = { 63, 93, 61, 99 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 57: { static const uint16_t ids[] = { 64, 94, 61, 99 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 58: { static const uint16_t ids[] = { 65, 95, 61, 99 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 59: { static const uint16_t ids[] = { 66, 96, 61, 99 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 60: { static const uint16_t ids[] = { 67, 97, 61, 99 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 61: { static const uint16_t ids[] = { 68, 98, 61, 99 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 62: { static const uint16_t ids[] = { 101, 105, 112, 128 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 66: { static const uint16_t ids[] = { 106, 129, 101, 112 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 67: { static const uint16_t ids[] = { 107, 130, 101, 112 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 68: { static const uint16_t ids[] = { 108, 131, 101, 112 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 69: { static const uint16_t ids[] = { 109, 132, 101, 112 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 70: { static const uint16_t ids[] = { 110, 133, 101, 112 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 71: { static const uint16_t ids[] = { 111, 134, 101, 112 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 75: { static const uint16_t ids[] = { 160, 166, 174, 178 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 76: { static const uint16_t ids[] = { 167, 179, 160, 174 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 77: { static const uint16_t ids[] = { 168, 180, 160, 174 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 78: { static const uint16_t ids[] = { 169, 181, 160, 174 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 79: { static const uint16_t ids[] = { 170, 182, 160, 174 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 80: { static const uint16_t ids[] = { 171, 183, 160, 174 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 81: { static const uint16_t ids[] = { 172, 184, 160, 174 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 83: { static const uint16_t ids[] = { 193, 194, 195, 196 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 85: { static const uint16_t ids[] = { 203, 204 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 90: { static const uint16_t ids[] = { 210, 215, 234, 244 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 106: { static const uint16_t ids[] = { 210, 215, 292, 296 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 107: { static const uint16_t ids[] = { 210, 215, 299, 305 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 108: { static const uint16_t ids[] = { 210, 215, 300, 306 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 109: { static const uint16_t ids[] = { 210, 215, 301, 307 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 110: { static const uint16_t ids[] = { 210, 215, 302, 308 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 111: { static const uint16_t ids[] = { 210, 215, 303, 309 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        default:
+            return false;
+        }
+
+        for (size_t i = 0; i < supplementalChildCount; ++i) {
+            AddUniqueItemId(children, supplementalChildren[i]);
+        }
+        return supplementalChildCount > 0;
+    }
+
+    static bool ParseBoolInt(const std::string& value) {
+        return std::atoi(value.c_str()) != 0;
+    }
+
 }
 
 TweakableAppearanceReload::TweakableAppearanceReload(int id, const std::string& name)
     : TweakableItem(id, name, TweakableType::Custom)
+    , m_pitViperTireColor(10071, "Pit-Viper Tire Color")
     , m_appearance{}
     , m_defaultAppearance{}
     , m_riderGearIds{}
@@ -1073,7 +5248,23 @@ TweakableAppearanceReload::TweakableAppearanceReload(int id, const std::string& 
     , m_bikeColors{}
     , m_hasAppearance(false)
     , m_hasCapturedDefaults(false)
-    , m_dirty(false) {
+    , m_persistCustomAppearance(false)
+    , m_dirty(false)
+    , m_wasTrackReady(false)
+    , m_lastBikePointer(0)
+    , m_lastCheckpointCount(0)
+    , m_reapplyAttemptsRemaining(0)
+    , m_subpartReapplyAttemptsRemaining(0)
+    , m_nextReapplyTick(0)
+    , m_nextSubpartReapplyTick(0)
+    , m_nextAppearanceMismatchCheckTick(0)
+    , m_gearPresets{}
+    , m_selectedGearPresetSlot(0)
+    , m_gearPresetsLoaded(false) {
+    for (GearPreset& preset : m_gearPresets) {
+        preset.hasData = false;
+        memset(preset.appearance, 0, sizeof(preset.appearance));
+    }
 }
 
 bool TweakableAppearanceReload::LoadLiveAppearance() {
@@ -1092,6 +5283,8 @@ bool TweakableAppearanceReload::LoadLiveAppearance() {
     RefreshBikePartEditors();
     m_hasAppearance = true;
     m_dirty = false;
+    m_lastBikePointer = reinterpret_cast<uintptr_t>(Respawn::GetBikePointer());
+    m_lastCheckpointCount = Respawn::GetCheckpointCount();
     return true;
 }
 
@@ -1150,19 +5343,32 @@ void TweakableAppearanceReload::EncodeGearIntoAppearance() {
 
 void TweakableAppearanceReload::RefreshBikePartEditors() {
     std::map<uint16_t, uint16_t> previousSources;
+    std::map<uint16_t, bool> previousHidden;
     struct PreviousColorState {
         uint32_t colors[3];
         bool hasOverrides[3];
     };
+    struct PreviousPartState {
+        uint16_t sourceItemId;
+        PreviousColorState colors;
+        bool hidden;
+    };
     std::map<uint16_t, PreviousColorState> previousColors;
+    std::map<std::string, PreviousPartState> previousPartsByCompatibilityKey;
     for (const BikePartEditorState& state : m_bikePartEditors) {
         previousSources[state.targetItemId] = state.currentSourceItemId;
+        previousHidden[state.targetItemId] = state.hidden;
         PreviousColorState colorState = {};
         for (int i = 0; i < 3; ++i) {
             colorState.colors[i] = EncodeRgb24(state.colors[i]);
             colorState.hasOverrides[i] = state.hasColorOverrides[i];
         }
         previousColors[state.targetItemId] = colorState;
+        previousPartsByCompatibilityKey[std::string(BikePartCompatibilityKey(state.partKey))] = {
+            state.currentSourceItemId,
+            colorState,
+            state.hidden
+        };
     }
 
     m_bikePartEditors.clear();
@@ -1172,11 +5378,22 @@ void TweakableAppearanceReload::RefreshBikePartEditors() {
         int colorSlot;
     };
     std::vector<ActiveBikeChild> activeChildren;
+    std::string currentBikeKey;
     bool hasPitViperChild = false;
     for (int i = 0; i < 2; ++i) {
+        if (currentBikeKey.empty()) {
+            currentBikeKey = BikeKeyFromGearSetId(m_bikeGearIds[i]);
+        }
+
         std::vector<uint16_t> children;
-        if (m_bikeGearIds[i] > 0
-            && GearCustomization::GetBikeGearSetChildren(static_cast<uint16_t>(m_bikeGearIds[i]), &children)) {
+        if (m_bikeGearIds[i] > 0) {
+            const uint16_t gearSetId = static_cast<uint16_t>(m_bikeGearIds[i]);
+            const bool readChildren = GearCustomization::GetBikeGearSetChildren(gearSetId, &children);
+            const bool addedSupplementalChildren = AddSupplementalBikeGearSetChildren(gearSetId, &children);
+            if (!readChildren && !addedSupplementalChildren) {
+                continue;
+            }
+
             for (uint16_t child : children) {
                 activeChildren.push_back({ child, i });
                 const BikeItemCatalogEntry* childEntry = FindBikeCatalogEntry(child);
@@ -1212,7 +5429,11 @@ void TweakableAppearanceReload::RefreshBikePartEditors() {
         state.currentSourceItemId = targetItemId;
         state.bikeKey = targetEntry->bikeKey;
         state.partKey = targetEntry->partKey;
+        if (IsRimPart(state.partKey) && IsSpecialRimFamily(state.bikeKey) && !currentBikeKey.empty()) {
+            state.bikeKey = currentBikeKey;
+        }
         state.selectedIndex = 0;
+        state.hidden = false;
         // Bike appearance slots 12..15 are resolved variant IDs, not RGB colors.
         // Leave per-part color neutral until the real bike color source is mapped.
         for (int colorIndex = 0; colorIndex < 3; ++colorIndex) {
@@ -1226,9 +5447,22 @@ void TweakableAppearanceReload::RefreshBikePartEditors() {
             state.nodeName = state.partKey;
         }
 
+        const std::string compatibilityKey = BikePartCompatibilityKey(state.partKey);
+        const auto previousCompatiblePart = previousPartsByCompatibilityKey.find(compatibilityKey);
         const auto previous = previousSources.find(targetItemId);
         if (previous != previousSources.end()) {
             state.currentSourceItemId = previous->second;
+        }
+        else if (previousCompatiblePart != previousPartsByCompatibilityKey.end()) {
+            state.currentSourceItemId = previousCompatiblePart->second.sourceItemId;
+        }
+
+        const auto previousHiddenIt = previousHidden.find(targetItemId);
+        if (previousHiddenIt != previousHidden.end()) {
+            state.hidden = previousHiddenIt->second;
+        }
+        else if (previousCompatiblePart != previousPartsByCompatibilityKey.end()) {
+            state.hidden = previousCompatiblePart->second.hidden;
         }
 
         const auto previousColor = previousColors.find(targetItemId);
@@ -1238,10 +5472,16 @@ void TweakableAppearanceReload::RefreshBikePartEditors() {
                 state.hasColorOverrides[colorIndex] = previousColor->second.hasOverrides[colorIndex];
             }
         }
+        else if (previousCompatiblePart != previousPartsByCompatibilityKey.end()) {
+            for (int colorIndex = 0; colorIndex < 3; ++colorIndex) {
+                DecodeRgb24(previousCompatiblePart->second.colors.colors[colorIndex], state.colors[colorIndex]);
+                state.hasColorOverrides[colorIndex] = previousCompatiblePart->second.colors.hasOverrides[colorIndex];
+            }
+        }
 
         for (size_t i = 0; i < kBikeItemCatalogCount; ++i) {
             const BikeItemCatalogEntry& candidate = kBikeItemCatalog[i];
-            if (state.bikeKey == candidate.bikeKey && state.partKey == candidate.partKey) {
+            if (AreBikePartsCompatible(state.partKey, candidate.partKey)) {
                 state.candidateItemIds.push_back(candidate.id);
                 if (candidate.id == state.currentSourceItemId) {
                     state.selectedIndex = static_cast<int>(state.candidateItemIds.size()) - 1;
@@ -1251,6 +5491,439 @@ void TweakableAppearanceReload::RefreshBikePartEditors() {
 
         if (!state.candidateItemIds.empty()) {
             m_bikePartEditors.push_back(state);
+        }
+    }
+
+    std::stable_sort(m_bikePartEditors.begin(), m_bikePartEditors.end(), [](const BikePartEditorState& left, const BikePartEditorState& right) {
+        const int leftRank = BikePartSortRank(left.partKey);
+        const int rightRank = BikePartSortRank(right.partKey);
+        if (leftRank != rightRank) {
+            return leftRank < rightRank;
+        }
+        return PrettyPartName(left.partKey) < PrettyPartName(right.partKey);
+    });
+}
+
+void TweakableAppearanceReload::ScheduleCustomAppearanceReapply(const char* reason) {
+    m_reapplyAttemptsRemaining = 24;
+    m_subpartReapplyAttemptsRemaining = 0;
+    m_nextReapplyTick = 0;
+    m_nextSubpartReapplyTick = 0;
+
+    if (reason) {
+        LOG_INFO("[DevMenu] Scheduling custom appearance reapply: " << reason);
+    }
+}
+
+bool TweakableAppearanceReload::QueueStoredSubpartReapply() {
+    bool queuedAny = false;
+
+    for (const BikePartEditorState& state : m_bikePartEditors) {
+        if (state.currentSourceItemId == 0) {
+            continue;
+        }
+
+        uint32_t color = 0x00ffffff;
+        bool hasColorOverride = false;
+        for (int colorIndex = 0; colorIndex < kBikePartMaxColorParts; ++colorIndex) {
+            if (state.hasColorOverrides[colorIndex]) {
+                color = EncodeRgb24(state.colors[colorIndex]);
+                hasColorOverride = true;
+                break;
+            }
+        }
+
+        if (hasColorOverride) {
+            GearCustomization::SetBikeChildColorOverride(state.targetItemId, color);
+        }
+
+        if (state.hidden) {
+            const uint16_t extraHideItemId = state.currentSourceItemId != state.targetItemId
+                ? state.currentSourceItemId
+                : 0;
+            if (GearCustomization::QueueBikeChildItemOverride(state.targetItemId, 0, color, extraHideItemId)) {
+                queuedAny = true;
+            }
+            continue;
+        }
+
+        if (state.currentSourceItemId == state.targetItemId) {
+            if (hasColorOverride && GearCustomization::QueueBikeChildItemOverride(0, state.targetItemId, color)) {
+                queuedAny = true;
+            }
+            continue;
+        }
+
+        bool payloadPatchQueued = false;
+        const bool payloadPatchAvailable = GearCustomization::CopyHiddenObjectVisualPayload(
+                state.targetItemId,
+                state.currentSourceItemId,
+                &payloadPatchQueued);
+        if (payloadPatchAvailable && payloadPatchQueued) {
+            if (GearCustomization::QueueBikeChildItemOverride(0, state.targetItemId, color)) {
+                queuedAny = true;
+            }
+        }
+        else if (payloadPatchAvailable && GearCustomization::QueueBikeChildItemOverride(0, state.currentSourceItemId, color)) {
+            LOG_INFO("[DevMenu] Requeued custom subpart source item without payload copy "
+                << state.currentSourceItemId << " for target " << state.targetItemId);
+            queuedAny = true;
+        }
+    }
+
+    return queuedAny;
+}
+
+std::string TweakableAppearanceReload::GearPresetPartCompatibilityKey(const GearPresetBikePart& part) const {
+    if (!part.compatibilityKey.empty()) {
+        return part.compatibilityKey;
+    }
+
+    if (!part.partKey.empty()) {
+        return BikePartCompatibilityKey(part.partKey);
+    }
+
+    const BikeItemCatalogEntry* targetEntry = FindBikeCatalogEntry(part.targetItemId);
+    if (targetEntry) {
+        return BikePartCompatibilityKey(targetEntry->partKey);
+    }
+
+    const BikeItemCatalogEntry* sourceEntry = FindBikeCatalogEntry(part.currentSourceItemId);
+    if (sourceEntry) {
+        return BikePartCompatibilityKey(sourceEntry->partKey);
+    }
+
+    return "";
+}
+
+void TweakableAppearanceReload::RenderGearPresets() {
+    if (!m_gearPresetsLoaded) {
+        LoadGearPresetsFromFile();
+        m_gearPresetsLoaded = true;
+    }
+
+    RenderGearEditorSectionHeader("Presets");
+    for (int i = 0; i < 5; ++i) {
+        if (i > 0) {
+            ImGui::SameLine();
+        }
+
+        ImGui::PushID(100900 + i);
+        const std::string label = std::string("Slot ") + std::to_string(i + 1);
+        int pushedColors = 0;
+        if (m_gearPresets[i].hasData) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            ++pushedColors;
+        }
+        if (i == m_selectedGearPresetSlot) {
+            ImGui::PushStyleColor(ImGuiCol_Border, ImGui::GetStyleColorVec4(ImGuiCol_Text));
+            ++pushedColors;
+        }
+        if (ImGui::Button(label.c_str(), ImVec2(62.0f, 0.0f))) {
+            m_selectedGearPresetSlot = i;
+            if (m_gearPresets[i].hasData && !LoadGearPreset(i)) {
+                LOG_WARNING("[DevMenu] Failed to load gear preset slot " << (i + 1));
+            }
+        }
+        if (pushedColors > 0) {
+            ImGui::PopStyleColor(pushedColors);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", m_gearPresets[i].hasData ? "Select and load preset" : "Select empty preset slot");
+        }
+        ImGui::PopID();
+    }
+
+    const std::string saveLabel =
+        std::string("Save to Slot ") + std::to_string(m_selectedGearPresetSlot + 1) + "##GearPresetSaveSelected";
+    if (ImGui::Button(saveLabel.c_str(), ImVec2(160.0f, 0.0f))) {
+        SaveGearPreset(m_selectedGearPresetSlot);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Save current gear to selected slot");
+    }
+}
+
+void TweakableAppearanceReload::SaveGearPreset(int slotIndex) {
+    if (slotIndex < 0 || slotIndex >= 5 || !m_hasAppearance) {
+        return;
+    }
+
+    EncodeGearIntoAppearance();
+    EncodeColorsIntoAppearance();
+
+    GearPreset& preset = m_gearPresets[slotIndex];
+    preset.hasData = true;
+    memcpy(preset.appearance, m_appearance, sizeof(preset.appearance));
+    preset.bikeParts.clear();
+    for (const BikePartEditorState& state : m_bikePartEditors) {
+        GearPresetBikePart part = {};
+        part.targetItemId = state.targetItemId;
+        part.currentSourceItemId = state.currentSourceItemId;
+        part.partKey = state.partKey;
+        part.compatibilityKey = BikePartCompatibilityKey(state.partKey);
+        part.hidden = state.hidden;
+        for (int colorIndex = 0; colorIndex < kBikePartMaxColorParts; ++colorIndex) {
+            part.colors[colorIndex] = EncodeRgb24(state.colors[colorIndex]);
+            part.hasColorOverrides[colorIndex] = state.hasColorOverrides[colorIndex];
+        }
+        preset.bikeParts.push_back(part);
+    }
+
+    if (!SaveGearPresetsToFile()) {
+        LOG_WARNING("[DevMenu] Failed to save gear presets file");
+    }
+    LOG_INFO("[DevMenu] Saved gear preset slot " << (slotIndex + 1));
+}
+
+bool TweakableAppearanceReload::LoadGearPreset(int slotIndex) {
+    if (slotIndex < 0 || slotIndex >= 5 || !m_gearPresets[slotIndex].hasData) {
+        return false;
+    }
+
+    const GearPreset& preset = m_gearPresets[slotIndex];
+    memcpy(m_appearance, preset.appearance, sizeof(m_appearance));
+    DecodeGearFromAppearance();
+    DecodeColorsFromAppearance();
+    RefreshBikePartEditors();
+
+    std::vector<bool> usedPresetParts(preset.bikeParts.size(), false);
+    for (BikePartEditorState& state : m_bikePartEditors) {
+        size_t presetPartIndex = preset.bikeParts.size();
+        for (size_t i = 0; i < preset.bikeParts.size(); ++i) {
+            if (!usedPresetParts[i] && preset.bikeParts[i].targetItemId == state.targetItemId) {
+                presetPartIndex = i;
+                break;
+            }
+        }
+
+        if (presetPartIndex == preset.bikeParts.size()) {
+            const std::string stateCompatibilityKey = BikePartCompatibilityKey(state.partKey);
+            for (size_t i = 0; i < preset.bikeParts.size(); ++i) {
+                if (usedPresetParts[i]) {
+                    continue;
+                }
+
+                if (GearPresetPartCompatibilityKey(preset.bikeParts[i]) == stateCompatibilityKey) {
+                    presetPartIndex = i;
+                    break;
+                }
+            }
+        }
+
+        if (presetPartIndex == preset.bikeParts.size()) {
+            continue;
+        }
+
+        usedPresetParts[presetPartIndex] = true;
+        const GearPresetBikePart& presetPart = preset.bikeParts[presetPartIndex];
+        state.currentSourceItemId = presetPart.currentSourceItemId;
+        state.hidden = presetPart.hidden;
+        for (int colorIndex = 0; colorIndex < kBikePartMaxColorParts; ++colorIndex) {
+            DecodeRgb24(presetPart.colors[colorIndex], state.colors[colorIndex]);
+            state.hasColorOverrides[colorIndex] = presetPart.hasColorOverrides[colorIndex];
+        }
+
+        state.selectedIndex = 0;
+        for (size_t i = 0; i < state.candidateItemIds.size(); ++i) {
+            if (state.candidateItemIds[i] == state.currentSourceItemId) {
+                state.selectedIndex = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+
+    m_hasAppearance = true;
+    m_dirty = true;
+    if (!GearCustomization::QueueAppearanceUpdate(m_appearance)) {
+        LOG_WARNING("[DevMenu] Failed to queue gear preset update");
+        return false;
+    }
+
+    m_dirty = false;
+    m_persistCustomAppearance = true;
+    m_lastBikePointer = reinterpret_cast<uintptr_t>(Respawn::GetBikePointer());
+    m_lastCheckpointCount = Respawn::GetCheckpointCount();
+    m_subpartReapplyAttemptsRemaining = 12;
+    m_nextSubpartReapplyTick = GetTickCount() + 700;
+    QueueStoredSubpartReapply();
+    LOG_INFO("[DevMenu] Loaded gear preset slot " << (slotIndex + 1));
+    return true;
+}
+
+bool TweakableAppearanceReload::SaveGearPresetsToFile() const {
+    const std::string configPath = GetGearPresetConfigPath();
+    std::ofstream file(configPath, std::ios::out | std::ios::trunc);
+    if (!file.is_open()) {
+        LOG_ERROR("[DevMenu] Failed to open gear preset config for writing: " << configPath);
+        return false;
+    }
+
+    file << "# TFPayload gear preset slots" << std::endl;
+    file << "# Format is internal and may change." << std::endl;
+    for (int slot = 0; slot < 5; ++slot) {
+        const GearPreset& preset = m_gearPresets[slot];
+        file << "slot=" << slot << std::endl;
+        file << "valid=" << (preset.hasData ? 1 : 0) << std::endl;
+        file << "appearance=";
+        for (int i = 0; i < 16; ++i) {
+            if (i > 0) {
+                file << ' ';
+            }
+            file << preset.appearance[i];
+        }
+        file << std::endl;
+        file << "parts=" << preset.bikeParts.size() << std::endl;
+        for (const GearPresetBikePart& part : preset.bikeParts) {
+            file << "part2=" << part.targetItemId << ' '
+                << part.currentSourceItemId << ' '
+                << (part.hidden ? 1 : 0) << ' '
+                << part.partKey << ' '
+                << part.compatibilityKey;
+            for (int colorIndex = 0; colorIndex < kBikePartMaxColorParts; ++colorIndex) {
+                file << ' ' << part.colors[colorIndex]
+                    << ' ' << (part.hasColorOverrides[colorIndex] ? 1 : 0);
+            }
+            file << std::endl;
+        }
+        file << "end" << std::endl;
+    }
+
+    return true;
+}
+
+bool TweakableAppearanceReload::LoadGearPresetsFromFile() {
+    const std::string configPath = GetGearPresetConfigPath();
+    std::ifstream file(configPath);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    int currentSlot = -1;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
+        const size_t equalsPos = line.find('=');
+        if (equalsPos == std::string::npos) {
+            continue;
+        }
+
+        const std::string key = line.substr(0, equalsPos);
+        const std::string value = line.substr(equalsPos + 1);
+        if (key == "slot") {
+            currentSlot = std::atoi(value.c_str());
+            if (currentSlot >= 0 && currentSlot < 5) {
+                m_gearPresets[currentSlot].hasData = false;
+                memset(m_gearPresets[currentSlot].appearance, 0, sizeof(m_gearPresets[currentSlot].appearance));
+                m_gearPresets[currentSlot].bikeParts.clear();
+            }
+            continue;
+        }
+
+        if (currentSlot < 0 || currentSlot >= 5) {
+            continue;
+        }
+
+        GearPreset& preset = m_gearPresets[currentSlot];
+        if (key == "valid") {
+            preset.hasData = ParseBoolInt(value);
+        }
+        else if (key == "appearance") {
+            std::istringstream stream(value);
+            for (int i = 0; i < 16; ++i) {
+                uint32_t word = 0;
+                stream >> word;
+                preset.appearance[i] = static_cast<uint16_t>(word & 0xffff);
+            }
+        }
+        else if (key == "part" || key == "part2") {
+            std::istringstream stream(value);
+            GearPresetBikePart part = {};
+            int hidden = 0;
+            stream >> part.targetItemId >> part.currentSourceItemId >> hidden;
+            part.hidden = hidden != 0;
+            if (key == "part2") {
+                stream >> part.partKey >> part.compatibilityKey;
+            }
+            for (int colorIndex = 0; colorIndex < kBikePartMaxColorParts; ++colorIndex) {
+                int hasOverride = 0;
+                stream >> part.colors[colorIndex] >> hasOverride;
+                part.hasColorOverrides[colorIndex] = hasOverride != 0;
+            }
+            if (part.targetItemId != 0) {
+                preset.bikeParts.push_back(part);
+            }
+        }
+    }
+
+    LOG_INFO("[DevMenu] Loaded gear presets from " << configPath);
+    return true;
+}
+
+void TweakableAppearanceReload::UpdateRuntime() {
+    if (!m_hasAppearance || !m_persistCustomAppearance) {
+        return;
+    }
+
+    void* bikePointer = Respawn::GetBikePointer();
+    const uintptr_t bikeKey = reinterpret_cast<uintptr_t>(bikePointer);
+    const int checkpointCount = Respawn::GetCheckpointCount();
+    if (!bikePointer || checkpointCount <= 0) {
+        m_wasTrackReady = false;
+        return;
+    }
+
+    const uint32_t now = GetTickCount();
+    if (!m_wasTrackReady) {
+        m_wasTrackReady = true;
+        m_lastBikePointer = bikeKey;
+        m_lastCheckpointCount = checkpointCount;
+        ScheduleCustomAppearanceReapply("entered playable track");
+    }
+
+    if (bikeKey != m_lastBikePointer || checkpointCount != m_lastCheckpointCount) {
+        m_lastBikePointer = bikeKey;
+        m_lastCheckpointCount = checkpointCount;
+        ScheduleCustomAppearanceReapply("new bike or checkpoint layout");
+    }
+
+    if (m_reapplyAttemptsRemaining <= 0 && m_subpartReapplyAttemptsRemaining <= 0) {
+        if (m_nextAppearanceMismatchCheckTick == 0
+            || static_cast<int32_t>(now - m_nextAppearanceMismatchCheckTick) >= 0) {
+            m_nextAppearanceMismatchCheckTick = now + 1000;
+
+            uint16_t liveAppearance[16] = {};
+            if (GearCustomization::GetCurrentAppearanceData(liveAppearance)
+                && memcmp(liveAppearance, m_appearance, sizeof(m_appearance)) != 0) {
+                ScheduleCustomAppearanceReapply("live appearance differs from saved mod-menu appearance");
+            }
+        }
+    }
+
+    if (m_reapplyAttemptsRemaining > 0
+        && (m_nextReapplyTick == 0 || static_cast<int32_t>(now - m_nextReapplyTick) >= 0)) {
+        --m_reapplyAttemptsRemaining;
+        m_nextReapplyTick = now + 500;
+
+        if (GearCustomization::QueueAppearanceUpdate(m_appearance)) {
+            LOG_INFO("[DevMenu] Requeued custom gear sets after track load");
+            m_reapplyAttemptsRemaining = 0;
+            m_subpartReapplyAttemptsRemaining = 12;
+            m_nextSubpartReapplyTick = now + 700;
+        }
+    }
+
+    if (m_subpartReapplyAttemptsRemaining > 0
+        && (m_nextSubpartReapplyTick == 0 || static_cast<int32_t>(now - m_nextSubpartReapplyTick) >= 0)) {
+        --m_subpartReapplyAttemptsRemaining;
+        m_nextSubpartReapplyTick = now + 500;
+
+        if (QueueStoredSubpartReapply()) {
+            LOG_INFO("[DevMenu] Requeued custom subparts after gear-set reapply");
+            m_subpartReapplyAttemptsRemaining = 0;
         }
     }
 }
@@ -1265,6 +5938,11 @@ void TweakableAppearanceReload::Render() {
     bool colorsChanged = false;
     bool colorEditFinished = false;
 
+    RenderGearPresets();
+    ImGui::Spacing();
+
+    RenderGearEditorSectionHeader("Rider Customization");
+    RenderGearEditorColumnHeader();
     gearChanged |= RenderGearSetCombo(
         "Helmet##appearanceGearHelmet",
         GearSetSlot::RiderHelmet,
@@ -1287,18 +5965,15 @@ void TweakableAppearanceReload::Render() {
         &colorsChanged,
         &colorEditFinished);
 
+    ImGui::Spacing();
+    RenderGearEditorSectionHeader("Bike Customization");
+    m_pitViperTireColor.Render();
+    RenderGearEditorColumnHeader();
     gearChanged |= RenderGearSetCombo(
         "Body kit##appearanceBikeGearBody",
         GearSetSlot::BikeFairings,
         &m_bikeGearIds[1],
         m_bikeColors[1],
-        &colorsChanged,
-        &colorEditFinished);
-    gearChanged |= RenderGearSetCombo(
-        "Rims##appearanceBikeGearRims",
-        GearSetSlot::BikeWheels,
-        &m_bikeGearIds[0],
-        m_bikeColors[0],
         &colorsChanged,
         &colorEditFinished);
     if (gearChanged) {
@@ -1312,6 +5987,11 @@ void TweakableAppearanceReload::Render() {
         }
         else {
             m_dirty = false;
+            m_persistCustomAppearance = true;
+            m_lastBikePointer = reinterpret_cast<uintptr_t>(Respawn::GetBikePointer());
+            m_lastCheckpointCount = Respawn::GetCheckpointCount();
+            m_subpartReapplyAttemptsRemaining = 12;
+            m_nextSubpartReapplyTick = GetTickCount() + 700;
         }
     }
 
@@ -1329,12 +6009,21 @@ void TweakableAppearanceReload::Render() {
         }
         else {
             m_dirty = false;
+            m_persistCustomAppearance = true;
+            m_lastBikePointer = reinterpret_cast<uintptr_t>(Respawn::GetBikePointer());
+            m_lastCheckpointCount = Respawn::GetCheckpointCount();
         }
     }
 
     if (!m_bikePartEditors.empty()) {
         ImGui::Spacing();
-        for (BikePartEditorState& state : m_bikePartEditors) {
+        const ImGuiTreeNodeFlags partFlags = ImGuiTreeNodeFlags_DefaultOpen;
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        const bool bikePartsOpen = ImGui::TreeNodeEx("Bike Parts##AppearanceBikeParts", partFlags);
+        ImGui::PopStyleColor();
+        if (bikePartsOpen) {
+            RenderGearEditorColumnHeader();
+            for (BikePartEditorState& state : m_bikePartEditors) {
             if (state.candidateItemIds.empty()) {
                 continue;
             }
@@ -1347,9 +6036,8 @@ void TweakableAppearanceReload::Render() {
                 continue;
             }
 
-            auto selectBikePartOption = [&](const BikeItemCatalogEntry& option) {
+            auto selectBikePartOption = [&](const BikeItemCatalogEntry& option) -> bool {
                 const uint16_t previousTargetItemId = state.targetItemId;
-                state.currentSourceItemId = option.id;
                 uint32_t color = 0x00ffffff;
                 bool hasColorOverride = false;
                 if (option.colorPartCount > 0) {
@@ -1365,31 +6053,81 @@ void TweakableAppearanceReload::Render() {
                     GearCustomization::SetBikeChildColorOverride(previousTargetItemId, color);
                 }
 
+                if (option.id == previousTargetItemId) {
+                    if (!GearCustomization::RestoreHiddenObjectVisualPayload(previousTargetItemId)) {
+                        LOG_WARNING("[DevMenu] Failed to restore bike child visual payload before default rim apply");
+                    }
+                    state.currentSourceItemId = option.id;
+                    m_persistCustomAppearance = true;
+                    m_lastBikePointer = reinterpret_cast<uintptr_t>(Respawn::GetBikePointer());
+                    m_lastCheckpointCount = Respawn::GetCheckpointCount();
+                    if (!GearCustomization::QueueBikeChildItemOverride(0, previousTargetItemId, color)) {
+                        LOG_WARNING("[DevMenu] Failed to queue default bike child item refresh");
+                        return false;
+                    }
+                    return true;
+                }
+
                 bool payloadPatchQueued = false;
                 if (!GearCustomization::CopyHiddenObjectVisualPayload(
                         previousTargetItemId,
-                        state.currentSourceItemId,
+                        option.id,
                         &payloadPatchQueued)) {
                     LOG_WARNING("[DevMenu] Failed to queue bike child visual payload copy");
                 }
                 if (payloadPatchQueued) {
-                    if (!GearCustomization::QueueBikeChildItemOverride(0, previousTargetItemId, color)) {
+                    state.currentSourceItemId = option.id;
+                    m_persistCustomAppearance = true;
+                    m_lastBikePointer = reinterpret_cast<uintptr_t>(Respawn::GetBikePointer());
+                    m_lastCheckpointCount = Respawn::GetCheckpointCount();
+                    const uint16_t extraHideItemId = option.id != previousTargetItemId ? option.id : 0;
+                    if (state.hidden
+                        ? !GearCustomization::QueueBikeChildItemOverride(previousTargetItemId, 0, color, extraHideItemId)
+                        : !GearCustomization::QueueBikeChildItemOverride(0, previousTargetItemId, color)) {
                         LOG_WARNING("[DevMenu] Failed to queue bike child item refresh");
                     }
                 }
-                else if (previousTargetItemId != state.currentSourceItemId) {
-                    if (!GearCustomization::ReplaceCurrentBikeGearSetChild(previousTargetItemId, state.currentSourceItemId)) {
+                else if (previousTargetItemId != option.id) {
+                    const bool crossBikeSwap = state.bikeKey != option.bikeKey;
+                    if (crossBikeSwap) {
+                        state.currentSourceItemId = option.id;
+                        m_persistCustomAppearance = true;
+                        m_lastBikePointer = reinterpret_cast<uintptr_t>(Respawn::GetBikePointer());
+                        m_lastCheckpointCount = Respawn::GetCheckpointCount();
+                        if (state.hidden
+                            ? !GearCustomization::QueueBikeChildItemOverride(previousTargetItemId, 0, color, option.id)
+                            : !GearCustomization::QueueBikeChildItemOverride(0, option.id, color)) {
+                            LOG_WARNING("[DevMenu] Failed to queue cross-bike child apply without a visual payload copy");
+                            return false;
+                        }
+                        if (!state.hidden) {
+                            LOG_WARNING("[DevMenu] Queued cross-bike child apply without hiding the current child because no visual payload copy was available");
+                        }
+                        return true;
+                    }
+
+                    state.currentSourceItemId = option.id;
+                    if (!GearCustomization::ReplaceCurrentBikeGearSetChild(previousTargetItemId, option.id)) {
                         LOG_WARNING("[DevMenu] Failed to queue bike child set replacement");
                     }
                     if (hasColorOverride) {
-                        GearCustomization::SetBikeChildColorOverride(state.currentSourceItemId, color);
+                        GearCustomization::SetBikeChildColorOverride(option.id, color);
                     }
-                    if (std::string(option.partKey) != "ENGINE"
-                        && !GearCustomization::QueueBikeChildItemOverride(previousTargetItemId, state.currentSourceItemId, color)) {
+                    if (state.hidden
+                        ? !GearCustomization::QueueBikeChildItemOverride(option.id, 0, color, previousTargetItemId)
+                        : (std::string(option.partKey) != "ENGINE"
+                            && !GearCustomization::QueueBikeChildItemOverride(previousTargetItemId, option.id, color))) {
                         LOG_WARNING("[DevMenu] Failed to queue replacement bike child item refresh");
                     }
-                    state.targetItemId = state.currentSourceItemId;
+                    state.targetItemId = option.id;
+                    m_persistCustomAppearance = true;
+                    m_lastBikePointer = reinterpret_cast<uintptr_t>(Respawn::GetBikePointer());
+                    m_lastCheckpointCount = Respawn::GetCheckpointCount();
                 }
+                else {
+                    state.currentSourceItemId = option.id;
+                }
+                return true;
             };
 
             const std::string label = PrettyPartName(state.partKey);
@@ -1398,14 +6136,47 @@ void TweakableAppearanceReload::Render() {
             ImGui::TextUnformatted(label.c_str());
             ImGui::SameLine(kGearEditorControlColumnX);
 
-            const std::string preview = BikeItemGroupLabel(*selectedEntry);
-            ImGui::TextUnformatted(preview.c_str());
+            ImGui::PushItemWidth(kGearEditorControlWidth);
+            const std::vector<BikePartGroup> partGroups = BuildBikePartGroups(
+                state.candidateItemIds,
+                state.bikeKey,
+                state.partKey,
+                state.targetItemId);
+            const BikePartGroup* selectedGroup = nullptr;
+            for (const BikePartGroup& group : partGroups) {
+                const auto optionIt = std::find_if(group.options.begin(), group.options.end(), [&state](const BikePartGroupOption& option) {
+                    return option.entry->id == state.currentSourceItemId;
+                });
+                if (optionIt != group.options.end()) {
+                    selectedGroup = &group;
+                    break;
+                }
+            }
+
+            const std::string preview = selectedGroup ? selectedGroup->label : BikeItemFamilyLabel(*selectedEntry);
+            if (ImGui::BeginCombo(comboId.c_str(), preview.c_str())) {
+                for (const BikePartGroup& group : partGroups) {
+                    const bool selected = selectedGroup && selectedGroup->label == group.label;
+                    if (ImGui::Selectable(group.label.c_str(), selected)) {
+                        if (!group.options.empty()) {
+                            if (selectBikePartOption(*group.options[0].entry)) {
+                                state.selectedIndex = static_cast<int>(group.options[0].candidateIndex);
+                            }
+                        }
+                    }
+                    if (selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::PopItemWidth();
 
             ImGui::SameLine(kGearEditorColorColumnX);
             const int colorPartCount = std::min<int>(selectedEntry->colorPartCount, kBikePartMaxColorParts);
             for (int colorIndex = 0; colorIndex < kBikePartMaxColorParts; ++colorIndex) {
                 if (colorIndex > 0) {
-                    ImGui::SameLine();
+                    ImGui::SameLine(0.0f, 2.0f);
                 }
 
                 if (colorIndex >= colorPartCount) {
@@ -1426,6 +6197,9 @@ void TweakableAppearanceReload::Render() {
                     state.hasColorOverrides[colorIndex] = true;
                     const uint32_t color = EncodeRgb24(state.colors[colorIndex]);
                     GearCustomization::SetBikeChildColorOverride(state.targetItemId, color);
+                    m_persistCustomAppearance = true;
+                    m_lastBikePointer = reinterpret_cast<uintptr_t>(Respawn::GetBikePointer());
+                    m_lastCheckpointCount = Respawn::GetCheckpointCount();
                     if (!GearCustomization::QueueBikeChildItemOverride(0, state.targetItemId, color)) {
                         LOG_WARNING("[DevMenu] Failed to queue bike child color update");
                     }
@@ -1435,36 +6209,85 @@ void TweakableAppearanceReload::Render() {
                 }
             }
 
-            ImGui::SameLine(kGearEditorVariantColumnX);
-            for (size_t i = 0; i < state.candidateItemIds.size(); ++i) {
-                if (i > 0) {
-                    ImGui::SameLine();
+            ImGui::SameLine(kGearEditorVisibilityColumnX);
+            const std::string invisibleId = "BikePartHidden" + std::to_string(state.targetItemId);
+            if (RenderVisibilityButton(invisibleId.c_str(), state.hidden)) {
+                state.hidden = !state.hidden;
+                m_persistCustomAppearance = true;
+                m_lastBikePointer = reinterpret_cast<uintptr_t>(Respawn::GetBikePointer());
+                m_lastCheckpointCount = Respawn::GetCheckpointCount();
+
+                uint32_t color = 0x00ffffff;
+                for (int colorIndex = 0; colorIndex < kBikePartMaxColorParts; ++colorIndex) {
+                    if (state.hasColorOverrides[colorIndex]) {
+                        color = EncodeRgb24(state.colors[colorIndex]);
+                        break;
+                    }
                 }
 
-                const BikeItemCatalogEntry* option = FindBikeCatalogEntry(state.candidateItemIds[i]);
-                if (!option) {
-                    continue;
+                bool queued = false;
+                if (state.hidden) {
+                    const uint16_t extraHideItemId = state.currentSourceItemId != state.targetItemId
+                        ? state.currentSourceItemId
+                        : 0;
+                    queued = GearCustomization::QueueBikeChildItemOverride(state.targetItemId, 0, color, extraHideItemId);
+                }
+                else if (state.currentSourceItemId == state.targetItemId) {
+                    queued = GearCustomization::QueueBikeChildItemOverride(0, state.targetItemId, color);
+                }
+                else {
+                    bool payloadPatchQueued = false;
+                    const bool payloadPatchAvailable = GearCustomization::CopyHiddenObjectVisualPayload(
+                        state.targetItemId,
+                        state.currentSourceItemId,
+                        &payloadPatchQueued);
+                    if (payloadPatchAvailable && payloadPatchQueued) {
+                        queued = GearCustomization::QueueBikeChildItemOverride(0, state.targetItemId, color);
+                    }
+                    else if (payloadPatchAvailable) {
+                        queued = GearCustomization::QueueBikeChildItemOverride(0, state.currentSourceItemId, color);
+                    }
                 }
 
-                const bool selected = state.currentSourceItemId == option->id;
-                if (selected) {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-                }
-
-                const std::string buttonLabel =
-                    std::to_string(i + 1) + "##BikePart" + std::to_string(state.targetItemId) + "_" + std::to_string(option->id);
-                if (ImGui::Button(buttonLabel.c_str(), ImVec2(24.0f, 0.0f))) {
-                    state.selectedIndex = static_cast<int>(i);
-                    selectBikePartOption(*option);
-                }
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("%s", BikeItemDisplayName(*option).c_str());
-                }
-
-                if (selected) {
-                    ImGui::PopStyleColor();
+                if (!queued) {
+                    LOG_WARNING("[DevMenu] Failed to queue bike child visibility update");
                 }
             }
+
+            ImGui::SameLine(kGearEditorVariantColumnX);
+            if (!selectedGroup && !partGroups.empty()) {
+                selectedGroup = &partGroups[0];
+            }
+            if (selectedGroup) {
+                for (size_t i = 0; i < selectedGroup->options.size(); ++i) {
+                    if (i > 0) {
+                        ImGui::SameLine();
+                    }
+
+                    const BikePartGroupOption& option = selectedGroup->options[i];
+                    const bool selected = state.currentSourceItemId == option.entry->id;
+                    if (selected) {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+                    }
+
+                    const std::string buttonLabel =
+                        std::to_string(i + 1) + "##BikePart" + std::to_string(state.targetItemId) + "_" + std::to_string(option.entry->id);
+                    if (ImGui::Button(buttonLabel.c_str(), ImVec2(24.0f, 0.0f))) {
+                        if (selectBikePartOption(*option.entry)) {
+                            state.selectedIndex = static_cast<int>(option.candidateIndex);
+                        }
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("%s", BikeItemVariationTooltip(*option.entry).c_str());
+                    }
+
+                    if (selected) {
+                        ImGui::PopStyleColor();
+                    }
+                }
+            }
+        }
+            ImGui::TreePop();
         }
     }
 
@@ -1478,6 +6301,11 @@ void TweakableAppearanceReload::Reset() {
     memcpy(m_appearance, m_defaultAppearance, sizeof(m_appearance));
     DecodeGearFromAppearance();
     DecodeColorsFromAppearance();
+    RefreshBikePartEditors();
+    for (BikePartEditorState& state : m_bikePartEditors) {
+        state.currentSourceItemId = state.targetItemId;
+        state.hidden = false;
+    }
     m_hasAppearance = true;
     m_dirty = false;
 }
@@ -1487,6 +6315,11 @@ void TweakableAppearanceReload::ResetToDefault() {
     if (m_hasAppearance && !GearCustomization::QueueAppearanceUpdate(m_appearance)) {
         LOG_WARNING("[DevMenu] Failed to queue default customization update");
     }
+    else if (m_hasAppearance) {
+        m_persistCustomAppearance = false;
+        m_reapplyAttemptsRemaining = 0;
+        m_subpartReapplyAttemptsRemaining = 0;
+    }
 }
 
 void TweakableUIViewExplorer::Render() {
@@ -1495,6 +6328,798 @@ void TweakableUIViewExplorer::Render() {
 #else
     ImGui::TextDisabled("UI View Explorer is available in DEVELOPMENT_MODE builds.");
 #endif
+}
+
+void TweakableEditorInspector::Render() {
+    ProcessPendingEditorNudgeRestore();
+
+    const uintptr_t gameManager = ResolveGameManagerForEditorInspector();
+    const uintptr_t editorManager = ResolveEditorManagerForInspector();
+    const uintptr_t selectionManager = ResolveEditorSelectionManagerForInspector();
+    const uintptr_t entityManager = ResolveEntityManagerForEditorInspector();
+    const std::vector<SelectedEditorObject> selectedObjects = ReadSelectedEditorObjects();
+
+    ImGui::TextDisabled("Read-only editor selection inspector");
+    RenderPointerCopyText("Game manager", gameManager);
+    RenderPointerCopyText("Editor manager", editorManager);
+    RenderPointerCopyText("Selection manager", selectionManager);
+    RenderPointerCopyText("Entity manager", entityManager);
+
+    if (editorManager == 0 || selectionManager == 0) {
+        ImGui::Spacing();
+        ImGui::TextWrapped("Editor state is unavailable. Open the track editor and select or place an object.");
+        return;
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Selected objects: %d", static_cast<int>(selectedObjects.size()));
+    if (selectedObjects.empty()) {
+        ImGui::TextDisabled("No objects are currently selected.");
+        return;
+    }
+
+    const std::string report = BuildEditorInspectorReport(
+        gameManager,
+        editorManager,
+        selectionManager,
+        entityManager,
+        selectedObjects);
+
+    if (ImGui::Button("Copy Inspector Report", ImVec2(180.0f, 0.0f))) {
+        ImGui::SetClipboardText(report.c_str());
+        LOG_INFO("[EditorInspector] Copied selected object report to clipboard");
+        LOG_INFO("[EditorInspector]\n" << report);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Copy the selected object data and raw fields to clipboard");
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Log Inspector Report", ImVec2(170.0f, 0.0f))) {
+        LOG_INFO("[EditorInspector]\n" << report);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Write the selected object report to the mod log and console");
+    }
+
+    if (ImGui::BeginTable("EditorSelectedObjects", 7, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("#");
+        ImGui::TableSetupColumn("Selected Object");
+        ImGui::TableSetupColumn("EA8 Transform");
+        ImGui::TableSetupColumn("Rotation");
+        ImGui::TableSetupColumn("Light Range");
+        ImGui::TableSetupColumn("Visible");
+        ImGui::TableSetupColumn("List Node");
+        ImGui::TableHeadersRow();
+
+        for (const SelectedEditorObject& selected : selectedObjects) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", selected.index);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%s", selected.selectedObject ? HexAddress(selected.selectedObject).c_str() : "<null>");
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%s", selected.editorTransform ? HexAddress(selected.editorTransform).c_str() : "<missing>");
+            ImGui::TableSetColumnIndex(3);
+            if (selected.hasRotation) {
+                ImGui::Text("%.2f deg", selected.rotationRadians * 57.2957795f);
+            }
+            else {
+                ImGui::TextDisabled("-");
+            }
+            ImGui::TableSetColumnIndex(4);
+            if (selected.hasLightRange) {
+                ImGui::Text("%.4f", selected.lightRangeRaw);
+            }
+            else {
+                ImGui::TextDisabled("-");
+            }
+            ImGui::TableSetColumnIndex(5);
+            if (selected.hasVisible) {
+                ImGui::Text("%s", selected.visible ? "true" : "false");
+            }
+            else {
+                ImGui::TextDisabled("-");
+            }
+            ImGui::TableSetColumnIndex(6);
+            ImGui::Text("%s", selected.listNode ? HexAddress(selected.listNode).c_str() : "<null>");
+        }
+
+        ImGui::EndTable();
+    }
+
+    const SelectedEditorObject& primary = selectedObjects.front();
+    ImGui::Spacing();
+    if (selectionManager != 0 && IsReadableRange(selectionManager, 0x9c)
+        && ImGui::TreeNodeEx("Selection Variation Controller", ImGuiTreeNodeFlags_DefaultOpen)) {
+        uintptr_t liveVariationObject = 0;
+        uintptr_t variationSource0 = 0;
+        uintptr_t variationSource1 = 0;
+        uintptr_t variationSource2 = 0;
+        float variationScaleFactor = 0.0f;
+        SafeReadValue(selectionManager + 0x64, variationScaleFactor);
+        SafeReadValue(selectionManager + 0x8c, liveVariationObject);
+        SafeReadValue(selectionManager + 0x90, variationSource0);
+        SafeReadValue(selectionManager + 0x94, variationSource1);
+        SafeReadValue(selectionManager + 0x98, variationSource2);
+
+        RenderPointerCopyText("Live variation object at selectionManager + 0x8C", liveVariationObject);
+        RenderPointerCopyText("Variation source 0 at selectionManager + 0x90", variationSource0);
+        RenderPointerCopyText("Variation source 1 at selectionManager + 0x94", variationSource1);
+        RenderPointerCopyText("Variation source 2 at selectionManager + 0x98", variationSource2);
+        ImGui::Text("Selection manager +0x64 bounding radius / gizmo scale: %.4f", variationScaleFactor);
+
+        const int variationIndex = VariationIndexFromMask(primary.sceneHolderVariationMask20);
+        if (variationIndex >= 0) {
+            ImGui::Text("Current variation index candidate: %d", variationIndex + 1);
+        }
+        else {
+            ImGui::TextDisabled("Current variation index candidate: unknown");
+        }
+
+        if (ImGui::Button("Apply current +0x64 gizmo radius", ImVec2(240.0f, 0.0f))) {
+            const bool applied = ApplyVariationControllerTransform(selectionManager);
+            LOG_INFO("[EditorInspector] Apply variation controller transform controller="
+                << HexAddress(selectionManager)
+                << " liveObject=" << (liveVariationObject ? HexAddress(liveVariationObject) : "<null>")
+                << " scaleFactor=" << variationScaleFactor
+                << " applied=" << applied);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Calls the engine helper that applies selectionManager +0x48/+0x54/+0x64 to +0x8C");
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("+1.0 gizmo radius and apply", ImVec2(230.0f, 0.0f))) {
+            const float newValue = variationScaleFactor + 1.0f;
+            const bool wrote = SafeWriteValue(selectionManager + 0x64, newValue);
+            const bool applied = wrote && ApplyVariationControllerTransform(selectionManager);
+            LOG_INFO("[EditorInspector] Variation scale factor +1.0 "
+                << variationScaleFactor << " -> " << newValue
+                << " write=" << wrote
+                << " applied=" << applied);
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("-1.0 gizmo radius and apply", ImVec2(230.0f, 0.0f))) {
+            const float decreasedValue = variationScaleFactor - 1.0f;
+            const float newValue = decreasedValue < 0.01f ? 0.01f : decreasedValue;
+            const bool wrote = SafeWriteValue(selectionManager + 0x64, newValue);
+            const bool applied = wrote && ApplyVariationControllerTransform(selectionManager);
+            LOG_INFO("[EditorInspector] Variation scale factor -1.0 "
+                << variationScaleFactor << " -> " << newValue
+                << " write=" << wrote
+                << " applied=" << applied);
+        }
+
+        if (variationIndex >= 0 && ImGui::Button("Rebuild current variation", ImVec2(240.0f, 0.0f))) {
+            const bool rebuilt = RebuildObjectVariation(selectionManager, variationIndex);
+            LOG_INFO("[EditorInspector] Rebuild current variation controller="
+                << HexAddress(selectionManager)
+                << " variationIndexZeroBased=" << variationIndex
+                << " rebuilt=" << rebuilt);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Calls create_object_variation(selectionManager, current zero-based variation index)");
+        }
+
+        ImGui::TreePop();
+    }
+
+    ImGui::Spacing();
+    if (ImGui::TreeNodeEx("Primary Object Properties", ImGuiTreeNodeFlags_DefaultOpen)) {
+        RenderPointerCopyText("Selected object", primary.selectedObject);
+        RenderPointerCopyText("Mapped object via entityManager + 0xe74", primary.mappedObject);
+        RenderPointerCopyText("Editor transform via entityManager + 0xea8", primary.editorTransform);
+        RenderPointerCopyText("Editor scale backing via entityManager + 0xe90", primary.editorScaleBackingObject);
+        if (primary.editorScaleBackingObject != 0 && IsReadableRange(primary.editorScaleBackingObject + 0x10, sizeof(float))) {
+            float backingScale = 0.0f;
+            SafeReadValue(primary.editorScaleBackingObject + 0x10, backingScale);
+            ImGui::Text("Editor scale backing +0x10 scalar: %.4f", backingScale);
+        }
+        const std::vector<EntityMapScanResult> primaryEntityMapResults =
+            ScanEntityManagerMapsForSelectedObject(primary);
+        ImGui::Text("EntityManager selected-object map matches: %d", static_cast<int>(primaryEntityMapResults.size()));
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Included in Copy/Log Inspector Report; useful for finding backing objects near scale/transform");
+        }
+        RenderPointerCopyText("Parent key at selectedObject + 0x1c", primary.parentObject);
+        RenderPointerCopyText("Mapped parent object", primary.mappedParentObject);
+        ImGui::Text(
+            "Selected object type/subtype: %u / %u",
+            static_cast<uint32_t>(primary.selectedObjectType & 0xff),
+            static_cast<uint32_t>(primary.selectedObjectType >> 8));
+        ImGui::Text(
+            "Selected object +0x0C flags: 0x%08X  physics bit 0x10000=%s",
+            primary.selectedObjectFlags0c,
+            primary.selectedObjectPhysicsEnabled ? "true" : "false");
+        ImGui::Text(
+            "Selected object +0x04 movement state: 0x%08X  moving/rotating=%s",
+            primary.selectedObjectMovementState04,
+            primary.movingOrRotatingCandidate ? "true" : "false");
+        if (primary.selectedObject != 0 && IsReadableRange(primary.selectedObject + 0x24, sizeof(float))) {
+            float selectedObject24 = 0.0f;
+            if (SafeReadValue(primary.selectedObject + 0x24, selectedObject24)) {
+                ImGui::Text("Selected object +0x24 float scale-axis candidate: %.4f", selectedObject24);
+                if (ImGui::Button("Add +10.0 to selectedObject +0x24", ImVec2(280.0f, 0.0f))) {
+                    const float newValue = selectedObject24 + 10.0f;
+                    if (SafeWriteValue(primary.selectedObject + 0x24, newValue)) {
+                        LOG_INFO("[EditorInspector] Wrote selectedObject+0x24 float "
+                            << selectedObject24 << " -> " << newValue
+                            << " at " << HexAddress(primary.selectedObject + 0x24));
+                    }
+                    else {
+                        LOG_WARNING("[EditorInspector] Failed to write selectedObject+0x24 at "
+                            << HexAddress(primary.selectedObject + 0x24));
+                    }
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Experimental runtime write: selected object +0x24 = current + 10.0f");
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("+10.0 and mark first mesh dirty", ImVec2(260.0f, 0.0f))) {
+                    const float newValue = selectedObject24 + 10.0f;
+                    const bool wroteScaleCandidate = SafeWriteValue(primary.selectedObject + 0x24, newValue);
+                    bool wroteDirtyFlag = false;
+                    uint32_t meshFlags0c = 0;
+                    if (primary.firstMeshSceneObject != 0
+                        && SafeReadValue(primary.firstMeshSceneObject + 0x0c, meshFlags0c)) {
+                        const uint32_t dirtyFlags = meshFlags0c | 0x80;
+                        wroteDirtyFlag = SafeWriteValue(primary.firstMeshSceneObject + 0x0c, dirtyFlags);
+                    }
+
+                    LOG_INFO("[EditorInspector] Scale-axis dirty probe selectedObject+0x24 "
+                        << selectedObject24 << " -> " << newValue
+                        << " write=" << wroteScaleCandidate
+                        << " firstMesh=" << (primary.firstMeshSceneObject ? HexAddress(primary.firstMeshSceneObject) : "<missing>")
+                        << " dirtyFlagWrite=" << wroteDirtyFlag);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Writes selectedObject+0x24, then sets first mesh +0x0C bit 0x80 like SetObjectScale does before render update");
+                }
+            }
+        }
+        ImGui::Text("Selected object child mode/count: %u", primary.selectedObjectChildMode);
+        RenderPointerCopyText("Selected object children at +0x18", primary.selectedObjectChildren);
+        ImGui::Text("Selected object flags at +0x20: 0x%08X", primary.selectedObjectFlags);
+        RenderPointerCopyText("Scene holder at selectedObject + 0x44", primary.sceneHolder);
+        RenderPointerCopyText("Resource container at [selectedObject + 0x44]", primary.resourceContainer);
+        RenderPointerCopyText("Resource scene root at resourceContainer + 0x68", primary.resourceSceneRoot);
+
+        if (primary.sceneHolder != 0 && IsReadableRange(primary.sceneHolder, 0x20)) {
+            uint32_t holder1c = 0;
+            float holder1cFloat = 0.0f;
+            SafeReadValue(primary.sceneHolder + 0x1c, holder1c);
+            memcpy(&holder1cFloat, &holder1c, sizeof(holder1cFloat));
+            ImGui::Text(
+                "Scene holder +0x08 flags: 0x%08X  horizontal=%s bit2/drivingLine=%s",
+                primary.sceneHolderFlags08,
+                primary.horizontalAlign ? "true" : "false",
+                primary.lockedToDrivingLineCandidate ? "true" : "false");
+            ImGui::Text(
+                "Flags +0x08 bits: 0=%s 2=%s 3=%s 4=%s 5=%s 6=%s 10=%s 12=%s",
+                primary.sceneHolderBit0 ? "1" : "0",
+                primary.lockedToDrivingLineCandidate ? "1" : "0",
+                primary.sceneHolderBit3 ? "1" : "0",
+                primary.horizontalAlign ? "1" : "0",
+                primary.sceneHolderBit5 ? "1" : "0",
+                primary.sceneHolderBit6 ? "1" : "0",
+                primary.fastObjectCandidate ? "1" : "0",
+                primary.sceneHolderBit12 ? "1" : "0");
+            ImGui::Text("Scene holder +0x20 variation mask: 0x%08X", primary.sceneHolderVariationMask20);
+            ImGui::Text("Scene holder +0x1C: 0x%08X / %.4f", holder1c, holder1cFloat);
+        }
+
+        ImGui::Spacing();
+        ImGui::Text("Named editor properties");
+        if (primary.hasRotation) {
+            ImGui::Text("Rotation: %.4f rad / %.2f deg", primary.rotationRadians, primary.rotationRadians * 57.2957795f);
+        }
+        else {
+            ImGui::TextDisabled("Rotation: unavailable");
+        }
+        if (primary.hasLightRange) {
+            ImGui::Text("Light range from first mesh +0xA4: %.4f", primary.lightRangeRaw);
+        }
+        else {
+            ImGui::TextDisabled("Light range: unavailable");
+        }
+        if (primary.hasSceneHolderBuoyancy) {
+            ImGui::Text("Buoyancy from scene holder +0x1C: %.4f", primary.sceneHolderBuoyancyRaw);
+        }
+        if (primary.hasFriction) {
+            ImGui::Text("Unknown first mesh +0x90: %.4f", primary.frictionRaw);
+        }
+        if (primary.hasMeshOffset94) {
+            ImGui::Text("Unknown first mesh +0x94: %.4f", primary.meshOffset94Raw);
+        }
+        if (primary.hasObjectGravity) {
+            ImGui::Text("Unknown first mesh +0x98: %.4f", primary.objectGravityRaw);
+        }
+        if (primary.hasMeshOffset9c) {
+            ImGui::Text("Unknown first mesh +0x9C: %.4f", primary.meshOffset9cRaw);
+        }
+        if (primary.hasLightIntensity) {
+            ImGui::Text("Light intensity from first mesh +0xB4: %.4f", primary.lightIntensityRaw);
+        }
+        if (primary.hasVisible) {
+            ImGui::Text("Visible: %s", primary.visible ? "true" : "false");
+        }
+        else {
+            ImGui::TextDisabled("Visible: unavailable");
+        }
+        if (primary.hasSceneHolderVisible) {
+            ImGui::Text("Visible candidate: %s", primary.sceneHolderVisible ? "true" : "false");
+            ImGui::Text("Contact response candidate: %s", primary.contactResponseEnabled ? "enabled" : "disabled");
+            ImGui::Text("Fast object candidate: %s", primary.fastObjectCandidate ? "true" : "false");
+            ImGui::Text(
+                "Locked to driving line candidate: %s",
+                primary.lockedToDrivingLineCandidate ? "true" : "false");
+        }
+        if (primary.hasShadowType) {
+            ImGui::Text("Shadow type candidate: %s", primary.shadowTypeDynamicCandidate ? "dynamic" : "static");
+        }
+        else {
+            ImGui::TextDisabled("Shadow type: unavailable");
+        }
+        if (primary.hasSelectedObjectPhysicsEnabled) {
+            ImGui::Text(
+                "Selected object physics: %s",
+                primary.selectedObjectPhysicsEnabled ? "enabled" : "disabled");
+        }
+        if (primary.hasLightEnabled) {
+            ImGui::Text("Light enabled: %s", primary.lightEnabled ? "true" : "false");
+        }
+
+        ImGui::Spacing();
+        if (ImGui::TreeNodeEx("Material Color Override Test", ImGuiTreeNodeFlags_DefaultOpen)) {
+            std::vector<uintptr_t> materialTestMeshes;
+            CollectMaterialColorTestSceneObjects(primary, materialTestMeshes);
+
+            ImGui::Text("Collected scene objects for test: %d", static_cast<int>(materialTestMeshes.size()));
+            RenderPointerCopyText("Primary first mesh scene object", primary.firstMeshSceneObject);
+            if (primary.firstMeshSceneObject != 0) {
+                ImGui::TextWrapped("First mesh selector candidates: %s", BuildMaterialSelectorSummary(primary.firstMeshSceneObject).c_str());
+            }
+            if (!materialTestMeshes.empty()) {
+                ImGui::TextWrapped("First collected selector candidates: %s", BuildMaterialSelectorSummary(materialTestMeshes.front()).c_str());
+            }
+            ImGui::SetNextItemWidth(240.0f);
+            ImGui::ColorEdit3(
+                "Override color##editorMaterialOverrideColor",
+                g_editorMaterialTestColor,
+                ImGuiColorEditFlags_NoInputs);
+            ImGui::SetNextItemWidth(160.0f);
+            ImGui::InputInt("Selector##editorMaterialSelector", &g_editorMaterialTestSelector, 1, 16);
+            if (g_editorMaterialTestSelector < 0) {
+                g_editorMaterialTestSelector = 0;
+            }
+            ImGui::SetNextItemWidth(160.0f);
+            ImGui::InputInt("Slot##editorMaterialSlot", &g_editorMaterialTestSlot, 1, 1);
+            if (g_editorMaterialTestSlot < 0) {
+                g_editorMaterialTestSlot = 0;
+            }
+            if (g_editorMaterialTestSlot > 255) {
+                g_editorMaterialTestSlot = 255;
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", DescribeMaterialColorSlot(static_cast<uint8_t>(g_editorMaterialTestSlot)));
+            ImGui::SetNextItemWidth(160.0f);
+            ImGui::InputInt("Source mode##editorMaterialSourceMode", &g_editorMaterialTestSourceMode, 1, 1);
+            if (g_editorMaterialTestSourceMode < 0) {
+                g_editorMaterialTestSourceMode = 0;
+            }
+            if (g_editorMaterialTestSourceMode > 255) {
+                g_editorMaterialTestSourceMode = 255;
+            }
+            ImGui::SetNextItemWidth(160.0f);
+            ImGui::InputInt("Override mode##editorMaterialOverrideMode", &g_editorMaterialTestOverrideMode, 1, 1);
+            if (g_editorMaterialTestOverrideMode < 0) {
+                g_editorMaterialTestOverrideMode = 0;
+            }
+            if (g_editorMaterialTestOverrideMode > 255) {
+                g_editorMaterialTestOverrideMode = 255;
+            }
+            ImGui::SetNextItemWidth(160.0f);
+            ImGui::InputInt("Secondary mode##editorMaterialSecondaryMode", &g_editorMaterialTestSecondaryMode, 1, 1);
+            if (g_editorMaterialTestSecondaryMode < 0) {
+                g_editorMaterialTestSecondaryMode = 0;
+            }
+            if (g_editorMaterialTestSecondaryMode > 255) {
+                g_editorMaterialTestSecondaryMode = 255;
+            }
+            ImGui::Checkbox("Refresh after apply##editorMaterialRefresh", &g_editorMaterialTestRefreshAfterApply);
+            if (ImGui::Checkbox("Sticky armed##editorMaterialSticky", &g_editorMaterialStickyEnabled)) {
+                if (g_editorMaterialStickyEnabled) {
+                    int attempts = 0;
+                    const int appliedCount = ArmStickyEditorMaterialOverride(materialTestMeshes, &attempts);
+                    LOG_INFO("[EditorInspector] Sticky material color override armed objects="
+                        << materialTestMeshes.size()
+                        << " paramOwners=" << g_editorMaterialStickyParamOwnerCount
+                        << " attempts=" << attempts
+                        << " initialApplied=" << appliedCount
+                        << " autoSelectors=" << g_editorMaterialStickyUseAutoSelectors);
+                }
+                else {
+                    g_editorMaterialStickySceneObjects.clear();
+                    InterlockedExchange(&g_editorMaterialStickyParamOwnerCount, 0);
+                    LOG_INFO("[EditorInspector] Sticky material color override disabled");
+                }
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Arms hooks for the current selection; does not run a timed reapply loop");
+            }
+            ImGui::SameLine();
+            ImGui::Checkbox("Sticky auto selectors##editorMaterialStickyAuto", &g_editorMaterialStickyUseAutoSelectors);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Sticky mode tries selector candidates from +0x20/+0x24/+0x38/+0x58");
+            }
+
+            if (ImGui::Button("Apply color to first mesh", ImVec2(210.0f, 0.0f))) {
+                const bool applied = ApplyMaterialColorOverrideToSceneObject(
+                    primary.firstMeshSceneObject,
+                    static_cast<uint32_t>(g_editorMaterialTestSelector),
+                    static_cast<uint8_t>(g_editorMaterialTestSlot),
+                    static_cast<uint8_t>(g_editorMaterialTestSourceMode),
+                    static_cast<uint8_t>(g_editorMaterialTestOverrideMode),
+                    static_cast<uint8_t>(g_editorMaterialTestSecondaryMode),
+                    g_editorMaterialTestColor,
+                    g_editorMaterialTestRefreshAfterApply);
+                LOG_INFO("[EditorInspector] Material color test firstMesh="
+                    << (primary.firstMeshSceneObject ? HexAddress(primary.firstMeshSceneObject) : "<missing>")
+                    << " selector=0x" << std::hex << std::uppercase << static_cast<uint32_t>(g_editorMaterialTestSelector)
+                    << std::dec
+                    << " slot=" << g_editorMaterialTestSlot
+                    << " color=(" << g_editorMaterialTestColor[0]
+                    << "," << g_editorMaterialTestColor[1]
+                    << "," << g_editorMaterialTestColor[2]
+                    << ") applied=" << applied);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Calls create_mesh_instances on the first collected mesh scene object");
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button("Apply color to collected", ImVec2(210.0f, 0.0f))) {
+                const int appliedCount = ApplyMaterialColorOverrideToObjects(
+                    materialTestMeshes,
+                    static_cast<uint32_t>(g_editorMaterialTestSelector),
+                    static_cast<uint8_t>(g_editorMaterialTestSlot),
+                    static_cast<uint8_t>(g_editorMaterialTestSourceMode),
+                    static_cast<uint8_t>(g_editorMaterialTestOverrideMode),
+                    static_cast<uint8_t>(g_editorMaterialTestSecondaryMode),
+                    g_editorMaterialTestColor,
+                    g_editorMaterialTestRefreshAfterApply);
+                LOG_INFO("[EditorInspector] Material color test allMeshes count="
+                    << materialTestMeshes.size()
+                    << " applied=" << appliedCount
+                    << " selector=0x" << std::hex << std::uppercase << static_cast<uint32_t>(g_editorMaterialTestSelector)
+                    << std::dec
+                    << " slot=" << g_editorMaterialTestSlot);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Calls create_mesh_instances on collected material/mesh scene object candidates");
+            }
+
+            if (ImGui::Button("Use first mesh +0x38 selector", ImVec2(220.0f, 0.0f))) {
+                uint32_t selector = 0;
+                if (primary.firstMeshSceneObject != 0
+                    && SafeReadValue(primary.firstMeshSceneObject + 0x38, selector)) {
+                    g_editorMaterialTestSelector = static_cast<int>(selector);
+                    LOG_INFO("[EditorInspector] Material color selector set from firstMesh+0x38 selector=0x"
+                        << std::hex << std::uppercase << selector << std::dec);
+                }
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Ghidra material collection path uses sceneObject +0x38 as a material selector");
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button("Try auto selectors", ImVec2(180.0f, 0.0f))) {
+                int attempts = 0;
+                const int appliedCount = ApplyMaterialColorAutoSelectorsToObjects(
+                    materialTestMeshes,
+                    static_cast<uint32_t>(g_editorMaterialTestSelector),
+                    static_cast<uint8_t>(g_editorMaterialTestSlot),
+                    static_cast<uint8_t>(g_editorMaterialTestSourceMode),
+                    static_cast<uint8_t>(g_editorMaterialTestOverrideMode),
+                    static_cast<uint8_t>(g_editorMaterialTestSecondaryMode),
+                    g_editorMaterialTestColor,
+                    g_editorMaterialTestRefreshAfterApply,
+                    &attempts);
+                LOG_INFO("[EditorInspector] Material color auto selector test objects="
+                    << materialTestMeshes.size()
+                    << " attempts=" << attempts
+                    << " appliedCalls=" << appliedCount
+                    << " slot=" << g_editorMaterialTestSlot
+                    << " color=(" << g_editorMaterialTestColor[0]
+                    << "," << g_editorMaterialTestColor[1]
+                    << "," << g_editorMaterialTestColor[2]
+                    << ")");
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Tries non-zero selector candidates from +0x20/+0x24/+0x38/+0x58 on each collected scene object");
+            }
+
+            if (ImGui::Button("Set material value ptr", ImVec2(210.0f, 0.0f))) {
+                int attempts = 0;
+                const int appliedCount = WriteMaterialParameterValuePtrsToObjects(
+                    materialTestMeshes,
+                    static_cast<uint32_t>(g_editorMaterialTestSelector),
+                    static_cast<uint8_t>(g_editorMaterialTestSlot),
+                    g_editorMaterialTestColor,
+                    g_editorMaterialTestRefreshAfterApply,
+                    &attempts);
+                LOG_INFO("[EditorInspector] Material value pointer write test objects="
+                    << materialTestMeshes.size()
+                    << " attempts=" << attempts
+                    << " applied=" << appliedCount
+                    << " slot=" << g_editorMaterialTestSlot
+                    << " color=(" << g_editorMaterialTestColor[0]
+                    << "," << g_editorMaterialTestColor[1]
+                    << "," << g_editorMaterialTestColor[2]
+                    << ")");
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Writes the looked-up diffuse/diffuse2 value pointer once; no override record or sticky hook");
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button("Trace material reset", ImVec2(190.0f, 0.0f))) {
+                const bool armed = ArmMaterialParameterTrace(
+                    materialTestMeshes,
+                    static_cast<uint32_t>(g_editorMaterialTestSelector),
+                    static_cast<uint8_t>(g_editorMaterialTestSlot));
+                LOG_INFO("[EditorInspector] Material reset trace armed=" << armed);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Logs value-pointer changes for the first matching diffuse/diffuse2 parameter; no vtable hook");
+            }
+
+            if (ImGui::Button("Trace backing events", ImVec2(190.0f, 0.0f))) {
+                EnsureTrackEventMaterialTraceHookInstalled();
+                InterlockedExchange(&g_editorMaterialTrackEventTraceCount, 0);
+                InterlockedExchange(&g_editorMaterialTrackEventAnyTraceCount, 0);
+                g_editorMaterialTrackEventTraceArmed = g_editorMaterialTrackEventHookInstalled;
+                LOG_INFO("[EditorInspector] TrackEvent material trace armed="
+                    << g_editorMaterialTrackEventTraceArmed);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Logs native event 0x12/0x13 material/color backing map state before and after engine handling");
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button("Set mesh color fields", ImVec2(210.0f, 0.0f))) {
+                const int appliedCount = SetSerializedMeshColorFieldsOnObjects(
+                    materialTestMeshes,
+                    g_editorMaterialTestColor,
+                    g_editorMaterialTestRefreshAfterApply);
+                LOG_INFO("[EditorInspector] Serialized mesh color field test objects="
+                    << materialTestMeshes.size()
+                    << " applied=" << appliedCount
+                    << " color=(" << g_editorMaterialTestColor[0]
+                    << "," << g_editorMaterialTestColor[1]
+                    << "," << g_editorMaterialTestColor[2]
+                    << ")");
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Writes mesh +0x90..+0x9c once; this is the serializer-tracked color path, not a timed override");
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button("Start sticky", ImVec2(120.0f, 0.0f))) {
+                int attempts = 0;
+                const int appliedCount = ArmStickyEditorMaterialOverride(materialTestMeshes, &attempts);
+                LOG_INFO("[EditorInspector] Sticky material color override armed objects="
+                    << materialTestMeshes.size()
+                    << " paramOwners=" << g_editorMaterialStickyParamOwnerCount
+                    << " attempts=" << attempts
+                    << " initialApplied=" << appliedCount
+                    << " autoSelectors="
+                    << (g_editorMaterialStickyUseAutoSelectors ? "true" : "false"));
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Arms sticky hooks using the current Sticky auto selectors checkbox state");
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button("Stop sticky", ImVec2(120.0f, 0.0f))) {
+                g_editorMaterialStickyEnabled = false;
+                g_editorMaterialStickySceneObjects.clear();
+                InterlockedExchange(&g_editorMaterialStickyParamOwnerCount, 0);
+                LOG_INFO("[EditorInspector] Sticky material color override disabled");
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button("Reset test color", ImVec2(150.0f, 0.0f))) {
+                g_editorMaterialTestColor[0] = 1.0f;
+                g_editorMaterialTestColor[1] = 1.0f;
+                g_editorMaterialTestColor[2] = 1.0f;
+            }
+
+            ImGui::TreePop();
+        }
+
+        ImGui::Spacing();
+        ImGui::Text("Visual scale");
+
+        if (primary.firstMeshSceneObject != g_editorInspectorAxisScaleObject) {
+            g_editorInspectorAxisScaleObject = primary.firstMeshSceneObject;
+            g_editorInspectorAutoScale = 1.0f;
+            g_editorInspectorLastAppliedScale = 1.0f;
+            float liveScale[3] = {};
+            if (ReadSceneObjectScaleVector(primary.firstMeshSceneObject, liveScale)) {
+                g_editorInspectorAxisScale[0] = ClampEditorAutoScale(liveScale[0]);
+                g_editorInspectorAxisScale[1] = ClampEditorAutoScale(liveScale[1]);
+                g_editorInspectorAxisScale[2] = ClampEditorAutoScale(liveScale[2]);
+            }
+            else {
+                g_editorInspectorAxisScale[0] = g_editorInspectorAutoScale;
+                g_editorInspectorAxisScale[1] = g_editorInspectorAutoScale;
+                g_editorInspectorAxisScale[2] = g_editorInspectorAutoScale;
+            }
+        }
+
+        ImGui::SetNextItemWidth(320.0f);
+        const bool scaleChanged = ImGui::SliderFloat(
+            "Scale##editorAutoScale",
+            &g_editorInspectorAutoScale,
+            EDITOR_AUTO_SCALE_MIN,
+            EDITOR_AUTO_SCALE_MAX,
+            "%.3fx",
+            ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_NoRoundToFormat);
+        g_editorInspectorAutoScale = ClampEditorAutoScale(g_editorInspectorAutoScale);
+
+        if (scaleChanged && std::fabs(g_editorInspectorAutoScale - g_editorInspectorLastAppliedScale) > 0.0001f) {
+            const float previousScale = g_editorInspectorLastAppliedScale > 0.0001f
+                ? g_editorInspectorLastAppliedScale
+                : 1.0f;
+            const float scaleRatio = g_editorInspectorAutoScale / previousScale;
+            float scaledAxis[3] = {
+                ClampEditorAutoScale(g_editorInspectorAxisScale[0] * scaleRatio),
+                ClampEditorAutoScale(g_editorInspectorAxisScale[1] * scaleRatio),
+                ClampEditorAutoScale(g_editorInspectorAxisScale[2] * scaleRatio),
+            };
+
+            const bool applied = SetSceneObjectScaleVectorWithRefresh(
+                primary.firstMeshSceneObject,
+                scaledAxis,
+                0);
+            if (applied) {
+                g_editorInspectorLastAppliedScale = g_editorInspectorAutoScale;
+                g_editorInspectorAxisScale[0] = scaledAxis[0];
+                g_editorInspectorAxisScale[1] = scaledAxis[1];
+                g_editorInspectorAxisScale[2] = scaledAxis[2];
+            }
+            LOG_VERBOSE("[EditorInspector] Auto visual scale firstMesh="
+                << (primary.firstMeshSceneObject ? HexAddress(primary.firstMeshSceneObject) : "<missing>")
+                << " selectedObject=" << (primary.selectedObject ? HexAddress(primary.selectedObject) : "<missing>")
+                << " scale=" << g_editorInspectorAutoScale
+                << " ratio=" << scaleRatio
+                << " axis=(" << scaledAxis[0] << ", " << scaledAxis[1] << ", " << scaledAxis[2] << ")"
+                << " applied=" << applied);
+        }
+
+        if (primary.firstMeshSceneObject == 0 || primary.selectedObject == 0) {
+            ImGui::TextDisabled("Auto scale needs a selected object with a mesh scene object.");
+        }
+        else {
+            ImGui::SetNextItemWidth(320.0f);
+            float axisScale[3] = {
+                g_editorInspectorAxisScale[0],
+                g_editorInspectorAxisScale[1],
+                g_editorInspectorAxisScale[2],
+            };
+            const bool axisChanged = ImGui::DragFloat3(
+                "Axis scale##editorAxisScale",
+                axisScale,
+                0.01f,
+                EDITOR_AUTO_SCALE_MIN,
+                EDITOR_AUTO_SCALE_MAX,
+                "%.3fx",
+                ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_NoRoundToFormat);
+
+            axisScale[0] = ClampEditorAutoScale(axisScale[0]);
+            axisScale[1] = ClampEditorAutoScale(axisScale[1]);
+            axisScale[2] = ClampEditorAutoScale(axisScale[2]);
+            if (axisChanged) {
+                const bool applied = SetSceneObjectScaleVectorWithRefresh(
+                    primary.firstMeshSceneObject,
+                    axisScale,
+                    0);
+                if (applied) {
+                    g_editorInspectorAxisScale[0] = axisScale[0];
+                    g_editorInspectorAxisScale[1] = axisScale[1];
+                    g_editorInspectorAxisScale[2] = axisScale[2];
+                }
+                LOG_VERBOSE("[EditorInspector] Axis visual scale firstMesh="
+                    << HexAddress(primary.firstMeshSceneObject)
+                    << " selectedObject=" << HexAddress(primary.selectedObject)
+                    << " scale=(" << axisScale[0] << ", " << axisScale[1] << ", " << axisScale[2] << ")"
+                    << " applied=" << applied);
+            }
+
+            if (ImGui::Button("Reset axis scale##editorAxisScaleReset", ImVec2(150.0f, 0.0f))) {
+                float resetScale[3] = { 1.0f, 1.0f, 1.0f };
+                const bool applied = SetSceneObjectScaleVectorWithRefresh(
+                    primary.firstMeshSceneObject,
+                    resetScale,
+                    0);
+                if (applied) {
+                    g_editorInspectorAxisScale[0] = resetScale[0];
+                    g_editorInspectorAxisScale[1] = resetScale[1];
+                    g_editorInspectorAxisScale[2] = resetScale[2];
+                    g_editorInspectorAutoScale = 1.0f;
+                    g_editorInspectorLastAppliedScale = 1.0f;
+                }
+                LOG_INFO("[EditorInspector] Reset axis visual scale firstMesh="
+                    << HexAddress(primary.firstMeshSceneObject)
+                    << " selectedObject=" << HexAddress(primary.selectedObject)
+                    << " applied=" << applied);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Sets the selected visual mesh scale vector to 1,1,1");
+            }
+        }
+        RenderPointerCopyText("First mesh scene object", primary.firstMeshSceneObject);
+        ImGui::Text("Mesh scene object count: %u", primary.meshSceneObjectCount);
+        ImGui::Text("Mesh reversed type/subtype fallback: %s", primary.meshUsedReversedTypeSubtypeFallback ? "true" : "false");
+        RenderPointerCopyText("First visibility scene object", primary.firstVisibilitySceneObject);
+        ImGui::Text("Visibility scene object count: %u", primary.visibilitySceneObjectCount);
+        ImGui::Text("Visibility reversed type/subtype fallback: %s", primary.visibilityUsedReversedTypeSubtypeFallback ? "true" : "false");
+        RenderPointerCopyText("First light scene object", primary.firstLightSceneObject);
+        ImGui::Text("Light scene object count: %u", primary.lightSceneObjectCount);
+        ImGui::Text("Light reversed type/subtype fallback: %s", primary.lightUsedReversedTypeSubtypeFallback ? "true" : "false");
+
+        ImGui::TreePop();
+    }
+
+    if (primary.selectedObject != 0 && ImGui::TreeNode("Raw Selected Object Fields")) {
+        if (ImGui::BeginTable("EditorSelectedObjectRawFields", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("Offset");
+            ImGui::TableSetupColumn("DWord");
+            ImGui::TableSetupColumn("Float");
+            ImGui::TableSetupColumn("Pointer");
+            ImGui::TableHeadersRow();
+
+            for (uintptr_t offset = 0; offset < 0x100; offset += 4) {
+                uint32_t dwordValue = 0;
+                if (!SafeReadValue(primary.selectedObject + offset, dwordValue)) {
+                    continue;
+                }
+
+                float floatValue = 0.0f;
+                memcpy(&floatValue, &dwordValue, sizeof(floatValue));
+                uintptr_t pointerValue = 0;
+                if (offset + sizeof(uintptr_t) <= 0x100) {
+                    SafeReadValue(primary.selectedObject + offset, pointerValue);
+                }
+
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("+0x%02X", static_cast<unsigned int>(offset));
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("0x%08X", dwordValue);
+                ImGui::TableSetColumnIndex(2);
+                if (std::isfinite(floatValue) && std::fabs(floatValue) < 1000000.0f) {
+                    ImGui::Text("%.4f", floatValue);
+                }
+                else {
+                    ImGui::TextDisabled("-");
+                }
+                ImGui::TableSetColumnIndex(3);
+                if (pointerValue != 0 && IsReadableRange(pointerValue, 0x10)) {
+                    ImGui::Text("%s", HexAddress(pointerValue).c_str());
+                }
+                else {
+                    ImGui::TextDisabled("-");
+                }
+            }
+
+            ImGui::EndTable();
+        }
+        ImGui::TreePop();
+    }
 }
 
 void TweakableFmodControls::Render() {
@@ -1522,6 +7147,31 @@ void TweakableFmodControls::Render() {
     }
 
     ImGui::TextDisabled("%s", Fmod::GetStartupMuteStatusString());
+}
+
+void TweakableFileUnlockControls::Render() {
+    if (ImGui::Button("Unlock All Items", ImVec2(316.0f, 0.0f))) {
+        ImGui::OpenPopup("Confirm Unlock All Items");
+    }
+
+    if (ImGui::BeginPopupModal("Confirm Unlock All Items", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("You must restart Trials Fusion to apply this change.");
+        ImGui::Spacing();
+        ImGui::TextWrapped("This will close the game, patch build\\data_pc\\data_patch.pak, and restart Trials Fusion.");
+        ImGui::Spacing();
+
+        if (ImGui::Button("Restart and Unlock", ImVec2(150.0f, 0.0f))) {
+            ImGui::CloseCurrentPopup();
+            FileUnlock::UnlockAllItems();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(90.0f, 0.0f))) {
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
 }
 
 // TweakableFolder Implementation
@@ -1573,6 +7223,17 @@ DevMenu::DevMenu()
 }
 
 DevMenu::~DevMenu() {
+}
+
+void DevMenu::UpdateRuntime() {
+    ProcessPendingEditorNudgeRestore();
+    ProcessEditorScaleKeybinds();
+    ProcessStickyEditorMaterialOverride();
+    ProcessMaterialParameterTrace();
+
+    if (m_appearanceReload) {
+        m_appearanceReload->UpdateRuntime();
+    }
 }
 
 void DevMenu::Initialize() {
@@ -1657,7 +7318,7 @@ void DevMenu::Render() {
             std::string label = "Select Checkpoint (0-" + std::to_string(checkpointCount - 1) + ")";
             g_checkpointIndexSlider->SetName(label);
             g_lastCheckpointCount = checkpointCount;
-            
+
             // Clamp current value if needed
             if (g_checkpointIndexSlider->GetValue() >= checkpointCount) {
                 g_checkpointIndexSlider->SetValue(checkpointCount - 1);
@@ -1690,60 +7351,77 @@ void DevMenu::Render() {
 
     // Render Keybindings window independently (even if main menu is hidden)
     if (m_showKeybindingsWindow) {
-        ImGui::SetNextWindowSize(ImVec2(600, 400), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(820, 400), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(ImVec2(700, 50), ImGuiCond_FirstUseEver);
-        
+
         if (ImGui::Begin("Keybindings", &m_showKeybindingsWindow)) {
+            UpdateGamepadBindingCapture();
             ImGui::Text("Configure hotkeys for mod actions:");
             ImGui::Separator();
-            
+
             // Build a map of VK codes to count how many actions use each key
             std::unordered_map<int, int> keyUsageCount;
+            std::unordered_map<int, int> gamepadUsageCount;
             size_t numKeybinds = m_keybindingItems.size() >= 2 ? m_keybindingItems.size() - 2 : 0;
-            
+
             for (size_t i = 0; i < numKeybinds; i++) {
                 int vkCode = Keybindings::GetKey(m_keybindingActions[i]);
                 if (vkCode != 0) { // Ignore unbound keys
                     keyUsageCount[vkCode]++;
                 }
+                int gamepadButton = Keybindings::GetGamepadButton(m_keybindingActions[i]);
+                if (gamepadButton != 0) {
+                    gamepadUsageCount[gamepadButton]++;
+                }
             }
-            
+
             // Calculate widths for alignment
             float maxActionWidth = 0.0f;
             float maxKeyWidth = 0.0f;
-            
+
             for (size_t i = 0; i < numKeybinds; i++) {
                 Keybindings::Action action = m_keybindingActions[i];
                 std::string actionName = Keybindings::GetActionName(action);
                 std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(action));
-                
+
                 ImVec2 actionSize = ImGui::CalcTextSize(actionName.c_str());
                 ImVec2 keySize = ImGui::CalcTextSize(keyName.c_str());
-                
+
                 if (actionSize.x > maxActionWidth) maxActionWidth = actionSize.x;
                 if (keySize.x > maxKeyWidth) maxKeyWidth = keySize.x;
             }
-            
+
             // Add padding for the button
             float buttonPadding = ImGui::GetStyle().FramePadding.x * 2.0f;
-            float colonWidth = ImGui::CalcTextSize(": ").x;
-            float keybindingButtonWidth = maxActionWidth + colonWidth + maxKeyWidth + buttonPadding + 10.0f; // 10 extra padding
-            
-            // Render keybindings with aligned columns
-            std::string lastCategory;
-            bool leaderboardScannerHeaderShown = false;
-            for (size_t i = 0; i < m_keybindingItems.size(); i++) {
-                auto& item = m_keybindingItems[i];
-                
-                // Check if this is one of the control buttons at the end (Save as Default or Reset All)
-                if (i >= m_keybindingItems.size() - 2) {
-                    item->Render();
-                    if (i < m_keybindingItems.size() - 1) {
-                        ImGui::SameLine();
-                    }
-                    continue;
-                }
-                
+            float actionColumnWidth = maxActionWidth + 24.0f;
+            float keybindingButtonWidth = maxKeyWidth + buttonPadding + 24.0f;
+            if (keybindingButtonWidth < 110.0f) {
+                keybindingButtonWidth = 110.0f;
+            }
+            float gamepadButtonWidth = 150.0f;
+            ImGuiTableFlags tableFlags =
+                ImGuiTableFlags_BordersV |
+                ImGuiTableFlags_BordersOuter |
+                ImGuiTableFlags_RowBg |
+                ImGuiTableFlags_Resizable |
+                ImGuiTableFlags_ScrollY;
+
+            if (ImGui::BeginTable("KeybindingsTable", 6, tableFlags, ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing() * 2.0f))) {
+                ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, actionColumnWidth);
+                ImGui::TableSetupColumn("Keyboard", ImGuiTableColumnFlags_WidthFixed, keybindingButtonWidth);
+                ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 58.0f);
+                ImGui::TableSetupColumn("Gamepad", ImGuiTableColumnFlags_WidthFixed, gamepadButtonWidth);
+                ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 58.0f);
+                ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupScrollFreeze(0, 1);
+                ImGui::TableHeadersRow();
+
+                // Render keybindings with aligned columns
+                std::string lastCategory;
+                bool leaderboardScannerHeaderShown = false;
+                for (size_t i = 0; i < numKeybinds; i++) {
+                    auto& item = m_keybindingItems[i];
+
                 // Get info for this keybinding
                 Keybindings::Action action = m_keybindingActions[i];
                 std::string category = GetKeybindingCategory(action);
@@ -1751,12 +7429,9 @@ void DevMenu::Render() {
                     if (category == "Leaderboard Scanner Controls" && leaderboardScannerHeaderShown) {
                         // Keep the scanner rows together under the first header only.
                     } else {
-                        if (i != 0) {
-                            ImGui::Spacing();
-                        }
-                        ImGui::Separator();
+                        ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(0);
                         ImGui::TextDisabled("%s", category.c_str());
-                        ImGui::Separator();
                         if (category == "Leaderboard Scanner Controls") {
                             leaderboardScannerHeaderShown = true;
                         }
@@ -1767,39 +7442,38 @@ void DevMenu::Render() {
                 std::string keyName = Keybindings::GetKeyName(Keybindings::GetKey(action));
                 int currentKey = Keybindings::GetKey(action);
                 int defaultKey = m_keybindingDefaults[i];
-                
+                int currentGamepadButton = Keybindings::GetGamepadButton(action);
+                int defaultGamepadButton = i < m_gamepadBindingDefaults.size() ? m_gamepadBindingDefaults[i] : 0;
+                std::string gamepadButtonName = Keybindings::GetGamepadButtonName(currentGamepadButton);
+
                 // Check if the button is in "waiting for key" mode by checking its actual name
                 std::string buttonName = item->GetName();
                 bool isWaitingForKey = (buttonName.find("Press any key...") != std::string::npos);
-                
+                bool isWaitingForGamepad = g_waitingForGamepadBind && g_waitingGamepadAction == action;
+
                 // Check if this key is bound to multiple actions
                 bool isOverbound = (keyUsageCount[currentKey] > 1);
                 bool isUnbound = (currentKey == 0);
-                
+                bool isGamepadOverbound = (gamepadUsageCount[currentGamepadButton] > 1);
+                bool isGamepadUnbound = (currentGamepadButton == 0);
+
                 // Build the button label
                 std::string buttonLabel;
                 if (isWaitingForKey) {
                     // Show "Press any key..." message when rebinding
                     buttonLabel = "Press any key...##bind" + std::to_string(i);
                 } else {
-                    // Build button label with fixed-width action name for alignment
-                    // Pad the action name to ensure consistent spacing
-                    std::string paddedActionName = actionName;
-                    float actionTextWidth = ImGui::CalcTextSize(actionName.c_str()).x;
-                    float paddingNeeded = maxActionWidth - actionTextWidth;
-                    
-                    // Calculate number of spaces needed (approximate, using average char width)
-                    int numSpaces = (int)(paddingNeeded / ImGui::CalcTextSize(" ").x);
-                    for (int s = 0; s < numSpaces; s++) {
-                        paddedActionName += " ";
-                    }
-                    
-                    buttonLabel = paddedActionName + ": " + keyName + "##bind" + std::to_string(i);
+                    buttonLabel = keyName + "##bind" + std::to_string(i);
                 }
-                
+
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("%s", actionName.c_str());
+                ImGui::TableSetColumnIndex(1);
+
                 // Render the button with fixed width and left-aligned text
                 ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f)); // 0.0 = left align, 0.5 = vertical center
-                
+
                 // Show visual indicator when waiting for key press, if key is overbound, or if unbound
                 if (isWaitingForKey) {
                     // Use a different color to indicate we're waiting for input
@@ -1817,14 +7491,14 @@ void DevMenu::Render() {
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.45f, 0.45f, 0.45f, 1.0f));
                     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.25f, 0.25f, 0.25f, 1.0f));
                 }
-                
+
                 if (ImGui::Button(buttonLabel.c_str(), ImVec2(keybindingButtonWidth, 0))) {
                     // Trigger the keybinding capture callback
                     if (auto btn = std::dynamic_pointer_cast<TweakableButton>(item)) {
                         btn->TriggerClick();
                     }
                 }
-                
+
                 // Add tooltip for overbound keys and unbound keys
                 if (isOverbound && !isWaitingForKey) {
                     if (ImGui::IsItemHovered()) {
@@ -1835,51 +7509,119 @@ void DevMenu::Render() {
                         ImGui::SetTooltip("This action is currently unbound.");
                     }
                 }
-                
+
                 if (isWaitingForKey || isOverbound || isUnbound) {
                     ImGui::PopStyleColor(3); // Pop the 3 color overrides
                 }
-                
+
                 ImGui::PopStyleVar(); // Restore previous alignment
-                
-                // Add individual buttons next to it
-                ImGui::SameLine();
-                
-                // Only show Reset and Save as Default buttons if current key differs from default
+
+                ImGui::TableSetColumnIndex(2);
                 if (currentKey != defaultKey) {
-                    std::string saveLabel = "Save##" + std::to_string(i);
-                    if (ImGui::SmallButton(saveLabel.c_str())) {
-                        // Save this specific keybinding as the new default (updates the stored default)
-                        m_keybindingDefaults[i] = currentKey;
-                        Keybindings::SaveToFile();
-                        LOG_VERBOSE("[DevMenu] Saved " << actionName << " = " << keyName << " as default");
-                    }
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Save as Default");
-                    }
-                    
-                    ImGui::SameLine();
-                    
-                    std::string resetLabel = "Reset##" + std::to_string(i);
-                    if (ImGui::SmallButton(resetLabel.c_str())) {
-                        // Reset this specific keybinding to default
+                    std::string resetKeyboardLabel = "Reset##keyreset" + std::to_string(i);
+                    if (ImGui::SmallButton(resetKeyboardLabel.c_str())) {
                         Keybindings::SetKey(action, defaultKey);
                         std::string newKeyName = Keybindings::GetKeyName(defaultKey);
                         item->SetName("Bind " + actionName + ": " + newKeyName);
-                        LOG_VERBOSE("[DevMenu] Reset " << actionName << " to default: " << newKeyName);
+                        LOG_VERBOSE("[DevMenu] Reset keyboard bind for " << actionName << " to default: " << newKeyName);
                     }
                     if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Reset to Default");
+                        ImGui::SetTooltip("Reset keyboard bind to default");
                     }
                 } else {
-                    // Show disabled text to maintain alignment
+                    ImGui::TextDisabled("Reset");
+                }
+
+                ImGui::TableSetColumnIndex(3);
+
+                std::string gamepadLabel = isWaitingForGamepad
+                    ? "Press gamepad...##padbind" + std::to_string(i)
+                    : gamepadButtonName + "##padbind" + std::to_string(i);
+
+                ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f));
+                if (isWaitingForGamepad) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 0.3f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.4f, 0.7f, 0.4f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.2f, 0.5f, 0.2f, 1.0f));
+                } else if (isGamepadOverbound) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.3f, 0.3f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.7f, 0.1f, 0.1f, 1.0f));
+                } else if (isGamepadUnbound) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.35f, 0.35f, 0.35f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.45f, 0.45f, 0.45f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.25f, 0.25f, 0.25f, 1.0f));
+                }
+
+                if (ImGui::Button(gamepadLabel.c_str(), ImVec2(gamepadButtonWidth, 0))) {
+                    g_waitingForGamepadBind = true;
+                    g_gamepadCaptureReady = false;
+                    g_waitingGamepadAction = action;
+                    LOG_VERBOSE("[DevMenu] Waiting for gamepad button to bind " << actionName << "...");
+                }
+
+                if (isWaitingForGamepad || isGamepadOverbound || isGamepadUnbound) {
+                    ImGui::PopStyleColor(3);
+                }
+                ImGui::PopStyleVar();
+
+                if (ImGui::IsItemHovered()) {
+                    if (isGamepadOverbound && !isWaitingForGamepad) {
+                        ImGui::SetTooltip("WARNING: This gamepad button is bound to multiple actions!");
+                    } else if (isGamepadUnbound && !isWaitingForGamepad) {
+                        ImGui::SetTooltip("This action has no gamepad bind. Press Esc while waiting to clear.");
+                    } else {
+                        ImGui::SetTooltip("Secondary gamepad bind. Press Esc while waiting to clear.");
+                    }
+                }
+
+                ImGui::TableSetColumnIndex(4);
+                if (currentGamepadButton != defaultGamepadButton) {
+                    std::string resetGamepadLabel = "Reset##padreset" + std::to_string(i);
+                    if (ImGui::SmallButton(resetGamepadLabel.c_str())) {
+                        Keybindings::SetGamepadButton(action, defaultGamepadButton);
+                        LOG_VERBOSE("[DevMenu] Reset gamepad bind for " << actionName
+                            << " to default: " << Keybindings::GetGamepadButtonName(defaultGamepadButton));
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Reset gamepad bind to default");
+                    }
+                } else {
+                    ImGui::TextDisabled("Reset");
+                }
+
+                ImGui::TableSetColumnIndex(5);
+                if (currentKey != defaultKey || currentGamepadButton != defaultGamepadButton) {
+                    std::string saveLabel = "Save##" + std::to_string(i);
+                    if (ImGui::SmallButton(saveLabel.c_str())) {
+                        m_keybindingDefaults[i] = currentKey;
+                        if (i < m_gamepadBindingDefaults.size()) {
+                            m_gamepadBindingDefaults[i] = currentGamepadButton;
+                        }
+                        Keybindings::SaveToFile();
+                        LOG_VERBOSE("[DevMenu] Saved " << actionName << " = " << keyName
+                            << ", gamepad = " << gamepadButtonName << " as default");
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Save both binds as default");
+                    }
+                } else {
                     ImGui::TextDisabled("(default)");
+                }
+            }
+                ImGui::EndTable();
+            }
+
+            for (size_t i = numKeybinds; i < m_keybindingItems.size(); i++) {
+                m_keybindingItems[i]->Render();
+                if (i < m_keybindingItems.size() - 1) {
+                    ImGui::SameLine();
                 }
             }
         }
         ImGui::End();
     }
-    
+
     // Early return if main dev menu is not visible
     if (!m_isVisible) {
         return;
@@ -1918,7 +7660,7 @@ void DevMenu::Render() {
             }
             ImGui::EndMenu();
         }
-        
+
         // Keybindings menu
         if (ImGui::BeginMenu("Keybindings")) {
             ImGui::MenuItem("Show Keybindings Window", nullptr, &m_showKeybindingsWindow);
@@ -4843,27 +10585,35 @@ void DevMenu::InitializeMod() {
     const float totalButtonsWidth = 316.0f;
 
     // ============================================================================
-    // Appearance Subcategory
+    // Gear Customization Subcategory
     // ============================================================================
-    auto appearanceFolder = std::make_shared<TweakableFolder>(10070, "Appearance");
-
-    auto tireColor = std::make_shared<TweakableTireColor>(
-        10071,
-        "Tire Color"
-    );
-    RegisterTweakable(tireColor);
-    appearanceFolder->AddChild(tireColor);
+    auto appearanceFolder = std::make_shared<TweakableFolder>(10070, "Gear Customization");
 
     auto appearanceReload = std::make_shared<TweakableAppearanceReload>(
         10072,
         "Rider / Bike Tint Refresh"
     );
+    m_appearanceReload = appearanceReload;
     RegisterTweakable(appearanceReload);
     appearanceFolder->AddChild(appearanceReload);
 
     RegisterTweakable(appearanceFolder);
-    mod->AddChild(appearanceFolder);
 
+    // ============================================================================
+    // Editor Subcategory
+    // ============================================================================
+    auto editorFolder = std::make_shared<TweakableFolder>(10180, "Editor");
+
+    auto editorInspector = std::make_shared<TweakableEditorInspector>(
+        10181,
+        "Selected Object Inspector"
+    );
+    RegisterTweakable(editorInspector);
+    editorFolder->AddChild(editorInspector);
+
+    RegisterTweakable(editorFolder);
+
+#ifdef DEVELOPMENT_MODE
     // ============================================================================
     // UI / AVM1 Discovery Subcategory
     // ============================================================================
@@ -4877,12 +10627,12 @@ void DevMenu::InitializeMod() {
     uiExplorerFolder->AddChild(uiExplorer);
 
     RegisterTweakable(uiExplorerFolder);
-    mod->AddChild(uiExplorerFolder);
+#endif
 
     // ============================================================================
-    // FMOD Subcategory
+    // Audio Subcategory
     // ============================================================================
-    auto fmodFolder = std::make_shared<TweakableFolder>(10090, "FMOD");
+    auto fmodFolder = std::make_shared<TweakableFolder>(10090, "Audio");
 
     auto fmodControls = std::make_shared<TweakableFmodControls>(
         10091,
@@ -4892,16 +10642,15 @@ void DevMenu::InitializeMod() {
     fmodFolder->AddChild(fmodControls);
 
     RegisterTweakable(fmodFolder);
-    mod->AddChild(fmodFolder);
 
     // ============================================================================
     // Checkpoint Subcategory
     // ============================================================================
     auto checkpointFolder = std::make_shared<TweakableFolder>(10040, "Checkpoint");
-    
+
     // Respawn buttons (aligned in a single row with fixed width)
     const float buttonWidth = 100.0f;  // Fixed width for all three buttons
-    
+
     // Previous Checkpoint
     auto respawnPrev = std::make_shared<TweakableButton>(
         10004,
@@ -4945,7 +10694,7 @@ void DevMenu::InitializeMod() {
     // Total width of three buttons = 100px * 3 = 300px, plus spacing (approx 8px per gap)
     // Using totalButtonsWidth already defined above (316.0f)
     const float sliderWidth = totalButtonsWidth - buttonWidth - 8.0f;  // 208px (316 - 100 - 8)
-    
+
     g_checkpointIndexSlider = std::make_shared<TweakableInt>(
         10005,
         "Select Checkpoint Index",
@@ -4966,20 +10715,20 @@ void DevMenu::InitializeMod() {
     goToCheckpointButton->SetOnClickCallback([]() {
         int selectedIndex = g_checkpointIndexSlider->GetValue();
         int checkpointCount = Respawn::GetCheckpointCount();
-        
+
         // Update slider range in case track changed
         if (checkpointCount > 0) {
             g_checkpointIndexSlider->SetRange(0, checkpointCount - 1);
             std::string label = "Select Checkpoint (0-" + std::to_string(checkpointCount - 1) + ")";
             g_checkpointIndexSlider->SetName(label);
-            
+
             // Clamp selected index to valid range
             if (selectedIndex >= checkpointCount) {
                 selectedIndex = checkpointCount - 1;
                 g_checkpointIndexSlider->SetValue(selectedIndex);
             }
         }
-        
+
         // Check if user selected the last checkpoint (finish line)
         if (selectedIndex == checkpointCount - 1 && checkpointCount > 0) {
             LOG_INFO("[DevMenu] Last checkpoint selected - using SafeInstantFinish");
@@ -5010,10 +10759,8 @@ void DevMenu::InitializeMod() {
     g_checkpointIndexSlider->SetRenderInline(true);  // Render inline with GO button
     RegisterTweakable(g_checkpointIndexSlider);
     checkpointFolder->AddChild(g_checkpointIndexSlider);
-    
-    // Register and add checkpoint folder to mod
+
     RegisterTweakable(checkpointFolder);
-    mod->AddChild(checkpointFolder);
 
 
 
@@ -5023,7 +10770,7 @@ void DevMenu::InitializeMod() {
     // Fault/Time Subcategory
     // ============================================================================
     auto faultTimeFolder = std::make_shared<TweakableFolder>(10050, "Fault/Time");
-    
+
     // Toggle Fault Limit
     g_toggleFaultLimitButton = std::make_shared<TweakableButton>(
         10006,
@@ -5076,7 +10823,7 @@ void DevMenu::InitializeMod() {
             Limits::DisableTimeCompletionCheck2();   // And the second time check
             LOG_INFO("[DevMenu] Time limit DISABLED!");
         }
-        
+
         // Note: Button label will be updated automatically in Render() function
     });
     RegisterTweakable(g_toggleTimeLimitButton);
@@ -5172,10 +10919,10 @@ void DevMenu::InitializeMod() {
     faultTimeFolder->AddChild(timeAdjust);
 
     // Instant Actions Label and Buttons
-    
+
     // Calculate width for inline buttons (3 buttons fitting in totalButtonsWidth)
     const float instantButtonWidth = (totalButtonsWidth - 16.0f) / 3.0f;  // Account for spacing
-    
+
     // Instant Time Out (30 minutes) - Trigger instant timeout finish
     auto instantTimeOut = std::make_shared<TweakableButton>(
         10013,
@@ -5188,7 +10935,7 @@ void DevMenu::InitializeMod() {
     });
     RegisterTweakable(instantTimeOut);
     faultTimeFolder->AddChild(instantTimeOut);
-    
+
     // Instant Fault Out (500 faults) - Trigger instant fault out finish
     auto instantFaultOut = std::make_shared<TweakableButton>(
         10012,
@@ -5236,19 +10983,18 @@ void DevMenu::InitializeMod() {
     RegisterTweakable(preventFinishLabel);
     faultTimeFolder->AddChild(preventFinishLabel);
     g_preventFinishLabel = preventFinishLabel;
-    
-    // Register and add fault/time folder to mod
+
     RegisterTweakable(faultTimeFolder);
-    mod->AddChild(faultTimeFolder);
 
 
+#ifdef DEVELOPMENT_MODE
     // ============================================================================
     // Host-Join Controls
     // ============================================================================
 
     // Create a subfolder for Host-Join controls
     auto hostJoinFolder = std::make_shared<TweakableFolder>(10030, "Host-Join (Private Match)");
-    
+
     // Scan for Session ID button
     auto scanSessionIdBtn = std::make_shared<TweakableButton>(
         10036,
@@ -5267,7 +11013,7 @@ void DevMenu::InitializeMod() {
     });
     RegisterTweakable(scanSessionIdBtn);
     hostJoinFolder->AddChild(scanSessionIdBtn);
-    
+
     // Show Current Session ID button
     auto showSessionIdBtn = std::make_shared<TweakableButton>(
         10031,
@@ -5284,7 +11030,7 @@ void DevMenu::InitializeMod() {
     });
     RegisterTweakable(showSessionIdBtn);
     hostJoinFolder->AddChild(showSessionIdBtn);
-    
+
     // Copy Session ID to Clipboard button
     auto copySessionIdBtn = std::make_shared<TweakableButton>(
         10032,
@@ -5299,7 +11045,7 @@ void DevMenu::InitializeMod() {
     });
     RegisterTweakable(copySessionIdBtn);
     hostJoinFolder->AddChild(copySessionIdBtn);
-    
+
     // Paste Session ID from Clipboard button
     auto pasteSessionIdBtn = std::make_shared<TweakableButton>(
         10033,
@@ -5315,7 +11061,7 @@ void DevMenu::InitializeMod() {
     });
     RegisterTweakable(pasteSessionIdBtn);
     hostJoinFolder->AddChild(pasteSessionIdBtn);
-    
+
     // Join Session button
     auto joinSessionBtn = std::make_shared<TweakableButton>(
         10034,
@@ -5336,7 +11082,7 @@ void DevMenu::InitializeMod() {
     });
     RegisterTweakable(joinSessionBtn);
     hostJoinFolder->AddChild(joinSessionBtn);
-    
+
     // Show Host-Join Status button
     auto showStatusBtn = std::make_shared<TweakableButton>(
         10035,
@@ -5351,19 +11097,19 @@ void DevMenu::InitializeMod() {
     });
     RegisterTweakable(showStatusBtn);
     hostJoinFolder->AddChild(showStatusBtn);
-    
+
     RegisterTweakable(hostJoinFolder);
-    mod->AddChild(hostJoinFolder);
+#endif
 
     // ============================================================================
     // Currency Subcategory
     // ============================================================================
     auto currencyFolder = std::make_shared<TweakableFolder>(10060, "Currency");
-    
+
     // ============================================================================
     // ROW 1: Get Balance Button
     // ============================================================================
-    
+
     // Get Money Balance Button
     auto getMoneyBalanceButton = std::make_shared<TweakableButton>(
         10021,
@@ -5385,7 +11131,7 @@ void DevMenu::InitializeMod() {
     // ============================================================================
     // ROW 2: Amount Slider
     // ============================================================================
-    
+
     // Money Amount Slider
     auto moneyAmount = std::make_shared<TweakableInt>(
         10022,
@@ -5403,7 +11149,7 @@ void DevMenu::InitializeMod() {
     // ============================================================================
     // ROW 3: Add Button
     // ============================================================================
-    
+
     // Add Money Button
     auto addMoneyButton = std::make_shared<TweakableButton>(
         10023,
@@ -5414,7 +11160,7 @@ void DevMenu::InitializeMod() {
     addMoneyButton->SetOnClickCallback([moneyAmount]() {
         int amount = moneyAmount->GetValue();
         LOG_INFO("[DevMenu] Adding " << amount << " money to player balance");
-        
+
         if (Money::AddToBalance(amount)) {
             LOG_INFO("[DevMenu] Successfully added " << amount << " money!");
         } else {
@@ -5423,10 +11169,36 @@ void DevMenu::InitializeMod() {
     });
     RegisterTweakable(addMoneyButton);
     currencyFolder->AddChild(addMoneyButton);
-    
-    // Register and add currency folder to mod
+
     RegisterTweakable(currencyFolder);
+
+    // ============================================================================
+    // Files Subcategory
+    // ============================================================================
+    auto filesFolder = std::make_shared<TweakableFolder>(10190, "Files");
+
+    auto unlockItemsButton = std::make_shared<TweakableFileUnlockControls>(
+        10191,
+        "Unlock All Items"
+    );
+    RegisterTweakable(unlockItemsButton);
+    filesFolder->AddChild(unlockItemsButton);
+
+    RegisterTweakable(filesFolder);
+
+    mod->AddChild(appearanceFolder);
+    mod->AddChild(editorFolder);
+    mod->AddChild(fmodFolder);
+    mod->AddChild(checkpointFolder);
     mod->AddChild(currencyFolder);
+    mod->AddChild(faultTimeFolder);
+    mod->AddChild(filesFolder);
+#ifdef DEVELOPMENT_MODE
+    mod->AddChild(hostJoinFolder);
+#endif
+#ifdef DEVELOPMENT_MODE
+    mod->AddChild(uiExplorerFolder);
+#endif
 
     RegisterTweakable(mod);
     m_rootFolders.push_back(mod);
@@ -5442,6 +11214,32 @@ struct KeybindThreadData {
     bool* waitingFlag;
 };
 
+static void UpdateGamepadBindingCapture() {
+    if (!g_waitingForGamepadBind) {
+        return;
+    }
+
+    if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
+        Keybindings::SetGamepadButton(g_waitingGamepadAction, 0);
+        LOG_VERBOSE("[DevMenu] Cleared gamepad bind for " << Keybindings::GetActionName(g_waitingGamepadAction));
+        g_waitingForGamepadBind = false;
+        return;
+    }
+
+    int pressedButton = Keybindings::GetPressedGamepadButton();
+    if (!g_gamepadCaptureReady) {
+        g_gamepadCaptureReady = pressedButton == 0;
+        return;
+    }
+
+    if (pressedButton != 0) {
+        Keybindings::SetGamepadButton(g_waitingGamepadAction, pressedButton);
+        LOG_VERBOSE("[DevMenu] " << Keybindings::GetActionName(g_waitingGamepadAction)
+            << " gamepad bound to: " << Keybindings::GetGamepadButtonName(pressedButton));
+        g_waitingForGamepadBind = false;
+    }
+}
+
 // Helper function to create a keybinding button
 static std::shared_ptr<TweakableButton> CreateKeybindButton(
     int id,
@@ -5451,25 +11249,25 @@ static std::shared_ptr<TweakableButton> CreateKeybindButton(
 {
     auto button = std::make_shared<TweakableButton>(
         id,
-        "Bind " + Keybindings::GetActionName(action) + ": " + 
+        "Bind " + Keybindings::GetActionName(action) + ": " +
         Keybindings::GetKeyName(Keybindings::GetKey(action))
     );
-    
+
     button->SetOnClickCallback([button, action, waitingFlag]() {
         *waitingFlag = true;
         button->SetName("Press any key... (Esc to clear)");
         LOG_VERBOSE("[DevMenu] Waiting for key press to bind " << Keybindings::GetActionName(action) << "...");
-        
+
         // Create thread data
         KeybindThreadData* data = new KeybindThreadData;
         data->button = button.get();
         data->action = action;
         data->waitingFlag = waitingFlag;
-        
+
         // Start a thread to capture the key press
         CreateThread(NULL, 0, [](LPVOID param) -> DWORD {
             KeybindThreadData* data = (KeybindThreadData*)param;
-            
+
             // Wait for any key press
             while (*data->waitingFlag) {
                 for (int vk = 0x08; vk <= 0xFE; vk++) {
@@ -5478,13 +11276,13 @@ static std::shared_ptr<TweakableButton> CreateKeybindButton(
                         vk == VK_XBUTTON1 || vk == VK_XBUTTON2) {
                         continue;
                     }
-                    
+
                     if (GetAsyncKeyState(vk) & 0x8000) {
                         // Wait for key release
                         while (GetAsyncKeyState(vk) & 0x8000) {
                             Sleep(10);
                         }
-                        
+
                         // Esc clears the binding instead of assigning a key
                         int newKey = (vk == VK_ESCAPE) ? 0 : vk;
                         Keybindings::SetKey(data->action, newKey);
@@ -5506,7 +11304,7 @@ static std::shared_ptr<TweakableButton> CreateKeybindButton(
             return 0;
         }, data, 0, NULL);
     });
-    
+
     return button;
 }
 
@@ -5559,21 +11357,24 @@ void DevMenu::InitializeKeybindings() {
     static bool waitingForSwapNextBike = false;
     static bool waitingForSwapPrevBike = false;
     static bool waitingForDebugBikeInfo = false;
+    static bool waitingForEditorScaleDecrease = false;
+    static bool waitingForEditorScaleIncrease = false;
     static bool waitingForToggleConsole = false;
-    
+
     // Clear the action and default vectors in case of re-initialization
     m_keybindingActions.clear();
     m_keybindingDefaults.clear();
-    
+    m_gamepadBindingDefaults.clear();
+
     // === General Controls ===
-    
+
     // Toggle Dev Menu
     auto toggleDevMenuBtn = CreateKeybindButton(10101, Keybindings::Action::ToggleDevMenu, &waitingForToggleDevMenu, this);
     RegisterTweakable(toggleDevMenuBtn);
     m_keybindingItems.push_back(toggleDevMenuBtn);
     m_keybindingActions.push_back(Keybindings::Action::ToggleDevMenu);
     m_keybindingDefaults.push_back(VK_F2);
-    
+
     // Toggle Keybindings Menu
     auto toggleKeybindingsMenuBtn = CreateKeybindButton(10100, Keybindings::Action::ToggleKeybindingsMenu, &waitingForToggleKeybindingsMenu, this);
     RegisterTweakable(toggleKeybindingsMenuBtn);
@@ -5596,7 +11397,7 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingActions.push_back(Keybindings::Action::ToggleConsole);
     m_keybindingDefaults.push_back(VK_F11);
 #endif
-    
+
 #ifndef RELEASE_AUTOLOAD_MODE
     // Clear Console
     auto clearConsoleBtn = CreateKeybindButton(10102, Keybindings::Action::ClearConsole, &waitingForClearConsole, this);
@@ -5605,14 +11406,14 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingActions.push_back(Keybindings::Action::ClearConsole);
     m_keybindingDefaults.push_back('C');
 #endif
-    
+
     // Toggle Verbose Logging
     auto toggleVerboseBtn = CreateKeybindButton(10103, Keybindings::Action::ToggleVerboseLogging, &waitingForToggleVerbose, this);
     RegisterTweakable(toggleVerboseBtn);
     m_keybindingItems.push_back(toggleVerboseBtn);
     m_keybindingActions.push_back(Keybindings::Action::ToggleVerboseLogging);
     m_keybindingDefaults.push_back('L');
-    
+
 #ifndef RELEASE_AUTOLOAD_MODE
     // Show Help Text
     auto showHelpBtn = CreateKeybindButton(10104, Keybindings::Action::ShowHelpText, &waitingForShowHelp, this);
@@ -5620,7 +11421,7 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(showHelpBtn);
     m_keybindingActions.push_back(Keybindings::Action::ShowHelpText);
     m_keybindingDefaults.push_back(VK_OEM_MINUS);
-    
+
     // Dump Tweakables
     auto dumpTweakablesBtn = CreateKeybindButton(10105, Keybindings::Action::DumpTweakables, &waitingForDumpTweakables, this);
     RegisterTweakable(dumpTweakablesBtn);
@@ -5628,30 +11429,30 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingActions.push_back(Keybindings::Action::DumpTweakables);
     m_keybindingDefaults.push_back('D');
 #endif
-    
+
     // === Respawn Controls ===
-    
+
     // Respawn At Checkpoint
     auto respawnAtCheckpointBtn = CreateKeybindButton(10108, Keybindings::Action::RespawnAtCheckpoint, &waitingForRespawnAtCheckpoint, this);
     RegisterTweakable(respawnAtCheckpointBtn);
     m_keybindingItems.push_back(respawnAtCheckpointBtn);
     m_keybindingActions.push_back(Keybindings::Action::RespawnAtCheckpoint);
     m_keybindingDefaults.push_back('W');
-    
+
     // Respawn Prev Checkpoint
     auto respawnPrevCheckpointBtn = CreateKeybindButton(10109, Keybindings::Action::RespawnPrevCheckpoint, &waitingForRespawnPrevCheckpoint, this);
     RegisterTweakable(respawnPrevCheckpointBtn);
     m_keybindingItems.push_back(respawnPrevCheckpointBtn);
     m_keybindingActions.push_back(Keybindings::Action::RespawnPrevCheckpoint);
     m_keybindingDefaults.push_back('Q');
-    
+
     // Respawn Next Checkpoint
     auto respawnNextCheckpointBtn = CreateKeybindButton(10110, Keybindings::Action::RespawnNextCheckpoint, &waitingForRespawnNextCheckpoint, this);
     RegisterTweakable(respawnNextCheckpointBtn);
     m_keybindingItems.push_back(respawnNextCheckpointBtn);
     m_keybindingActions.push_back(Keybindings::Action::RespawnNextCheckpoint);
     m_keybindingDefaults.push_back('E');
-    
+
     // Respawn Forward 5
     auto respawnForward5Btn = CreateKeybindButton(10111, Keybindings::Action::RespawnForward5, &waitingForRespawnForward5, this);
     RegisterTweakable(respawnForward5Btn);
@@ -5665,8 +11466,15 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(instantFinishBtn);
     m_keybindingActions.push_back(Keybindings::Action::InstantFinish);
     m_keybindingDefaults.push_back('F');
-    
-    // === Fault Controls ===
+
+    // === Fault / Time / Limit Controls ===
+    // Toggle Limit Validation
+    auto toggleLimitValidationBtn = CreateKeybindButton(10125, Keybindings::Action::ToggleLimitValidation, &waitingForToggleLimitValidation, this);
+    RegisterTweakable(toggleLimitValidationBtn);
+    m_keybindingItems.push_back(toggleLimitValidationBtn);
+    m_keybindingActions.push_back(Keybindings::Action::ToggleLimitValidation);
+    m_keybindingDefaults.push_back(VK_F3);
+
     // Reset Faults
     auto resetFaultsBtn = CreateKeybindButton(10116, Keybindings::Action::ResetFaults, &waitingForResetFaults, this);
     RegisterTweakable(resetFaultsBtn);
@@ -5680,9 +11488,9 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(resetTimeBtn);
     m_keybindingActions.push_back(Keybindings::Action::ResetTime);
     m_keybindingDefaults.push_back('2');
-    
+
     // === Time Controls ===
-    
+
 #ifdef DEVELOPMENT_MODE
     // Debug Time Counter
     auto debugTimeCounterBtn = CreateKeybindButton(10117, Keybindings::Action::DebugTimeCounter, &waitingForDebugTimeCounter, this);
@@ -5719,38 +11527,29 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(subtract100FaultsBtn);
     m_keybindingActions.push_back(Keybindings::Action::Subtract100Faults);
     m_keybindingDefaults.push_back(0);
-    
+
     // Add 10 Seconds
     auto add10SecondsBtn = CreateKeybindButton(10118, Keybindings::Action::Add60Seconds, &waitingForAdd10Seconds, this);
     RegisterTweakable(add10SecondsBtn);
     m_keybindingItems.push_back(add10SecondsBtn);
     m_keybindingActions.push_back(Keybindings::Action::Add60Seconds);
     m_keybindingDefaults.push_back(0);
-    
+
     // Subtract 10 Seconds
     auto subtract10SecondsBtn = CreateKeybindButton(10119, Keybindings::Action::Subtract60Seconds, &waitingForSubtract10Seconds, this);
     RegisterTweakable(subtract10SecondsBtn);
     m_keybindingItems.push_back(subtract10SecondsBtn);
     m_keybindingActions.push_back(Keybindings::Action::Subtract60Seconds);
     m_keybindingDefaults.push_back(0);
-    
+
     // Add 1 Minute
     auto add1MinuteBtn = CreateKeybindButton(10120, Keybindings::Action::Add10Minute, &waitingForAdd1Minute, this);
     RegisterTweakable(add1MinuteBtn);
     m_keybindingItems.push_back(add1MinuteBtn);
     m_keybindingActions.push_back(Keybindings::Action::Add10Minute);
     m_keybindingDefaults.push_back(0);
-    
-    // === Limit Controls ===
-    // Toggle Limit Validation
-    auto toggleLimitValidationBtn = CreateKeybindButton(10125, Keybindings::Action::ToggleLimitValidation, &waitingForToggleLimitValidation, this);
-    RegisterTweakable(toggleLimitValidationBtn);
-    m_keybindingItems.push_back(toggleLimitValidationBtn);
-    m_keybindingActions.push_back(Keybindings::Action::ToggleLimitValidation);
-    m_keybindingDefaults.push_back(VK_F3);
-
     // === Pause Controls ===
-    
+
     // Toggle Pause
     auto togglePauseBtn = CreateKeybindButton(10126, Keybindings::Action::TogglePause, &waitingForTogglePause, this);
     RegisterTweakable(togglePauseBtn);
@@ -5758,8 +11557,8 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingActions.push_back(Keybindings::Action::TogglePause);
     m_keybindingDefaults.push_back('P');
 
-    // === Camera Controls ===
-    
+    // === Replay Controls ===
+
     // Cycle HUD Visibility
     auto CycleHUDBtn = CreateKeybindButton(10107, Keybindings::Action::CycleHUD, &waitingForCycleHUD, this);
     RegisterTweakable(CycleHUDBtn);
@@ -5791,68 +11590,90 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingActions.push_back(Keybindings::Action::DebugBikeInfo);
     m_keybindingDefaults.push_back(VK_F9);
 #endif
-    
+
+    // === Editor Controls ===
+
+    auto editorScaleDecreaseBtn = CreateKeybindButton(
+        10182,
+        Keybindings::Action::EditorScaleDecrease,
+        &waitingForEditorScaleDecrease,
+        this);
+    RegisterTweakable(editorScaleDecreaseBtn);
+    m_keybindingItems.push_back(editorScaleDecreaseBtn);
+    m_keybindingActions.push_back(Keybindings::Action::EditorScaleDecrease);
+    m_keybindingDefaults.push_back(0);
+
+    auto editorScaleIncreaseBtn = CreateKeybindButton(
+        10183,
+        Keybindings::Action::EditorScaleIncrease,
+        &waitingForEditorScaleIncrease,
+        this);
+    RegisterTweakable(editorScaleIncreaseBtn);
+    m_keybindingItems.push_back(editorScaleIncreaseBtn);
+    m_keybindingActions.push_back(Keybindings::Action::EditorScaleIncrease);
+    m_keybindingDefaults.push_back(0);
+
     // === Track Central Auto-Scroll Controls ===
-    
+
     // Start Auto Scroll
     auto startAutoScrollBtn = CreateKeybindButton(10129, Keybindings::Action::StartAutoScroll, &waitingForStartAutoScroll, this);
     RegisterTweakable(startAutoScrollBtn);
     m_keybindingItems.push_back(startAutoScrollBtn);
     m_keybindingActions.push_back(Keybindings::Action::StartAutoScroll);
     m_keybindingDefaults.push_back(VK_F5);
-    
+
     // Killswitch
     auto killswitchBtn = CreateKeybindButton(10130, Keybindings::Action::Killswitch, &waitingForKillswitch, this);
     RegisterTweakable(killswitchBtn);
     m_keybindingItems.push_back(killswitchBtn);
     m_keybindingActions.push_back(Keybindings::Action::Killswitch);
     m_keybindingDefaults.push_back(VK_F6);
-    
+
     // Cycle Search
     auto cycleSearchBtn = CreateKeybindButton(10131, Keybindings::Action::CycleSearch, &waitingForCycleSearch, this);
     RegisterTweakable(cycleSearchBtn);
     m_keybindingItems.push_back(cycleSearchBtn);
     m_keybindingActions.push_back(Keybindings::Action::CycleSearch);
     m_keybindingDefaults.push_back(VK_F7);
-    
+
     // Decrease Scroll Delay
     auto decreaseScrollDelayBtn = CreateKeybindButton(10132, Keybindings::Action::DecreaseScrollDelay, &waitingForDecreaseScrollDelay, this);
     RegisterTweakable(decreaseScrollDelayBtn);
     m_keybindingItems.push_back(decreaseScrollDelayBtn);
     m_keybindingActions.push_back(Keybindings::Action::DecreaseScrollDelay);
     m_keybindingDefaults.push_back(VK_INSERT);
-    
+
     // Increase Scroll Delay
     auto increaseScrollDelayBtn = CreateKeybindButton(10133, Keybindings::Action::IncreaseScrollDelay, &waitingForIncreaseScrollDelay, this);
     RegisterTweakable(increaseScrollDelayBtn);
     m_keybindingItems.push_back(increaseScrollDelayBtn);
     m_keybindingActions.push_back(Keybindings::Action::IncreaseScrollDelay);
     m_keybindingDefaults.push_back(VK_DELETE);
-    
+
     // === Multiplayer Monitoring Controls ===
     // Save Multiplayer Logs
     auto saveMultiplayerLogsBtn = CreateKeybindButton(10136, Keybindings::Action::SaveMultiplayerLogs, &waitingForSaveMultiplayerLogs, this);
     RegisterTweakable(saveMultiplayerLogsBtn);
     m_keybindingItems.push_back(saveMultiplayerLogsBtn);
     m_keybindingActions.push_back(Keybindings::Action::SaveMultiplayerLogs);
-    m_keybindingDefaults.push_back('M');
-    
+    m_keybindingDefaults.push_back(0);
+
     // Capture Session State
     auto captureSessionStateBtn = CreateKeybindButton(10137, Keybindings::Action::CaptureSessionState, &waitingForCaptureSessionState, this);
     RegisterTweakable(captureSessionStateBtn);
     m_keybindingItems.push_back(captureSessionStateBtn);
     m_keybindingActions.push_back(Keybindings::Action::CaptureSessionState);
-    m_keybindingDefaults.push_back('N');
+    m_keybindingDefaults.push_back(0);
 
     // === Leaderboard Scanner Controls ===
-    
+
     // Scan Leaderboard By ID
     auto scanLeaderboardByIDBtn = CreateKeybindButton(10127, Keybindings::Action::ScanLeaderboardByID, &waitingForScanLeaderboardByID, this);
     RegisterTweakable(scanLeaderboardByIDBtn);
     m_keybindingItems.push_back(scanLeaderboardByIDBtn);
     m_keybindingActions.push_back(Keybindings::Action::ScanLeaderboardByID);
     m_keybindingDefaults.push_back(0);
-    
+
     // Scan Current Leaderboard
     auto scanCurrentLeaderboardBtn = CreateKeybindButton(10128, Keybindings::Action::ScanCurrentLeaderboard, &waitingForScanCurrentLeaderboard, this);
     RegisterTweakable(scanCurrentLeaderboardBtn);
@@ -5866,7 +11687,7 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(testFetchTrackIDBtn);
     m_keybindingActions.push_back(Keybindings::Action::TestFetchTrackID);
     m_keybindingDefaults.push_back(0);
-    
+
     // === ActionScript Controls ===
     // Full Countdown Sequence
     auto fullCountdownSequenceBtn = CreateKeybindButton(10141, Keybindings::Action::FullCountdownSequence, &waitingForFullCountdownSequence, this);
@@ -5874,20 +11695,33 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(fullCountdownSequenceBtn);
     m_keybindingActions.push_back(Keybindings::Action::FullCountdownSequence);
     m_keybindingDefaults.push_back(0);
-    
+
     // Show Single Countdown
     auto showSingleCountdownBtn = CreateKeybindButton(10142, Keybindings::Action::ShowSingleCountdown, &waitingForShowSingleCountdown, this);
     RegisterTweakable(showSingleCountdownBtn);
     m_keybindingItems.push_back(showSingleCountdownBtn);
     m_keybindingActions.push_back(Keybindings::Action::ShowSingleCountdown);
     m_keybindingDefaults.push_back(0);
-    
+
     // Toggle Load Screen
     auto ToggleLoadScreenBtn = CreateKeybindButton(10143, Keybindings::Action::ToggleLoadScreen, &waitingForToggleLoadScreen, this);
     RegisterTweakable(ToggleLoadScreenBtn);
     m_keybindingItems.push_back(ToggleLoadScreenBtn);
     m_keybindingActions.push_back(Keybindings::Action::ToggleLoadScreen);
     m_keybindingDefaults.push_back(0);
+
+    m_gamepadBindingDefaults.assign(m_keybindingActions.size(), 0);
+    for (size_t i = 0; i < m_keybindingActions.size(); ++i) {
+        if (m_keybindingActions[i] == Keybindings::Action::RespawnPrevCheckpoint) {
+            m_gamepadBindingDefaults[i] = XINPUT_GAMEPAD_LEFT_SHOULDER;
+        } else if (m_keybindingActions[i] == Keybindings::Action::RespawnNextCheckpoint) {
+            m_gamepadBindingDefaults[i] = XINPUT_GAMEPAD_RIGHT_SHOULDER;
+        } else if (m_keybindingActions[i] == Keybindings::Action::EditorScaleDecrease) {
+            m_gamepadBindingDefaults[i] = XINPUT_GAMEPAD_DPAD_LEFT;
+        } else if (m_keybindingActions[i] == Keybindings::Action::EditorScaleIncrease) {
+            m_gamepadBindingDefaults[i] = XINPUT_GAMEPAD_DPAD_RIGHT;
+        }
+    }
 
     // Save as Default button - explicitly saves current keybindings to config file
     auto saveKeybindings = std::make_shared<TweakableButton>(
@@ -5903,7 +11737,7 @@ void DevMenu::InitializeKeybindings() {
     });
     RegisterTweakable(saveKeybindings);
     m_keybindingItems.push_back(saveKeybindings);
-    
+
     // Reset all to defaults button
     auto resetKeybindings = std::make_shared<TweakableButton>(
         10199,
@@ -5914,15 +11748,17 @@ void DevMenu::InitializeKeybindings() {
         for (size_t i = 0; i < m_keybindingActions.size(); i++) {
             Keybindings::Action action = m_keybindingActions[i];
             int defaultKey = m_keybindingDefaults[i];
-            
+            int defaultGamepadButton = i < m_gamepadBindingDefaults.size() ? m_gamepadBindingDefaults[i] : 0;
+
             // Reset the keybinding
             Keybindings::SetKey(action, defaultKey);
-            
+            Keybindings::SetGamepadButton(action, defaultGamepadButton);
+
             // Update the button label
             std::string keyName = Keybindings::GetKeyName(defaultKey);
             m_keybindingItems[i]->SetName("Bind " + Keybindings::GetActionName(action) + ": " + keyName);
         }
-        
+
         LOG_VERBOSE("[DevMenu] Reset all keybindings to defaults");
     });
     RegisterTweakable(resetKeybindings);

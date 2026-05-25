@@ -3,7 +3,98 @@
 #include "logging.h"
 #include <fstream>
 #include <sstream>
+#include <cctype>
 #include <Windows.h>
+#include <Xinput.h>
+
+static const int GAMEPAD_LT = 0x10000;
+static const int GAMEPAD_RT = 0x20000;
+static const BYTE GAMEPAD_TRIGGER_THRESHOLD = 30;
+
+typedef DWORD(WINAPI* XInputGetStateFn)(DWORD, XINPUT_STATE*);
+
+static XInputGetStateFn GetXInputGetState() {
+    static HMODULE s_xinputModule = NULL;
+    static XInputGetStateFn s_xinputGetState = nullptr;
+    static bool s_attemptedLoad = false;
+
+    if (s_attemptedLoad) {
+        return s_xinputGetState;
+    }
+
+    s_attemptedLoad = true;
+    const char* dllNames[] = { "xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll" };
+    for (const char* dllName : dllNames) {
+        s_xinputModule = LoadLibraryA(dllName);
+        if (!s_xinputModule) {
+            continue;
+        }
+
+        s_xinputGetState = reinterpret_cast<XInputGetStateFn>(GetProcAddress(s_xinputModule, "XInputGetState"));
+        if (s_xinputGetState) {
+            return s_xinputGetState;
+        }
+
+        FreeLibrary(s_xinputModule);
+        s_xinputModule = NULL;
+    }
+
+    return nullptr;
+}
+
+static int GetPressedGamepadButtons() {
+    XInputGetStateFn xinputGetState = GetXInputGetState();
+    if (!xinputGetState) {
+        return 0;
+    }
+
+    for (DWORD controllerIndex = 0; controllerIndex < XUSER_MAX_COUNT; ++controllerIndex) {
+        XINPUT_STATE state = {};
+        if (xinputGetState(controllerIndex, &state) != ERROR_SUCCESS) {
+            continue;
+        }
+
+        int pressed = state.Gamepad.wButtons;
+        if (state.Gamepad.bLeftTrigger > GAMEPAD_TRIGGER_THRESHOLD) {
+            pressed |= GAMEPAD_LT;
+        }
+        if (state.Gamepad.bRightTrigger > GAMEPAD_TRIGGER_THRESHOLD) {
+            pressed |= GAMEPAD_RT;
+        }
+        return pressed;
+    }
+
+    return 0;
+}
+
+static int GetFirstPressedGamepadButtonFromMask(int pressed) {
+    const int buttons[] = {
+        XINPUT_GAMEPAD_DPAD_UP,
+        XINPUT_GAMEPAD_DPAD_DOWN,
+        XINPUT_GAMEPAD_DPAD_LEFT,
+        XINPUT_GAMEPAD_DPAD_RIGHT,
+        XINPUT_GAMEPAD_START,
+        XINPUT_GAMEPAD_BACK,
+        XINPUT_GAMEPAD_LEFT_THUMB,
+        XINPUT_GAMEPAD_RIGHT_THUMB,
+        XINPUT_GAMEPAD_LEFT_SHOULDER,
+        XINPUT_GAMEPAD_RIGHT_SHOULDER,
+        XINPUT_GAMEPAD_A,
+        XINPUT_GAMEPAD_B,
+        XINPUT_GAMEPAD_X,
+        XINPUT_GAMEPAD_Y,
+        GAMEPAD_LT,
+        GAMEPAD_RT
+    };
+
+    for (int button : buttons) {
+        if ((pressed & button) != 0) {
+            return button;
+        }
+    }
+
+    return 0;
+}
 
 // Helper function to get game directory
 static std::string GetGameDirectory() {
@@ -36,7 +127,9 @@ static std::string GetGameDirectory() {
 
 // Static member initialization
 std::unordered_map<Keybindings::Action, int> Keybindings::s_keybindings;
+std::unordered_map<Keybindings::Action, int> Keybindings::s_gamepadBindings;
 std::unordered_map<Keybindings::Action, bool> Keybindings::s_keyStates;
+std::unordered_map<Keybindings::Action, bool> Keybindings::s_gamepadStates;
 bool Keybindings::s_initialized = false;
 
 void Keybindings::Initialize() {
@@ -98,8 +191,8 @@ void Keybindings::Initialize() {
     s_keybindings[Action::ToggleLimitValidation] = VK_F3;  // F3 key
     
     // Multiplayer Monitoring
-    s_keybindings[Action::SaveMultiplayerLogs] = 'M';  // M key
-    s_keybindings[Action::CaptureSessionState] = 'N';  // N key
+    s_keybindings[Action::SaveMultiplayerLogs] = 0;  // Unbound
+    s_keybindings[Action::CaptureSessionState] = 0;  // Unbound
     
     // ActionScript Commands
     s_keybindings[Action::FullCountdownSequence] = 0;  // Unbound
@@ -117,11 +210,25 @@ void Keybindings::Initialize() {
     s_keybindings[Action::SwapNextBike] = VK_OEM_PERIOD;  // . key
     s_keybindings[Action::SwapPrevBike] = VK_OEM_COMMA;   // , key
     s_keybindings[Action::DebugBikeInfo] = VK_F9;         // F9 key
+
+    // Editor controls
+    s_keybindings[Action::EditorScaleDecrease] = 0;       // Unbound
+    s_keybindings[Action::EditorScaleIncrease] = 0;       // Unbound
     
 #ifdef DEVELOPMENT_MODE
     // Console
     s_keybindings[Action::ToggleConsole] = VK_F11;  // F11 key
 #endif
+
+    // Gamepad bindings are secondary bindings. Keep them unbound by default so
+    // existing keyboard configs continue to behave exactly as before.
+    for (const auto& pair : s_keybindings) {
+        s_gamepadBindings[pair.first] = 0;
+    }
+    s_gamepadBindings[Action::RespawnPrevCheckpoint] = XINPUT_GAMEPAD_LEFT_SHOULDER;
+    s_gamepadBindings[Action::RespawnNextCheckpoint] = XINPUT_GAMEPAD_RIGHT_SHOULDER;
+    s_gamepadBindings[Action::EditorScaleDecrease] = XINPUT_GAMEPAD_DPAD_LEFT;
+    s_gamepadBindings[Action::EditorScaleIncrease] = XINPUT_GAMEPAD_DPAD_RIGHT;
     
     // Initialize key states
     s_keyStates[Action::InstantFinish] = false;
@@ -168,9 +275,16 @@ void Keybindings::Initialize() {
     s_keyStates[Action::SwapNextBike] = false;
     s_keyStates[Action::SwapPrevBike] = false;
     s_keyStates[Action::DebugBikeInfo] = false;
+    s_keyStates[Action::EditorScaleDecrease] = false;
+    s_keyStates[Action::EditorScaleIncrease] = false;
 #ifdef DEVELOPMENT_MODE
     s_keyStates[Action::ToggleConsole] = false;
 #endif
+
+    for (const auto& pair : s_keybindings) {
+        s_keyStates[pair.first] = false;
+        s_gamepadStates[pair.first] = false;
+    }
     
     // Try to load from file
     if (!LoadFromFile()) {
@@ -193,7 +307,9 @@ void Keybindings::Shutdown() {
     SaveToFile();
     
     s_keybindings.clear();
+    s_gamepadBindings.clear();
     s_keyStates.clear();
+    s_gamepadStates.clear();
     s_initialized = false;
 }
 
@@ -215,6 +331,24 @@ void Keybindings::SetKey(Action action, int vkCode) {
     }
 }
 
+int Keybindings::GetGamepadButton(Action action) {
+    auto it = s_gamepadBindings.find(action);
+    if (it != s_gamepadBindings.end()) {
+        return it->second;
+    }
+    return 0;
+}
+
+void Keybindings::SetGamepadButton(Action action, int gamepadButton) {
+    s_gamepadBindings[action] = gamepadButton;
+    SaveToFile();
+    if (gamepadButton == 0) {
+        LOG_VERBOSE("[Keybindings] Cleared gamepad bind for " << GetActionName(action));
+    } else {
+        LOG_VERBOSE("[Keybindings] Set gamepad bind for " << GetActionName(action) << " to " << GetGamepadButtonName(gamepadButton));
+    }
+}
+
 bool Keybindings::IsActionPressed(Action action) {
 #ifdef RELEASE_AUTOLOAD_MODE
     if (action == Action::ClearConsole
@@ -225,36 +359,81 @@ bool Keybindings::IsActionPressed(Action action) {
 #endif
 
     int vkCode = GetKey(action);
-    if (vkCode == 0) {
-        return false;
-    }
+    int gamepadButton = GetGamepadButton(action);
+    bool keyboardPressed = false;
+    bool gamepadPressed = false;
 
     // Treat modifiers as modifiers, not standalone hotkeys. A bare Shift/Ctrl/Alt
     // press is common gameplay/overlay input and should never fire mod actions.
-    switch (vkCode) {
-        case VK_SHIFT:
-        case VK_LSHIFT:
-        case VK_RSHIFT:
-        case VK_CONTROL:
-        case VK_LCONTROL:
-        case VK_RCONTROL:
-        case VK_MENU:
-        case VK_LMENU:
-        case VK_RMENU:
-            s_keyStates[action] = false;
-            return false;
-        default:
-            break;
+    if (vkCode != 0) {
+        switch (vkCode) {
+            case VK_SHIFT:
+            case VK_LSHIFT:
+            case VK_RSHIFT:
+            case VK_CONTROL:
+            case VK_LCONTROL:
+            case VK_RCONTROL:
+            case VK_MENU:
+            case VK_LMENU:
+            case VK_RMENU:
+                s_keyStates[action] = false;
+                break;
+            default:
+                keyboardPressed = (GetAsyncKeyState(vkCode) & 0x8000) != 0;
+                break;
+        }
     }
-    
-    bool currentlyPressed = (GetAsyncKeyState(vkCode) & 0x8000) != 0;
-    bool wasPressed = s_keyStates[action];
-    
-    // Update state
-    s_keyStates[action] = currentlyPressed;
-    
-    // Return true only on key press (not held)
-    return currentlyPressed && !wasPressed;
+
+    if (gamepadButton != 0) {
+        gamepadPressed = (GetPressedGamepadButtons() & gamepadButton) != 0;
+    }
+
+    bool keyboardWasPressed = s_keyStates[action];
+    bool gamepadWasPressed = s_gamepadStates[action];
+
+    s_keyStates[action] = keyboardPressed;
+    s_gamepadStates[action] = gamepadPressed;
+
+    return (keyboardPressed && !keyboardWasPressed) || (gamepadPressed && !gamepadWasPressed);
+}
+
+bool Keybindings::IsActionDown(Action action) {
+#ifdef RELEASE_AUTOLOAD_MODE
+    if (action == Action::ClearConsole
+        || action == Action::ShowHelpText
+        || action == Action::DumpTweakables) {
+        return false;
+    }
+#endif
+
+    int vkCode = GetKey(action);
+    int gamepadButton = GetGamepadButton(action);
+    bool keyboardPressed = false;
+    bool gamepadPressed = false;
+
+    if (vkCode != 0) {
+        switch (vkCode) {
+            case VK_SHIFT:
+            case VK_LSHIFT:
+            case VK_RSHIFT:
+            case VK_CONTROL:
+            case VK_LCONTROL:
+            case VK_RCONTROL:
+            case VK_MENU:
+            case VK_LMENU:
+            case VK_RMENU:
+                break;
+            default:
+                keyboardPressed = (GetAsyncKeyState(vkCode) & 0x8000) != 0;
+                break;
+        }
+    }
+
+    if (gamepadButton != 0) {
+        gamepadPressed = (GetPressedGamepadButtons() & gamepadButton) != 0;
+    }
+
+    return keyboardPressed || gamepadPressed;
 }
 
 std::string Keybindings::GetKeyName(int vkCode) {
@@ -333,6 +512,33 @@ std::string Keybindings::GetKeyName(int vkCode) {
     
     // Unknown key
     return "Unknown (" + std::to_string(vkCode) + ")";
+}
+
+std::string Keybindings::GetGamepadButtonName(int gamepadButton) {
+    switch (gamepadButton) {
+        case 0: return "None";
+        case XINPUT_GAMEPAD_DPAD_UP: return "D-Pad Up";
+        case XINPUT_GAMEPAD_DPAD_DOWN: return "D-Pad Down";
+        case XINPUT_GAMEPAD_DPAD_LEFT: return "D-Pad Left";
+        case XINPUT_GAMEPAD_DPAD_RIGHT: return "D-Pad Right";
+        case XINPUT_GAMEPAD_START: return "Start";
+        case XINPUT_GAMEPAD_BACK: return "Back";
+        case XINPUT_GAMEPAD_LEFT_THUMB: return "Left Stick";
+        case XINPUT_GAMEPAD_RIGHT_THUMB: return "Right Stick";
+        case XINPUT_GAMEPAD_LEFT_SHOULDER: return "LB";
+        case XINPUT_GAMEPAD_RIGHT_SHOULDER: return "RB";
+        case XINPUT_GAMEPAD_A: return "A";
+        case XINPUT_GAMEPAD_B: return "B";
+        case XINPUT_GAMEPAD_X: return "X";
+        case XINPUT_GAMEPAD_Y: return "Y";
+        case GAMEPAD_LT: return "LT";
+        case GAMEPAD_RT: return "RT";
+        default: return "Unknown (" + std::to_string(gamepadButton) + ")";
+    }
+}
+
+int Keybindings::GetPressedGamepadButton() {
+    return GetFirstPressedGamepadButtonFromMask(GetPressedGamepadButtons());
 }
 
 std::string Keybindings::GetActionName(Action action) {
@@ -434,6 +640,10 @@ std::string Keybindings::GetActionName(Action action) {
             return "Debug Bike Info";
         case Action::ToggleConsole:
             return "Toggle Console";
+        case Action::EditorScaleDecrease:
+            return "Editor Scale Decrease";
+        case Action::EditorScaleIncrease:
+            return "Editor Scale Increase";
         default:
             return "Unknown Action";
     }
@@ -450,11 +660,14 @@ bool Keybindings::SaveToFile() {
     
     file << "# TFPayload Keybindings Configuration" << std::endl;
     file << "# Format: ActionName=VirtualKeyCode" << std::endl;
+    file << "# Secondary gamepad format: ActionName.Gamepad=GamepadButtonCode" << std::endl;
     file << "# Virtual Key Codes: https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes" << std::endl;
     file << std::endl;
     
     for (const auto& pair : s_keybindings) {
         file << GetActionName(pair.first) << "=" << pair.second << " # " << GetKeyName(pair.second) << std::endl;
+        int gamepadButton = GetGamepadButton(pair.first);
+        file << GetActionName(pair.first) << ".Gamepad=" << gamepadButton << " # " << GetGamepadButtonName(gamepadButton) << std::endl;
     }
     
     file.close();
@@ -485,6 +698,13 @@ bool Keybindings::LoadFromFile() {
         
         std::string actionName = line.substr(0, equalsPos);
         std::string vkCodeStr = line.substr(equalsPos + 1);
+        bool isGamepadBinding = false;
+        const std::string gamepadSuffix = ".Gamepad";
+        if (actionName.size() > gamepadSuffix.size()
+            && actionName.compare(actionName.size() - gamepadSuffix.size(), gamepadSuffix.size(), gamepadSuffix) == 0) {
+            isGamepadBinding = true;
+            actionName = actionName.substr(0, actionName.size() - gamepadSuffix.size());
+        }
         
         // Remove any comments after the value
         size_t commentPos = vkCodeStr.find('#');
@@ -498,6 +718,21 @@ bool Keybindings::LoadFromFile() {
         
         try {
             int vkCode = std::stoi(vkCodeStr);
+
+            if (isGamepadBinding) {
+                for (const auto& pair : s_keybindings) {
+                    if (GetActionName(pair.first) == actionName
+                        || (actionName == "Instant Finish" && pair.first == Action::InstantFinish)
+                        || (actionName == "Show Help Text" && pair.first == Action::ShowHelpText)
+                        || (actionName == "Dump Tweakables" && pair.first == Action::DumpTweakables)
+                        || (actionName == "Toggle Limit Validation" && pair.first == Action::ToggleLimitValidation)
+                        || (actionName == "Disable All Limit Validation" && pair.first == Action::ToggleLimitValidation)) {
+                        s_gamepadBindings[pair.first] = vkCode;
+                        break;
+                    }
+                }
+                continue;
+            }
             
             // Map action name to Action enum
             // System controls
@@ -595,6 +830,10 @@ bool Keybindings::LoadFromFile() {
                 s_keybindings[Action::SwapPrevBike] = vkCode;
             } else if (actionName == "Debug Bike Info") {
                 s_keybindings[Action::DebugBikeInfo] = vkCode;
+            } else if (actionName == "Editor Scale Decrease") {
+                s_keybindings[Action::EditorScaleDecrease] = vkCode;
+            } else if (actionName == "Editor Scale Increase") {
+                s_keybindings[Action::EditorScaleIncrease] = vkCode;
 #ifdef DEVELOPMENT_MODE
             } else if (actionName == "Toggle Console") {
                 s_keybindings[Action::ToggleConsole] = vkCode;

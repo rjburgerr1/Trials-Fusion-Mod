@@ -5,6 +5,7 @@
 #include <memory>
 #include <functional>
 #include <unordered_map>
+#include <cstdint>
 #include "keybindings.h"
 #include "imgui/imgui.h"  // For ImVec4 and other ImGui types
 
@@ -264,6 +265,7 @@ public:
     void Render() override;
     void Reset() override;
     void ResetToDefault() override;
+    void UpdateRuntime();
 
 private:
     struct BikePartEditorState {
@@ -276,6 +278,23 @@ private:
         int selectedIndex;
         float colors[3][3];
         bool hasColorOverrides[3];
+        bool hidden;
+    };
+
+    struct GearPresetBikePart {
+        uint16_t targetItemId;
+        uint16_t currentSourceItemId;
+        std::string partKey;
+        std::string compatibilityKey;
+        uint32_t colors[3];
+        bool hasColorOverrides[3];
+        bool hidden;
+    };
+
+    struct GearPreset {
+        bool hasData;
+        uint16_t appearance[16];
+        std::vector<GearPresetBikePart> bikeParts;
     };
 
     bool LoadLiveAppearance();
@@ -284,7 +303,16 @@ private:
     void DecodeGearFromAppearance();
     void EncodeGearIntoAppearance();
     void RefreshBikePartEditors();
+    void ScheduleCustomAppearanceReapply(const char* reason);
+    bool QueueStoredSubpartReapply();
+    void RenderGearPresets();
+    void SaveGearPreset(int slotIndex);
+    bool LoadGearPreset(int slotIndex);
+    bool SaveGearPresetsToFile() const;
+    bool LoadGearPresetsFromFile();
+    std::string GearPresetPartCompatibilityKey(const GearPresetBikePart& part) const;
 
+    TweakableTireColor m_pitViperTireColor;
     uint16_t m_appearance[16];
     uint16_t m_defaultAppearance[16];
     int m_riderGearIds[3];
@@ -294,7 +322,19 @@ private:
     float m_bikeColors[2][3];
     bool m_hasAppearance;
     bool m_hasCapturedDefaults;
+    bool m_persistCustomAppearance;
     bool m_dirty;
+    bool m_wasTrackReady;
+    uintptr_t m_lastBikePointer;
+    int m_lastCheckpointCount;
+    int m_reapplyAttemptsRemaining;
+    int m_subpartReapplyAttemptsRemaining;
+    uint32_t m_nextReapplyTick;
+    uint32_t m_nextSubpartReapplyTick;
+    uint32_t m_nextAppearanceMismatchCheckTick;
+    GearPreset m_gearPresets[5];
+    int m_selectedGearPresetSlot;
+    bool m_gearPresetsLoaded;
 };
 
 class TweakableUIViewExplorer : public TweakableItem {
@@ -307,9 +347,29 @@ public:
     void ResetToDefault() override {}
 };
 
+class TweakableEditorInspector : public TweakableItem {
+public:
+    TweakableEditorInspector(int id, const std::string& name)
+        : TweakableItem(id, name, TweakableType::Custom) {}
+
+    void Render() override;
+    void Reset() override {}
+    void ResetToDefault() override {}
+};
+
 class TweakableFmodControls : public TweakableItem {
 public:
     TweakableFmodControls(int id, const std::string& name)
+        : TweakableItem(id, name, TweakableType::Custom) {}
+
+    void Render() override;
+    void Reset() override {}
+    void ResetToDefault() override {}
+};
+
+class TweakableFileUnlockControls : public TweakableItem {
+public:
+    TweakableFileUnlockControls(int id, const std::string& name)
         : TweakableItem(id, name, TweakableType::Custom) {}
 
     void Render() override;
@@ -355,6 +415,7 @@ public:
     
     // Render the menu (call this every frame when menu should be visible)
     void Render();
+    void UpdateRuntime();
     
     // Toggle menu visibility
     void Toggle() { m_isVisible = !m_isVisible; }
@@ -446,11 +507,13 @@ private:
     
     std::vector<std::shared_ptr<TweakableFolder>> m_rootFolders;
     std::unordered_map<int, std::shared_ptr<TweakableItem>> m_tweakableMap;
+    std::shared_ptr<TweakableAppearanceReload> m_appearanceReload;
     
     // Keybindings storage (separate from root folders)
     std::vector<std::shared_ptr<TweakableItem>> m_keybindingItems;
     std::vector<Keybindings::Action> m_keybindingActions; // Stores the Action for each keybinding button
     std::vector<int> m_keybindingDefaults; // Stores the default key for each keybinding button
+    std::vector<int> m_gamepadBindingDefaults; // Stores the default gamepad button for each keybinding button
     bool m_showKeybindingsWindow;
     
     bool m_isVisible;
