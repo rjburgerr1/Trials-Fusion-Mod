@@ -33,6 +33,7 @@ namespace Fmod {
     static DWORD g_lastEventSystemScanMs = 0;
     static DWORD g_lastSilentApplyMs = 0;
     static DWORD g_suppressApplyUntilMs = 0;
+    static volatile LONG g_runtimeUpdatesPaused = 0;
     static std::mutex g_stateMutex;
 
     static FMOD_EventSystem_GetCategoryFunc g_FMOD_EventSystem_GetCategory = nullptr;
@@ -123,6 +124,17 @@ namespace Fmod {
     }
 
     static bool SafeReadPointer(void* address, void** outValue) {
+        if (!address || !outValue) {
+            return false;
+        }
+
+        MEMORY_BASIC_INFORMATION mbi = {};
+        if (VirtualQuery(address, &mbi, sizeof(mbi)) != sizeof(mbi)
+            || mbi.State != MEM_COMMIT
+            || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
+            return false;
+        }
+
         __try {
             *outValue = *reinterpret_cast<void**>(address);
             return true;
@@ -130,6 +142,49 @@ namespace Fmod {
         __except (EXCEPTION_EXECUTE_HANDLER) {
             return false;
         }
+    }
+
+    static bool IsExecutablePage(DWORD protect) {
+        if ((protect & PAGE_GUARD) != 0 || (protect & PAGE_NOACCESS) != 0) {
+            return false;
+        }
+
+        protect &= 0xff;
+        return protect == PAGE_EXECUTE
+            || protect == PAGE_EXECUTE_READ
+            || protect == PAGE_EXECUTE_READWRITE
+            || protect == PAGE_EXECUTE_WRITECOPY;
+    }
+
+    static bool IsAddressInModule(void* address, HMODULE module) {
+        if (!address || !module) {
+            return false;
+        }
+
+        MEMORY_BASIC_INFORMATION mbi = {};
+        return VirtualQuery(address, &mbi, sizeof(mbi)) == sizeof(mbi)
+            && mbi.AllocationBase == module;
+    }
+
+    static bool LooksLikeFmodObject(void* candidate) {
+        if (!candidate || !g_fmodEventModule) {
+            return false;
+        }
+
+        void* vtable = nullptr;
+        if (!SafeReadPointer(candidate, &vtable)) {
+            return false;
+        }
+
+        MEMORY_BASIC_INFORMATION mbi = {};
+        if (VirtualQuery(vtable, &mbi, sizeof(mbi)) != sizeof(mbi)
+            || mbi.State != MEM_COMMIT
+            || !IsExecutablePage(mbi.Protect)
+            || mbi.AllocationBase != g_fmodEventModule) {
+            return false;
+        }
+
+        return true;
     }
 
     static int SafeCallGetVersion(void* eventSystem, unsigned int* version) {
@@ -178,6 +233,10 @@ namespace Fmod {
 
     static bool LooksLikeEventSystem(void* candidate) {
         if (!candidate || !ResolveFmodEventExports()) {
+            return false;
+        }
+
+        if (!LooksLikeFmodObject(candidate)) {
             return false;
         }
 
@@ -371,6 +430,7 @@ namespace Fmod {
         g_lastResult = 0;
         g_lastResolveAttemptMs = 0;
         g_suppressApplyUntilMs = 0;
+        InterlockedExchange(&g_runtimeUpdatesPaused, 0);
 
         LoadConfig();
         g_eventsMuted = g_muteOnStartup;
@@ -394,10 +454,15 @@ namespace Fmod {
         }
 
         g_initialized = false;
+        InterlockedExchange(&g_runtimeUpdatesPaused, 0);
         ClearRuntimePointers();
     }
 
     void Update() {
+        if (InterlockedCompareExchange(&g_runtimeUpdatesPaused, 0, 0) != 0) {
+            return;
+        }
+
         std::lock_guard<std::mutex> lock(g_stateMutex);
 
         if (!g_initialized) {
@@ -438,6 +503,20 @@ namespace Fmod {
         }
         LOG_VERBOSE("[FMOD] Invalidated cached FMOD pointers"
             << (suppressApplyMs != 0 ? " with temporary apply suppression" : ""));
+    }
+
+    void SetRuntimeUpdatesPaused(bool paused) {
+        const LONG newValue = paused ? 1 : 0;
+        const LONG oldValue = InterlockedExchange(&g_runtimeUpdatesPaused, newValue);
+
+        if (paused) {
+            InvalidateCachedPointers(0);
+        }
+
+        if (oldValue != newValue) {
+            LOG_VERBOSE("[FMOD] Runtime pointer updates "
+                << (paused ? "paused" : "resumed"));
+        }
     }
 
     bool SetEventsMuted(bool muted) {

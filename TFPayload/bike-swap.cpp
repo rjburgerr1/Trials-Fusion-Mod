@@ -81,6 +81,7 @@ namespace BikeSwap {
 
     // Bike entity offsets
     static constexpr uintptr_t BIKE_ID_OFFSET = 0x680;
+    static constexpr int MAX_RUNTIME_SAFE_BIKE_ID = 6;
 
     // Editor manager offsets
     static constexpr uintptr_t SELECTED_BIKE_ID_OFFSET = 0x684;  // Byte: selected bike index (on editor manager)
@@ -230,9 +231,7 @@ namespace BikeSwap {
     static uint16_t g_pendingVisualOnlyData[16] = {};
     static std::mutex g_pendingAppearanceMutex;
     static bool g_hookInstalled = false;
-    static volatile bool g_swapInProgress = false;   // Guard against overlapping swaps
-    static DWORD g_lastSwapTick = 0;                 // Cooldown timer
-    static constexpr DWORD SWAP_COOLDOWN_MS = 8000;  // Minimum ms between swaps (give engine time to settle)
+    static volatile LONG g_swapInProgress = 0;       // Guard against overlapping swaps
     enum class SwapStage {
         None,
         RespawnBeforeReload,
@@ -244,12 +243,10 @@ namespace BikeSwap {
     static bool g_activeAppearanceReload = false;
     static bool g_activeVisualOnlyReload = false;
     static uint16_t g_activeAppearanceData[16] = {};
-    static volatile LONG g_lastCompletedBikeId = -1;   // Last bike applied by a completed direct reload
-    static volatile int g_settleValidationFrames = 0;  // Frames left before another swap is allowed
+    static bool g_fmodPausedForSwap = false;
     static SwapStage g_swapStage = SwapStage::None;
     static constexpr int RESPAWN_DELAY_FRAMES = 5;     // Wait N frames before respawning
     static constexpr int RELOAD_DELAY_FRAMES = 15;     // Wait N frames after respawn before bike reload
-    static constexpr int POST_SWAP_SETTLE_FRAMES = 90; // Require stable frames after completed reload
 
     // Original function pointer for HandleGameFrameUpdate
     static HandleGameFrameUpdateFunc g_OriginalHandleGameFrameUpdate = nullptr;
@@ -300,31 +297,25 @@ namespace BikeSwap {
         InterlockedExchange(&g_activeSwapBikeId, -1);
         g_activeAppearanceReload = false;
         g_activeVisualOnlyReload = false;
-        g_swapInProgress = false;
+        InterlockedExchange(&g_swapInProgress, 0);
+        if (g_fmodPausedForSwap) {
+            Fmod::SetRuntimeUpdatesPaused(false);
+            g_fmodPausedForSwap = false;
+        }
     }
 
-    static bool IsPostSwapSettleComplete() {
-        if (g_settleValidationFrames <= 0) {
-            return true;
+    static void PauseFmodForSwap() {
+        if (!g_fmodPausedForSwap) {
+            g_fmodPausedForSwap = true;
+            Fmod::SetRuntimeUpdatesPaused(true);
         }
+    }
 
-        void* bikeEntity = GetCurrentBikeEntity();
-        if (!bikeEntity || IsBadReadPtr(bikeEntity, 0xb20)) {
-            return false;
-        }
-
-        int currentBikeId = GetCurrentBikeId();
-        if (currentBikeId != g_lastCompletedBikeId) {
-            return false;
-        }
-
-        g_settleValidationFrames--;
-        if (g_settleValidationFrames == 0) {
-            GearCustomization::RestoreActiveHiddenObjectPayloadPatches();
-            LOG_INFO("[BikeSwap] Post-swap settle validation complete");
-        }
-
-        return g_settleValidationFrames <= 0;
+    static bool HasPendingReloadWork() {
+        return InterlockedCompareExchange(&g_swapInProgress, 0, 0) != 0
+            || g_swapStage != SwapStage::None
+            || InterlockedCompareExchange(&g_pendingAppearanceReload, 0, 0) != 0
+            || InterlockedCompareExchange(&g_pendingVisualOnlyReload, 0, 0) != 0;
     }
 
     // ============================================================================
@@ -496,6 +487,8 @@ namespace BikeSwap {
     // These use a two-layer approach: inner function does SEH, outer does logging
     // ============================================================================
 
+    static bool CallReloadBikeFromSettings_Inner(void* editorManager, DWORD* exceptionCode);
+
     // Assembly wrapper for thiscall function
     // ChangeBikeWithMeshReload: void __thiscall(void* this, byte bikeId, void* appearanceData)
     // thiscall: this in ECX, params pushed right-to-left
@@ -528,6 +521,55 @@ namespace BikeSwap {
         bool result = CallChangeBikeWithMeshReload_Inner(bikeEntity, bikeId, appearanceData, &exceptionCode);
         if (!result) {
             LOG_ERROR("[BikeSwap] Exception in ChangeBikeWithMeshReload: 0x" << std::hex << exceptionCode);
+        }
+        return result;
+    }
+
+    static bool CallChangeBikeWithMeshReloadAtomic(void* bikeEntity, uint8_t bikeId, void* appearanceData) {
+        std::vector<HANDLE> suspendedThreads = SuspendOtherThreads();
+        DWORD exceptionCode = 0;
+        bool result = CallChangeBikeWithMeshReload_Inner(bikeEntity, bikeId, appearanceData, &exceptionCode);
+        ResumeThreads(suspendedThreads);
+        if (!result) {
+            LOG_ERROR("[BikeSwap] Exception in atomic ChangeBikeWithMeshReload: 0x" << std::hex << exceptionCode);
+        }
+        return result;
+    }
+
+    static bool CallChangeBikeWithMeshReloadAndRespawnAtomic(void* bikeEntity, uint8_t bikeId, void* appearanceData) {
+        std::vector<HANDLE> suspendedThreads = SuspendOtherThreads();
+        DWORD exceptionCode = 0;
+        bool result = CallChangeBikeWithMeshReload_Inner(bikeEntity, bikeId, appearanceData, &exceptionCode);
+        if (result) {
+            LOG_INFO("[BikeSwap] Atomic bike reload completed; stabilizing with checkpoint respawn");
+            result = Respawn::RespawnAtCheckpoint();
+        }
+        ResumeThreads(suspendedThreads);
+
+        if (exceptionCode != 0) {
+            LOG_ERROR("[BikeSwap] Exception in atomic ChangeBikeWithMeshReload: 0x" << std::hex << exceptionCode);
+        }
+        else if (!result) {
+            LOG_ERROR("[BikeSwap] Atomic post-reload respawn failed");
+        }
+        return result;
+    }
+
+    static bool CallReloadBikeFromSettingsAtomic(void* editorManager) {
+        std::vector<HANDLE> suspendedThreads = SuspendOtherThreads();
+        DWORD exceptionCode = 0;
+        bool result = CallReloadBikeFromSettings_Inner(editorManager, &exceptionCode);
+        if (result) {
+            LOG_INFO("[BikeSwap] Settings reload completed; stabilizing with checkpoint respawn");
+            result = Respawn::RespawnAtCheckpoint();
+        }
+        ResumeThreads(suspendedThreads);
+
+        if (exceptionCode != 0) {
+            LOG_ERROR("[BikeSwap] Exception in atomic ReloadBikeFromSettings: 0x" << std::hex << exceptionCode);
+        }
+        else if (!result) {
+            LOG_ERROR("[BikeSwap] Atomic settings-reload respawn failed");
         }
         return result;
     }
@@ -768,12 +810,8 @@ namespace BikeSwap {
             g_OriginalHandleGameFrameUpdate(thisPtr, edx_unused, param2, param3);
         }
 
-        if (g_swapStage == SwapStage::None && g_settleValidationFrames > 0) {
-            IsPostSwapSettleComplete();
-        }
-
         // Run the staged swap after normal frame work. The order is:
-        // selection write -> respawn to settle physics -> direct bike reload -> immediate respawn.
+        // selection write -> checkpoint respawn -> bike reload.
         if (g_swapStage != SwapStage::None) {
             if (g_stageDelayFrames > 0) {
                 g_stageDelayFrames--;
@@ -809,6 +847,38 @@ namespace BikeSwap {
                 }
 
                 if (g_swapStage == SwapStage::ReloadBike) {
+                    if (!g_activeAppearanceReload && !g_activeVisualOnlyReload) {
+                        void* editorManager = GetEditorManager();
+                        if (!editorManager) {
+                            LOG_ERROR("[BikeSwap] Could not get editor manager during settings bike reload");
+                            ClearActiveSwap();
+                            return;
+                        }
+
+                        if (IsBadReadPtr(editorManager, 0x800)) {
+                            LOG_ERROR("[BikeSwap] Editor manager became unreadable before settings reload");
+                            ClearActiveSwap();
+                            return;
+                        }
+
+                        Fmod::InvalidateCachedPointers(5000);
+                        LOG_INFO("[BikeSwap] Applying settings-driven bike reload for bike "
+                            << std::dec << targetBike);
+                        if (!CallReloadBikeFromSettingsAtomic(editorManager)) {
+                            Fmod::InvalidateCachedPointers(5000);
+                            ClearActiveSwap();
+                            return;
+                        }
+
+                        Fmod::InvalidateCachedPointers(5000);
+                        LOG_INFO("[BikeSwap] Settings bike reload completed; current bike ID is "
+                            << std::dec << GetCurrentBikeId());
+
+                        ClearActiveSwap();
+                        LOG_INFO("[BikeSwap] Bike swap + settings reload complete");
+                        return;
+                    }
+
                     void* bikeEntity = GetCurrentBikeEntity();
                     if (!bikeEntity) {
                         LOG_ERROR("[BikeSwap] Could not get bike entity during direct bike reload");
@@ -856,7 +926,7 @@ namespace BikeSwap {
                         }
                     }
                     else {
-                        reloadSucceeded = CallChangeBikeWithMeshReload(bikeEntity, static_cast<uint8_t>(targetBike), appearanceData);
+                        reloadSucceeded = CallChangeBikeWithMeshReloadAndRespawnAtomic(bikeEntity, static_cast<uint8_t>(targetBike), appearanceData);
                         if (!reloadSucceeded) {
                             Fmod::InvalidateCachedPointers(5000);
                             GearCustomization::RestoreActiveHiddenObjectPayloadPatches();
@@ -869,27 +939,20 @@ namespace BikeSwap {
                     LOG_INFO("[BikeSwap] Direct bike reload completed; current bike ID is "
                         << std::dec << GetCurrentBikeId());
 
-                    const bool completedAppearanceReload = g_activeAppearanceReload;
                     const bool completedVisualOnlyReload = g_activeVisualOnlyReload;
+                    const bool completedAppearanceReload = g_activeAppearanceReload;
                     GearCustomization::RestoreActiveHiddenObjectPayloadPatches();
 
-                    if (!completedVisualOnlyReload) {
-                        LOG_INFO("[BikeSwap] Immediate post-reload respawn executing...");
-                        if (!Respawn::RespawnAtCheckpoint()) {
-                            LOG_ERROR("[BikeSwap] Immediate post-reload respawn failed");
-                            Fmod::InvalidateCachedPointers(5000);
-                            ClearActiveSwap();
-                            return;
-                        }
-                        Fmod::InvalidateCachedPointers(5000);
+                    if (completedVisualOnlyReload) {
+                        ClearActiveSwap();
+                        LOG_INFO("[BikeSwap] Visual-only reload complete");
+                        return;
                     }
 
-                    InterlockedExchange(&g_lastCompletedBikeId, targetBike);
-                    g_settleValidationFrames = POST_SWAP_SETTLE_FRAMES;
                     ClearActiveSwap();
                     LOG_INFO("[BikeSwap] "
-                        << (completedVisualOnlyReload ? "Visual-only reload" : (completedAppearanceReload ? "Appearance reload" : "Bike swap"))
-                        << (completedVisualOnlyReload ? " complete" : " + respawn complete"));
+                        << (completedAppearanceReload ? "Appearance reload" : "Bike swap")
+                        << " + atomic respawn complete");
                     return;
                 }
             }
@@ -927,7 +990,11 @@ namespace BikeSwap {
         GearCustomization::ProcessPendingMainThread();
 
         if (InterlockedExchange(&g_pendingAppearanceReload, 0) != 0) {
-            g_swapInProgress = true;
+            if (InterlockedCompareExchange(&g_swapInProgress, 1, 0) != 0) {
+                LOG_WARNING("[BikeSwap] Reload already in progress, ignoring appearance reload");
+                return;
+            }
+            PauseFmodForSwap();
 
             if (!IsGameStateSafeForSwap()) {
                 LOG_WARNING("[BikeSwap] Pending appearance reload skipped because game state is no longer safe");
@@ -956,7 +1023,11 @@ namespace BikeSwap {
         }
 
         if (InterlockedExchange(&g_pendingVisualOnlyReload, 0) != 0) {
-            g_swapInProgress = true;
+            if (InterlockedCompareExchange(&g_swapInProgress, 1, 0) != 0) {
+                LOG_WARNING("[BikeSwap] Reload already in progress, ignoring visual-only reload");
+                return;
+            }
+            PauseFmodForSwap();
 
             if (!IsGameStateSafeForSwap()) {
                 LOG_WARNING("[BikeSwap] Pending visual-only reload skipped because game state is no longer safe");
@@ -984,10 +1055,16 @@ namespace BikeSwap {
             return;
         }
 
-        // Check if we have a pending bike swap
+        // Check if we have a pending bike swap. Like GearCustomization, the
+        // public API only publishes an atomic request; the actual engine reload
+        // is owned by this main-thread hook.
         LONG targetBike = InterlockedExchange(&g_pendingBikeId, -1);
         if (targetBike >= 0) {
-            g_swapInProgress = true;
+            if (InterlockedCompareExchange(&g_swapInProgress, 1, 0) != 0) {
+                LOG_WARNING("[BikeSwap] Swap already in progress when pending request was consumed");
+                return;
+            }
+            PauseFmodForSwap();
 
             if (!IsGameStateSafeForSwap()) {
                 LOG_WARNING("[BikeSwap] Pending swap skipped because game state is no longer safe");
@@ -1044,26 +1121,16 @@ namespace BikeSwap {
             return false;
         }
 
-        if (!IsPostSwapSettleComplete()) {
-            LOG_WARNING("[BikeSwap] Previous swap is still settling, ignoring request");
-            return false;
-        }
-
-        // Check cooldown
-        DWORD now = GetTickCount();
-        if (now - g_lastSwapTick < SWAP_COOLDOWN_MS) {
-            LOG_WARNING("[BikeSwap] Swap cooldown active, ignoring request");
-            return false;
-        }
-
-        // Check if a swap is already in progress (including pending respawn)
-        if (g_swapInProgress) {
+        // Check if a reload or staged swap is already in progress.
+        if (HasPendingReloadWork() || InterlockedCompareExchange(&g_pendingBikeId, -1, -1) >= 0) {
             LOG_WARNING("[BikeSwap] Swap already in progress, ignoring request");
             return false;
         }
 
-        g_lastSwapTick = now;
-        InterlockedExchange(&g_pendingBikeId, bikeId);
+        if (InterlockedCompareExchange(&g_pendingBikeId, bikeId, -1) != -1) {
+            LOG_WARNING("[BikeSwap] Swap already pending, ignoring request");
+            return false;
+        }
         LOG_INFO("[BikeSwap] Queued swap to bike " << bikeId << " (" << GetBikeName(bikeId) << ") - will execute on next frame");
         return true;
     }
@@ -1203,8 +1270,6 @@ namespace BikeSwap {
         g_pendingAppearanceTintRefresh = 0;
         g_pendingAppearanceReload = 0;
         g_pendingVisualOnlyReload = 0;
-        g_lastCompletedBikeId = -1;
-        g_settleValidationFrames = 0;
         ClearActiveSwap();
 
         LOG_VERBOSE("[BikeSwap] Shutdown complete");
@@ -1253,10 +1318,10 @@ namespace BikeSwap {
             return 0;
         }
 
-        // The game has a fixed set of bikes (typically 8-10)
-        // Bikes: Pit Viper (0), Squid (1), Roach (2), Turtle (3), Jackal (4), 
-        //        Mantis (5), Donkey (6), Rabbit (7), Rhino (8)
-        return 9;
+        // Runtime swapping writes the selected-bike byte directly. The extracted
+        // bike catalog backs IDs 1..6, and ID 0 is observed in live state. IDs
+        // above 6 can enter special/non-garage data and crash during game update.
+        return MAX_RUNTIME_SAFE_BIKE_ID + 1;
     }
 
     bool SwapToBike(int bikeId) {
@@ -1329,15 +1394,13 @@ namespace BikeSwap {
     std::string GetBikeName(int bikeId) {
         // Bike names based on Trials Fusion
         static const char* bikeNames[] = {
-            "Pit Viper",    // 0 - Beginner
-            "Squid",        // 1 - Easy
-            "Roach",        // 2 - Medium  
-            "Turtle",       // 3 - Medium
-            "Jackal",       // 4 - Hard
-            "Mantis",       // 5 - Hard
-            "Donkey",       // 6 - Extreme
-            "Rabbit",       // 7 - Unicorn/Special
-            "Rhino"         // 8 - Helium/Special
+            "Pit Viper",    // 0 - observed live baseline
+            "Squid",        // 1
+            "Roach",        // 2
+            "Turtle",       // 3
+            "Jackal",       // 4
+            "Mantis",       // 5
+            "Donkey"        // 6
         };
 
         if (bikeId < 0 || bikeId >= static_cast<int>(sizeof(bikeNames) / sizeof(bikeNames[0]))) {
@@ -1400,7 +1463,8 @@ namespace BikeSwap {
             return false;
         }
 
-        if (g_swapInProgress || InterlockedCompareExchange(&g_pendingAppearanceReload, 0, 0) != 0) {
+        if (InterlockedCompareExchange(&g_swapInProgress, 0, 0) != 0
+            || InterlockedCompareExchange(&g_pendingAppearanceReload, 0, 0) != 0) {
             LOG_WARNING("[BikeSwap] Reload already in progress, ignoring tint refresh request");
             return false;
         }
@@ -1438,13 +1502,8 @@ namespace BikeSwap {
             return false;
         }
 
-        if (!IsPostSwapSettleComplete()) {
-            Logging::WriteImmediate("[AppearanceQueue] rejected because previous reload is settling");
-            LOG_WARNING("[BikeSwap] Previous reload is still settling, ignoring appearance request");
-            return false;
-        }
-
-        if (g_swapInProgress || InterlockedCompareExchange(&g_pendingAppearanceReload, 0, 0) != 0) {
+        if (InterlockedCompareExchange(&g_swapInProgress, 0, 0) != 0
+            || InterlockedCompareExchange(&g_pendingAppearanceReload, 0, 0) != 0) {
             Logging::WriteImmediate("[AppearanceQueue] rejected because reload is already in progress");
             LOG_WARNING("[BikeSwap] Reload already in progress, ignoring appearance request");
             return false;
@@ -1485,12 +1544,7 @@ namespace BikeSwap {
             return false;
         }
 
-        if (!IsPostSwapSettleComplete()) {
-            LOG_WARNING("[BikeSwap] Previous reload is still settling, ignoring visual-only request");
-            return false;
-        }
-
-        if (g_swapInProgress
+        if (InterlockedCompareExchange(&g_swapInProgress, 0, 0) != 0
             || InterlockedCompareExchange(&g_pendingAppearanceReload, 0, 0) != 0
             || InterlockedCompareExchange(&g_pendingVisualOnlyReload, 0, 0) != 0) {
             LOG_WARNING("[BikeSwap] Reload already in progress, ignoring visual-only request");
@@ -1506,7 +1560,7 @@ namespace BikeSwap {
         return true;
     }
 
-    bool GetCooldownStatus(float* secondsRemaining, float* progress01, std::string* statusText) {
+    bool GetSwapStatus(float* secondsRemaining, float* progress01, std::string* statusText) {
         if (secondsRemaining) {
             *secondsRemaining = 0.0f;
         }
@@ -1521,49 +1575,32 @@ namespace BikeSwap {
             return false;
         }
 
-        const DWORD now = GetTickCount();
-        float cooldownSeconds = 0.0f;
-        float cooldownProgress = 1.0f;
-
-        if (g_lastSwapTick != 0) {
-            DWORD elapsedMs = now - g_lastSwapTick;
-            if (elapsedMs < SWAP_COOLDOWN_MS) {
-                DWORD remainingMs = SWAP_COOLDOWN_MS - elapsedMs;
-                cooldownSeconds = static_cast<float>(remainingMs) / 1000.0f;
-                cooldownProgress = static_cast<float>(elapsedMs) / static_cast<float>(SWAP_COOLDOWN_MS);
-            }
-        }
-
-        // Approximate frame-based settle delay as seconds for display only.
-        const float settleSeconds = g_settleValidationFrames > 0
-            ? static_cast<float>(g_settleValidationFrames) / 60.0f
-            : 0.0f;
-        const float settleProgress = g_settleValidationFrames > 0
-            ? 1.0f - (static_cast<float>(g_settleValidationFrames) / static_cast<float>(POST_SWAP_SETTLE_FRAMES))
-            : 1.0f;
-
-        const bool stagedSwapActive = g_swapInProgress || g_swapStage != SwapStage::None;
+        const bool stagedSwapActive = InterlockedCompareExchange(&g_swapInProgress, 0, 0) != 0
+            || g_swapStage != SwapStage::None;
         float stageSeconds = 0.0f;
         float stageProgress = 1.0f;
         if (stagedSwapActive && g_stageDelayFrames > 0) {
-            int totalFrames = g_swapStage == SwapStage::ReloadBike ? RELOAD_DELAY_FRAMES : RESPAWN_DELAY_FRAMES;
+            int totalFrames = RESPAWN_DELAY_FRAMES;
+            if (g_swapStage == SwapStage::ReloadBike) {
+                totalFrames = RELOAD_DELAY_FRAMES;
+            }
             stageSeconds = static_cast<float>(g_stageDelayFrames) / 60.0f;
             stageProgress = 1.0f - (static_cast<float>(g_stageDelayFrames) / static_cast<float>(totalFrames));
         }
 
-        float remaining = cooldownSeconds;
-        float progress = cooldownProgress;
-        std::string text = "Bike swap cooldown";
+        float remaining = 0.0f;
+        float progress = 1.0f;
+        std::string text;
 
         if (stagedSwapActive) {
             remaining = stageSeconds;
             progress = stageProgress;
-            text = g_swapStage == SwapStage::ReloadBike ? "Bike swap applying" : "Bike swap respawning";
-        }
-        else if (settleSeconds > remaining) {
-            remaining = settleSeconds;
-            progress = settleProgress;
-            text = "Bike swap settling";
+            if (g_swapStage == SwapStage::ReloadBike) {
+                text = "Bike swap applying";
+            }
+            else {
+                text = "Bike swap respawning";
+            }
         }
 
         if (remaining <= 0.0f && !stagedSwapActive) {
@@ -1659,14 +1696,12 @@ namespace BikeSwap {
         }
 
         LOG_INFO("[BikeSwap] Hook installed: " << (g_hookInstalled ? "yes" : "no"));
-        LOG_INFO("[BikeSwap] Swap in progress: " << (g_swapInProgress ? "yes" : "no"));
+        LOG_INFO("[BikeSwap] Swap in progress: "
+            << (InterlockedCompareExchange(&g_swapInProgress, 0, 0) != 0 ? "yes" : "no"));
         LOG_INFO("[BikeSwap] Swap stage: " << static_cast<int>(g_swapStage));
         LOG_INFO("[BikeSwap] Stage delay frames: " << g_stageDelayFrames);
         LOG_INFO("[BikeSwap] Active swap bike ID: " << g_activeSwapBikeId);
         LOG_INFO("[BikeSwap] Active appearance reload: " << (g_activeAppearanceReload ? "yes" : "no"));
-        LOG_INFO("[BikeSwap] Last completed bike ID: " << g_lastCompletedBikeId);
-        LOG_INFO("[BikeSwap] Settle validation frames: " << g_settleValidationFrames);
-
         LOG_INFO("[BikeSwap] === END DEBUG ===");
     }
 }

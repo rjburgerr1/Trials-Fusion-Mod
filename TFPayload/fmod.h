@@ -7,6 +7,7 @@ namespace Fmod {
     void Shutdown();
     void Update();
     void InvalidateCachedPointers(DWORD suppressApplyMs = 5000);
+    void SetRuntimeUpdatesPaused(bool paused);
 
     bool SetEventsMuted(bool muted);
     bool ToggleEventsMuted();

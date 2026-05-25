@@ -138,13 +138,13 @@ void TFPayloadRenderCallback()
         }
 
         // =========================================================================
-        // BIKE SWAP COOLDOWN INDICATOR
+        // BIKE SWAP STATUS INDICATOR
         // =========================================================================
 
         float bikeSwapSeconds = 0.0f;
         float bikeSwapProgress = 1.0f;
         std::string bikeSwapStatus;
-        if (GameMode::IsPlaying() && BikeSwap::GetCooldownStatus(&bikeSwapSeconds, &bikeSwapProgress, &bikeSwapStatus)) {
+        if (GameMode::IsPlaying() && BikeSwap::GetSwapStatus(&bikeSwapSeconds, &bikeSwapProgress, &bikeSwapStatus)) {
             ImGuiIO& io = ImGui::GetIO();
             const float windowWidth = 260.0f;
             const float windowHeight = 58.0f;
@@ -160,7 +160,7 @@ void TFPayloadRenderCallback()
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 5.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 8));
 
-            ImGui::Begin("BikeSwapCooldownOverlay", nullptr,
+            ImGui::Begin("BikeSwapStatusOverlay", nullptr,
                 ImGuiWindowFlags_NoTitleBar |
                 ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoMove |

@@ -54,8 +54,8 @@ namespace BikeSwap {
     // Queue a narrower same-bike visual rebuild that skips settings/state/rider setup.
     bool QueueCurrentVisualOnlyReload(const uint16_t appearanceData[16]);
 
-    // Cooldown/status shown by the render overlay after a bike swap
-    bool GetCooldownStatus(float* secondsRemaining, float* progress01, std::string* statusText);
+    // Staged swap/status shown by the render overlay after a bike swap
+    bool GetSwapStatus(float* secondsRemaining, float* progress01, std::string* statusText);
 
     // Process bike swap hotkeys
     void CheckHotkey();
