@@ -120,7 +120,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PreBuildEvent>
       <Command>REM 1. Define the path to the project directory.
@@ -154,7 +154,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PreBuildEvent>
       <Command>REM 1. Define the path to the project directory.
@@ -188,7 +188,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PreBuildEvent>
       <Command>REM 1. Define the path to the project directory.
@@ -222,7 +222,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -264,6 +264,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClInclude Include="camera.h" />
     <ClInclude Include="devMenu.h" />
     <ClInclude Include="devMenuSync.h" />
+    <ClInclude Include="file-unlock.h" />
     <ClInclude Include="fmod.h" />
     <ClInclude Include="gear-customization.h" />
     <ClInclude Include="bike-item-catalog.generated.h" />
@@ -310,6 +311,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClCompile Include="camera.cpp" />
     <ClCompile Include="devMenu.cpp" />
     <ClCompile Include="devMenuSync.cpp" />
+    <ClCompile Include="file-unlock.cpp" />
     <ClCompile Include="fmod.cpp" />
     <ClCompile Include="gear-customization.cpp" />
     <ClCompile Include="gamemode.cpp" />
@@ -326,6 +328,9 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClCompile Include="keybindings.cpp" />
     <ClCompile Include="limits.cpp" />
     <ClCompile Include="logging.cpp" />
+    <ClCompile Include="..\vendor\miniz\miniz.c" />
+    <ClCompile Include="..\vendor\miniz\miniz_tdef.c" />
+    <ClCompile Include="..\vendor\miniz\miniz_tinfl.c" />
     <ClCompile Include="..\vendor\minhook\src\buffer.c" />
     <ClCompile Include="..\vendor\minhook\src\hde\hde32.c" />
     <ClCompile Include="..\vendor\minhook\src\hde\hde64.c" />
