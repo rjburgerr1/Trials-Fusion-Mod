@@ -1316,7 +1316,7 @@ namespace SaveStates {
         }
 
         g_initialized = true;
-        LOG_INFO("[SaveStates] Initialized"
+        LOG_VERBOSE("[SaveStates] Initialized"
             << " version=" << (g_isSteamVersion ? "Steam" : "Uplay")
             << " base=0x" << std::hex << g_baseAddress
             << " updateBikeAndCamera=0x" << reinterpret_cast<uintptr_t>(g_updateBikeAndCameraFromTrack)
@@ -1402,7 +1402,7 @@ namespace SaveStates {
 
         g_slot = nextSlot;
 
-        LOG_INFO("[SaveStates] Captured slot"
+        LOG_VERBOSE("[SaveStates] Captured slot"
             << " checkpointIndex=" << g_slot.checkpointIndex
             << " checkpoint=0x" << std::hex << reinterpret_cast<uintptr_t>(g_slot.checkpointPtr)
             << " bike=0x" << reinterpret_cast<uintptr_t>(g_slot.bikePtr)
@@ -1419,7 +1419,7 @@ namespace SaveStates {
         return true;
     }
 
-    static bool ApplyCapturedSlotWithPortalTransform() {
+    static bool RestoreSlotSteamTrackFrame() {
         if (!g_initialized) {
             LOG_ERROR("[SaveStates] Not initialized");
             return false;
@@ -1440,7 +1440,7 @@ namespace SaveStates {
             return false;
         }
 
-        LOG_INFO("[SaveStates] Applying captured slot"
+        LOG_VERBOSE("[SaveStates] Applying captured slot"
             << " checkpointIndex=" << g_slot.checkpointIndex
             << " bike=0x" << reinterpret_cast<uintptr_t>(bike)
             << std::dec
@@ -1485,7 +1485,78 @@ namespace SaveStates {
             LOG_WARNING("[SaveStates] Failed to apply captured scene object velocities");
         }
 
-        LOG_INFO("[SaveStates] Restore complete"
+        LOG_VERBOSE("[SaveStates] Restore complete"
+            << " trackFrameRestore=" << (usedTrackFrameRestore ? "yes" : "no")
+            << " sceneObjects=" << restoredSceneObjects << "/" << g_slot.sceneObjectCount
+            << " velocities=" << restoredVelocities << "/" << g_slot.sceneObjectCount);
+        PreventFinish::NotifySaveStateRestore();
+        return true;
+    }
+
+    static bool RestoreSlotUplayTrackFrame() {
+        if (!g_initialized) {
+            LOG_ERROR("[SaveStates] Not initialized");
+            return false;
+        }
+
+        if (!g_slot.valid) {
+            LOG_WARNING("[SaveStates] No captured slot to restore");
+            return false;
+        }
+
+        LOG_VERBOSE("[SaveStates] Applying captured slot"
+            << " checkpointIndex=" << g_slot.checkpointIndex
+            << " bike=0x" << reinterpret_cast<uintptr_t>(Respawn::GetBikePointer())
+            << std::dec
+            << " time=" << g_slot.raceTimeMs
+            << " faults=" << g_slot.faults
+            << " trackFrame=" << g_slot.trackFrame
+            << " mode=uplay-track-frame");
+
+        void* bike = Respawn::GetBikePointer();
+        if (!bike) {
+            LOG_ERROR("[SaveStates] Uplay restore failed: no bike pointer");
+            return false;
+        }
+
+        if (!RestoreBikeFrameTasks(bike, g_slot.trackFrame, g_slot.trackFrameAux)) {
+            LOG_WARNING("[SaveStates] Failed to restore encrypted frame-task values");
+        }
+        RestoreBikeTrackState(bike, g_slot);
+
+        void* checkpoint = Respawn::GetCheckpointPointer(g_slot.checkpointIndex);
+        bool usedTrackFrameRestore = false;
+        if (!checkpoint) {
+            LOG_WARNING("[SaveStates] Failed to resolve checkpoint pointer for native restore");
+        }
+        else {
+            usedTrackFrameRestore = CallUpdateBikeAndCameraFromTrack(bike, checkpoint, 1, 1);
+        }
+
+        size_t restoredSceneObjects = RestoreSceneObjectSnapshots(bike, g_slot);
+        if (g_slot.sceneObjectCount != 0 && restoredSceneObjects == 0) {
+            LOG_WARNING("[SaveStates] Failed to restore scene object snapshots");
+        }
+
+        if (g_slot.hasBikePoseCache && !RestoreBikePoseCache(bike, g_slot.bikePoseCache)) {
+            LOG_WARNING("[SaveStates] Failed to restore bike pose cache");
+        }
+
+        if (!Respawn::SetFaultCounterValue(g_slot.faults)) {
+            LOG_WARNING("[SaveStates] Failed to restore fault counter");
+        }
+
+        if (!Respawn::SetRaceTimeMs(g_slot.raceTimeMs)) {
+            LOG_WARNING("[SaveStates] Failed to restore race time");
+        }
+
+        size_t restoredVelocities = ApplyCapturedSceneObjectVelocities(bike, g_slot);
+        if (g_slot.sceneObjectCount != 0 && restoredVelocities == 0) {
+            LOG_WARNING("[SaveStates] Failed to apply captured scene object velocities");
+        }
+
+        LOG_VERBOSE("[SaveStates] Restore complete"
+            << " mode=uplay-track-frame"
             << " trackFrameRestore=" << (usedTrackFrameRestore ? "yes" : "no")
             << " sceneObjects=" << restoredSceneObjects << "/" << g_slot.sceneObjectCount
             << " velocities=" << restoredVelocities << "/" << g_slot.sceneObjectCount);
@@ -1504,17 +1575,21 @@ namespace SaveStates {
             return false;
         }
 
-        LOG_INFO("[SaveStates] Starting native track-frame restore"
+        LOG_VERBOSE("[SaveStates] Starting native track-frame restore"
             << " checkpointIndex=" << g_slot.checkpointIndex
             << " time=" << g_slot.raceTimeMs
             << " faults=" << g_slot.faults
             << " trackFrame=" << g_slot.trackFrame);
 
-        return ApplyCapturedSlotWithPortalTransform();
+        if (!g_isSteamVersion) {
+            return RestoreSlotUplayTrackFrame();
+        }
+
+        return RestoreSlotSteamTrackFrame();
     }
 
     void DebugDumpSlot() {
-        LOG_INFO("[SaveStates] Slot"
+        LOG_VERBOSE("[SaveStates] Slot"
             << " valid=" << (g_slot.valid ? "yes" : "no")
             << " checkpointIndex=" << g_slot.checkpointIndex
             << " checkpoint=0x" << std::hex << reinterpret_cast<uintptr_t>(g_slot.checkpointPtr)
@@ -1532,7 +1607,7 @@ namespace SaveStates {
             << " sceneObjects=" << g_slot.sceneObjectCount);
         for (size_t i = 0; i < g_slot.sceneObjectCount; ++i) {
             const SceneObjectSnapshot& snapshot = g_slot.sceneObjects[i];
-            LOG_INFO("[SaveStates]   object[" << i << "]"
+            LOG_VERBOSE("[SaveStates]   object[" << i << "]"
                 << " hash=0x" << std::hex << snapshot.hash
                 << " ptr=0x" << reinterpret_cast<uintptr_t>(snapshot.objectPtr)
                 << std::dec
@@ -1554,17 +1629,17 @@ namespace SaveStates {
 
         if (Keybindings::IsActionPressed(Keybindings::Action::CaptureSaveState)) {
             InterlockedExchange(&g_pendingCapture, 1);
-            LOG_INFO("[SaveStates] Capture queued for main thread");
+            LOG_VERBOSE("[SaveStates] Capture queued for main thread");
         }
 
         if (Keybindings::IsActionPressed(Keybindings::Action::RestoreSaveState)) {
             InterlockedExchange(&g_pendingRestore, 1);
-            LOG_INFO("[SaveStates] Restore queued for main thread");
+            LOG_VERBOSE("[SaveStates] Restore queued for main thread");
         }
 
         if (Keybindings::IsActionPressed(Keybindings::Action::DebugSaveState)) {
             InterlockedExchange(&g_pendingDebugDump, 1);
-            LOG_INFO("[SaveStates] Debug dump queued for main thread");
+            LOG_VERBOSE("[SaveStates] Debug dump queued for main thread");
         }
     }
 
