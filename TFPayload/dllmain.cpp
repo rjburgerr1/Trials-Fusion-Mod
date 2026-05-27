@@ -34,6 +34,7 @@
 #include "prevent-finish.h"
 #include "gamemode.h"
 #include "bike-swap.h"
+#include "save-states.h"
 #include "fmod.h"
 #include <MinHook.h>
 
@@ -267,6 +268,7 @@ void ShutdownTFPayload()
     LeaderboardScanner::Shutdown();
     LeaderboardDirect::Shutdown();
     Pause::Shutdown();
+    SaveStates::Shutdown();
     Respawn::Shutdown();
     Camera::Shutdown();
     Multiplayer::Shutdown();
@@ -422,6 +424,11 @@ static bool Init_ActionScript(void* userData) {
 static bool Init_Respawn(void* userData) {
     InitContext* ctx = (InitContext*)userData;
     return Respawn::Initialize(ctx->baseAddress);
+}
+
+static bool Init_SaveStates(void* userData) {
+    InitContext* ctx = (InitContext*)userData;
+    return SaveStates::Initialize(ctx->baseAddress);
 }
 
 static bool Init_Camera(void* userData) {
@@ -637,6 +644,7 @@ void InitializeTFPayload()
     SafeInitCall("Pause", Init_Pause, &ctx);
     SafeInitCall("ActionScript", Init_ActionScript, &ctx);
     SafeInitCall("Respawn", Init_Respawn, &ctx);
+    SafeInitCall("SaveStates", Init_SaveStates, &ctx);
     SafeInitCall("Camera", Init_Camera, &ctx);
     SafeInitCall("Multiplayer", Init_Multiplayer, &ctx);
     SafeInitCall("HostJoin", Init_HostJoin, &ctx);
@@ -1142,7 +1150,6 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         // Keep core UI controls responsive even when the game's foreground-window
         // focus check is confused by overlays or reload transitions.
         HandleHomeImGuiMenu();
-        HandleKeybindingsMenu();
         HandleToggleConsole();
         if (g_DevMenu) {
             g_DevMenu->UpdateRuntime();
@@ -1168,12 +1175,14 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         HandleShowHelp();
         HandleClearConsole();
         HandleDebugGameState();
+        HandleKeybindingsMenu();
         HandleToggleLimitValidation();
         
         LeaderboardScanner::CheckHotkey();
         LeaderboardDirect::CheckHotkey();
         Pause::CheckHotkey();
         Respawn::CheckHotkey();
+        SaveStates::CheckHotkey();
         Camera::CheckHotkey();
         Multiplayer::CheckHotkey();
         BikeSwap::CheckHotkey();
@@ -1182,10 +1191,14 @@ DWORD WINAPI KeyMonitorThread(LPVOID lpParam)
         // Fmod::Update();
         PreventFinish::Update();
 
+#ifdef DEVELOPMENT_MODE
         const bool editorScaleHeld =
             Keybindings::IsActionDown(Keybindings::Action::EditorScaleDecrease) ||
             Keybindings::IsActionDown(Keybindings::Action::EditorScaleIncrease);
         Sleep(editorScaleHeld ? 16 : 80);
+#else
+        Sleep(80);
+#endif
     }
     return 0;
 }

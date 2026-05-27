@@ -73,6 +73,36 @@ EntityManager+0xe74  selected editor object -> editor visual object/map
 
 ## Engine-Native Calls Worth Using
 
+### Upload object value serialization
+
+```text
+BuildTrackObjectLists
+Uplay RVA 0x0a1c40, Steam RVA 0x1e1710
+
+BuildObjectValuesJson
+Uplay RVA 0xc20380, Steam RVA 0x65fa40
+```
+
+`BuildObjectValuesJson` emits an array of `{ objectName, values }` dictionaries
+from the global object-values staging list at Uplay RVA `0x105125c`. Each object
+record is `0x40` bytes; `record+0x08` is the object name C string,
+`record+0x34` is the value count, and `record+0x3c` points to `0x3c`-byte value
+records. Each value record has `+0x08` value name, `+0x34` value type, and
+`+0x38` value pointer.
+
+The first DEVELOPMENT_MODE `Trace upload values` probe hooked
+`BuildObjectValuesJson` and dereferenced the staging records in the hook. That
+caused access violations during publish, so the live button now only hooks
+`BuildTrackObjectLists` and logs object/value list counts. Do not re-enable
+name/type dereferencing in the publish path without moving it to a safer
+post-call snapshot or a manual inspector action.
+
+The trace now copies the flat `objectList` pointer vector and `valueList`
+`0x50`-byte records into TFPayload-owned buffers immediately after
+`BuildTrackObjectLists` returns. Use `Dump upload snapshot` after a publish
+attempt to log raw bytes/dwords/floats for the last captured records without
+following embedded pointers.
+
 ### Selected object scale delta
 
 ```text
@@ -159,6 +189,11 @@ the existing aspect ratio instead of replacing it with `{b,b,b}`.
 The editor scale hotkeys use the same proportional axis-vector scaling path and
 run from `DevMenu::UpdateRuntime`, so they do not depend on the mod menu window
 being open.
+
+2026-05-26 follow-up: visual scale writes now mark the editor transform dirty.
+Running the selection constraint/bounds refresh here made selected objects
+disappear during scale changes, so that path stays reserved for editor-native
+scale operations until the non-uniform backing fields are identified.
 
 This is still different from the editor's durable backing scale path above. It
 does not replace `EditorScaleBacking_SetUniformScaleAndRefresh` for serialized

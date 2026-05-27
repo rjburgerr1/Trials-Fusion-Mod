@@ -300,6 +300,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
     <ClInclude Include="prevent-finish.h" />
     <ClInclude Include="rendering.h" />
     <ClInclude Include="respawn.h" />
+    <ClInclude Include="save-states.h" />
     <ClInclude Include="tracks.h" />
     <ClInclude Include="acorns.h" />
     <ClInclude Include="ui-view-explorer.h" />
@@ -348,6 +349,7 @@ ping -n 2 127.0.0.1 &gt;nul</Command>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="respawn.cpp" />
+    <ClCompile Include="save-states.cpp" />
     <ClCompile Include="tracks.cpp" />
     <ClCompile Include="acorns.cpp" />
     <ClCompile Include="ui-view-explorer.cpp" />

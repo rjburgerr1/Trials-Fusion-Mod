@@ -337,6 +337,7 @@ private:
     bool m_gearPresetsLoaded;
 };
 
+#ifdef DEVELOPMENT_MODE
 class TweakableUIViewExplorer : public TweakableItem {
 public:
     TweakableUIViewExplorer(int id, const std::string& name)
@@ -346,6 +347,7 @@ public:
     void Reset() override {}
     void ResetToDefault() override {}
 };
+#endif
 
 class TweakableEditorInspector : public TweakableItem {
 public:

@@ -14,7 +14,9 @@
 #include "base-address.h"
 #include "prevent-finish.h"
 #include "fmod.h"
+#ifdef DEVELOPMENT_MODE
 #include "ui-view-explorer.h"
+#endif
 #include "file-unlock.h"
 #include "bike-item-catalog.generated.h"
 #include "gear-set-catalog.generated.h"
@@ -106,6 +108,18 @@ namespace {
     static constexpr uintptr_t APPLY_MATERIAL_COLOR_OVERRIDES_RVA_STEAM = 0x541ad0;
     static constexpr uintptr_t TRACK_EVENT_APPLY_SCENE_OBJECT_RVA_UPLAY = 0x788f50;
     static constexpr uintptr_t TRACK_EVENT_APPLY_SCENE_OBJECT_RVA_STEAM = 0x787d70;
+    static constexpr uintptr_t BUILD_OBJECT_VALUES_JSON_RVA_UPLAY = 0xc20380;
+    static constexpr uintptr_t BUILD_OBJECT_VALUES_JSON_RVA_STEAM = 0x65fa40;
+    static constexpr uintptr_t BUILD_TRACK_OBJECT_LISTS_RVA_UPLAY = 0x0a1c40;
+    static constexpr uintptr_t BUILD_TRACK_OBJECT_LISTS_RVA_STEAM = 0x1e1710;
+    static constexpr uintptr_t UPLOAD_OBJECT_VALUES_GLOBAL_RVA_UPLAY = 0x105125c;
+    static constexpr uintptr_t UPLOAD_OBJECT_VALUES_GLOBAL_RVA_STEAM = 0x105325c;
+    static constexpr uintptr_t SERIALIZE_TRACK_DATA_RVA_UPLAY = 0x2a9d90;
+    static constexpr uintptr_t SERIALIZE_TRACK_DATA_RVA_STEAM = 0x3e9770;
+    static constexpr uintptr_t SERIALIZE_TRACK_DATA_TO_PACKET_RVA_UPLAY = 0x2a8b40;
+    static constexpr uintptr_t SERIALIZE_TRACK_DATA_TO_PACKET_RVA_STEAM = 0x3e8520;
+    static constexpr uintptr_t PROCESS_TRACK_HASHES_AND_SAVE_RVA_UPLAY = 0x51bb20;
+    static constexpr uintptr_t PROCESS_TRACK_HASHES_AND_SAVE_RVA_STEAM = 0x65b240;
     static constexpr size_t EDITOR_MANAGER_SCAN_SIZE = 0x800;
     static constexpr uint32_t MAX_EDITOR_SCENE_OBJECT_SNAPSHOT = 4092;
 
@@ -142,6 +156,11 @@ namespace {
     typedef void(__cdecl* CreateMeshInstancesFunc)(void* sceneObject, void* overrideVector, float blend);
     typedef void(__cdecl* ApplyMaterialColorOverridesFunc)(void* sceneObject, void* overrideEntry, float blend);
     typedef void(__thiscall* TrackEventApplySceneObjectFunc)(void* dispatcher, void* sceneObject, void* eventId, void* eventParam);
+    typedef void(__cdecl* BuildObjectValuesJsonFunc)(void* outValue);
+    typedef void(__thiscall* BuildTrackObjectListsFunc)(void* thisPtr, int* objectList, int* valueList);
+    typedef uint32_t(__thiscall* SerializeTrackDataFunc)(void* thisPtr, void* outStream, char includeBikeState);
+    typedef uint32_t(__cdecl* SerializeTrackDataToPacketFunc)(int packetBuilder);
+    typedef uint32_t(__thiscall* ProcessTrackHashesAndSaveFunc)(void* thisPtr, uint32_t callbackOrTask, int* outputStream);
     typedef bool(__thiscall* SceneObjectGetMaterialParameterFunc)(void* sceneObject, uint32_t parameterHash, void* outParameter, uint32_t selector);
     typedef void(__thiscall* MaterialParameterSetBytesFunc)(void* parameterOwner, void* parameterHandle, const void* value, uint32_t size);
 
@@ -281,6 +300,17 @@ namespace {
         uint32_t unknown18 = 0;
     };
 
+    struct EditorPublishScaleOverride {
+        bool active = false;
+        uintptr_t selectedObject = 0;
+        uintptr_t mappedObject = 0;
+        uintptr_t editorScaleBackingObject = 0;
+        uintptr_t sceneHolder = 0;
+        uintptr_t firstMeshSceneObject = 0;
+        float scale[3] = { 1.0f, 1.0f, 1.0f };
+        uint32_t updatedTick = 0;
+    };
+
     static_assert(sizeof(MaterialColorOverrideEntry) == 0x60, "material override entry must match engine layout");
     static_assert(sizeof(MaterialParameterLookup) == 0x1c, "material parameter lookup must match engine layout");
 
@@ -312,6 +342,33 @@ namespace {
     static MaterialParameterSetBytesFunc g_originalMaterialParameterSetBytes = nullptr;
     static bool g_editorMaterialTrackEventHookInstalled = false;
     static TrackEventApplySceneObjectFunc g_originalTrackEventApplySceneObject = nullptr;
+    static bool g_editorUploadTrackListTraceHookInstalled = false;
+    static bool g_editorUploadTraceArmed = false;
+    static BuildTrackObjectListsFunc g_originalBuildTrackObjectLists = nullptr;
+    static volatile LONG g_editorUploadTraceCount = 0;
+    static constexpr uint32_t EDITOR_UPLOAD_TRACE_MAX_OBJECTS = 16;
+    static constexpr uint32_t EDITOR_UPLOAD_TRACE_MAX_VALUES = 16;
+    static constexpr uint32_t EDITOR_UPLOAD_TRACE_VALUE_RECORD_SIZE = 0x50;
+    static constexpr uint32_t EDITOR_PUBLISH_SCALE_MAX_OVERRIDES = 64;
+    static constexpr uint32_t EDITOR_PUBLISH_SCALE_VALUE_OFFSET = 0x30;
+    static bool g_editorPublishScalePatchEnabled = false;
+    static bool g_editorNativeUniformScaleBackingEnabled = true;
+    static bool g_editorSyncSavedPlacementOnScaleEnabled = true;
+    static EditorPublishScaleOverride g_editorPublishScaleOverrides[EDITOR_PUBLISH_SCALE_MAX_OVERRIDES] = {};
+    static bool g_editorTrackSaveTraceHooksInstalled = false;
+    static SerializeTrackDataFunc g_originalSerializeTrackData = nullptr;
+    static SerializeTrackDataToPacketFunc g_originalSerializeTrackDataToPacket = nullptr;
+    static ProcessTrackHashesAndSaveFunc g_originalProcessTrackHashesAndSave = nullptr;
+    static volatile LONG g_editorTrackSaveTraceCount = 0;
+    static uint32_t g_editorUploadTraceSnapshotIndex = 0;
+    static uint32_t g_editorUploadTraceSnapshotObjectCount = 0;
+    static uint32_t g_editorUploadTraceSnapshotValueCount = 0;
+    static uintptr_t g_editorUploadTraceSnapshotObjectEntries = 0;
+    static uintptr_t g_editorUploadTraceSnapshotValueEntries = 0;
+    static uintptr_t g_editorUploadTraceSnapshotObjects[EDITOR_UPLOAD_TRACE_MAX_OBJECTS] = {};
+    static uint8_t g_editorUploadTraceSnapshotValues
+        [EDITOR_UPLOAD_TRACE_MAX_VALUES][EDITOR_UPLOAD_TRACE_VALUE_RECORD_SIZE] = {};
+    static bool g_editorUploadTraceSnapshotValid = false;
     static bool g_editorMaterialTrackEventTraceArmed = false;
     static volatile LONG g_editorMaterialTrackEventTraceCount = 0;
     static volatile LONG g_editorMaterialTrackEventAnyTraceCount = 0;
@@ -379,6 +436,32 @@ namespace {
         std::ostringstream ss;
         ss << "0x" << std::hex << std::uppercase << value;
         return ss.str();
+    }
+
+    static std::string SafeReadCString(uintptr_t address, size_t maxLen = 96) {
+        if (address == 0 || IsBadReadPtr(reinterpret_cast<void*>(address), 1)) {
+            return "<null>";
+        }
+
+        std::string value;
+        value.reserve(maxLen);
+        for (size_t i = 0; i < maxLen; ++i) {
+            char ch = '\0';
+            if (!SafeReadValue(address + i, ch)) {
+                return value.empty() ? "<unreadable>" : value;
+            }
+            if (ch == '\0') {
+                return value;
+            }
+            if (static_cast<unsigned char>(ch) < 0x20 || static_cast<unsigned char>(ch) > 0x7e) {
+                value.push_back('?');
+            }
+            else {
+                value.push_back(ch);
+            }
+        }
+        value += "...";
+        return value;
     }
 
     static int VariationIndexFromMask(uint32_t mask) {
@@ -492,6 +575,42 @@ namespace {
         return BaseAddress::IsSteamVersion()
             ? TRACK_EVENT_APPLY_SCENE_OBJECT_RVA_STEAM
             : TRACK_EVENT_APPLY_SCENE_OBJECT_RVA_UPLAY;
+    }
+
+    static uintptr_t GetBuildObjectValuesJsonRva() {
+        return BaseAddress::IsSteamVersion()
+            ? BUILD_OBJECT_VALUES_JSON_RVA_STEAM
+            : BUILD_OBJECT_VALUES_JSON_RVA_UPLAY;
+    }
+
+    static uintptr_t GetBuildTrackObjectListsRva() {
+        return BaseAddress::IsSteamVersion()
+            ? BUILD_TRACK_OBJECT_LISTS_RVA_STEAM
+            : BUILD_TRACK_OBJECT_LISTS_RVA_UPLAY;
+    }
+
+    static uintptr_t GetUploadObjectValuesGlobalRva() {
+        return BaseAddress::IsSteamVersion()
+            ? UPLOAD_OBJECT_VALUES_GLOBAL_RVA_STEAM
+            : UPLOAD_OBJECT_VALUES_GLOBAL_RVA_UPLAY;
+    }
+
+    static uintptr_t GetSerializeTrackDataRva() {
+        return BaseAddress::IsSteamVersion()
+            ? SERIALIZE_TRACK_DATA_RVA_STEAM
+            : SERIALIZE_TRACK_DATA_RVA_UPLAY;
+    }
+
+    static uintptr_t GetSerializeTrackDataToPacketRva() {
+        return BaseAddress::IsSteamVersion()
+            ? SERIALIZE_TRACK_DATA_TO_PACKET_RVA_STEAM
+            : SERIALIZE_TRACK_DATA_TO_PACKET_RVA_UPLAY;
+    }
+
+    static uintptr_t GetProcessTrackHashesAndSaveRva() {
+        return BaseAddress::IsSteamVersion()
+            ? PROCESS_TRACK_HASHES_AND_SAVE_RVA_STEAM
+            : PROCESS_TRACK_HASHES_AND_SAVE_RVA_UPLAY;
     }
 
     static uintptr_t ResolveGameManagerForEditorInspector() {
@@ -644,6 +763,38 @@ namespace {
         const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
         return reinterpret_cast<TrackEventApplySceneObjectFunc>(
             baseAddress + GetTrackEventApplySceneObjectRva());
+    }
+
+    static BuildObjectValuesJsonFunc ResolveBuildObjectValuesJson() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<BuildObjectValuesJsonFunc>(
+            baseAddress + GetBuildObjectValuesJsonRva());
+    }
+
+    static BuildTrackObjectListsFunc ResolveBuildTrackObjectLists() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<BuildTrackObjectListsFunc>(
+            baseAddress + GetBuildTrackObjectListsRva());
+    }
+
+    static uintptr_t ResolveUploadObjectValuesGlobal() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return baseAddress + GetUploadObjectValuesGlobalRva();
+    }
+
+    static SerializeTrackDataFunc ResolveSerializeTrackData() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<SerializeTrackDataFunc>(baseAddress + GetSerializeTrackDataRva());
+    }
+
+    static SerializeTrackDataToPacketFunc ResolveSerializeTrackDataToPacket() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<SerializeTrackDataToPacketFunc>(baseAddress + GetSerializeTrackDataToPacketRva());
+    }
+
+    static ProcessTrackHashesAndSaveFunc ResolveProcessTrackHashesAndSave() {
+        const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+        return reinterpret_cast<ProcessTrackHashesAndSaveFunc>(baseAddress + GetProcessTrackHashesAndSaveRva());
     }
 
     static bool ForceSceneObjectVisualRefresh(uintptr_t sceneObject);
@@ -1341,6 +1492,598 @@ namespace {
         }
     }
 
+    static void LogTrackObjectListSnapshot(const char* phase, int* objectList, int* valueList) {
+        if (!g_editorUploadTraceArmed) {
+            return;
+        }
+
+        int objectCount = 0;
+        int objectCapacity = 0;
+        uintptr_t objectEntries = 0;
+        int valueCount = 0;
+        int valueCapacity = 0;
+        uintptr_t valueEntries = 0;
+        if (objectList && IsReadableRange(reinterpret_cast<uintptr_t>(objectList), 0x0c)) {
+            SafeReadValue(reinterpret_cast<uintptr_t>(objectList), objectCount);
+            SafeReadValue(reinterpret_cast<uintptr_t>(objectList) + 0x04, objectCapacity);
+            SafeReadValue(reinterpret_cast<uintptr_t>(objectList) + 0x08, objectEntries);
+        }
+        if (valueList && IsReadableRange(reinterpret_cast<uintptr_t>(valueList), 0x0c)) {
+            SafeReadValue(reinterpret_cast<uintptr_t>(valueList), valueCount);
+            SafeReadValue(reinterpret_cast<uintptr_t>(valueList) + 0x04, valueCapacity);
+            SafeReadValue(reinterpret_cast<uintptr_t>(valueList) + 0x08, valueEntries);
+        }
+
+        LOG_INFO("[EditorUploadTrace] BuildTrackObjectLists " << phase
+            << " objectCount=" << objectCount
+            << " objectCapacity=" << objectCapacity
+            << " objectEntries=" << (objectEntries ? HexAddress(objectEntries) : "<null>")
+            << " valueCount=" << valueCount
+            << " valueCapacity=" << valueCapacity
+            << " valueEntries=" << (valueEntries ? HexAddress(valueEntries) : "<null>"));
+    }
+
+    static void CaptureTrackObjectListSnapshot(LONG traceIndex, int* objectList, int* valueList) {
+        int objectCount = 0;
+        uintptr_t objectEntries = 0;
+        int valueCount = 0;
+        uintptr_t valueEntries = 0;
+        if (objectList && IsReadableRange(reinterpret_cast<uintptr_t>(objectList), 0x0c)) {
+            SafeReadValue(reinterpret_cast<uintptr_t>(objectList), objectCount);
+            SafeReadValue(reinterpret_cast<uintptr_t>(objectList) + 0x08, objectEntries);
+        }
+        if (valueList && IsReadableRange(reinterpret_cast<uintptr_t>(valueList), 0x0c)) {
+            SafeReadValue(reinterpret_cast<uintptr_t>(valueList), valueCount);
+            SafeReadValue(reinterpret_cast<uintptr_t>(valueList) + 0x08, valueEntries);
+        }
+
+        g_editorUploadTraceSnapshotValid = false;
+        g_editorUploadTraceSnapshotIndex = static_cast<uint32_t>(traceIndex);
+        g_editorUploadTraceSnapshotObjectCount = objectCount > 0
+            ? static_cast<uint32_t>(objectCount)
+            : 0;
+        g_editorUploadTraceSnapshotValueCount = valueCount > 0
+            ? static_cast<uint32_t>(valueCount)
+            : 0;
+        g_editorUploadTraceSnapshotObjectEntries = objectEntries;
+        g_editorUploadTraceSnapshotValueEntries = valueEntries;
+        memset(g_editorUploadTraceSnapshotObjects, 0, sizeof(g_editorUploadTraceSnapshotObjects));
+        memset(g_editorUploadTraceSnapshotValues, 0, sizeof(g_editorUploadTraceSnapshotValues));
+
+        const uint32_t objectCopyCount =
+            g_editorUploadTraceSnapshotObjectCount < EDITOR_UPLOAD_TRACE_MAX_OBJECTS
+            ? g_editorUploadTraceSnapshotObjectCount
+            : EDITOR_UPLOAD_TRACE_MAX_OBJECTS;
+        const uint32_t valueCopyCount =
+            g_editorUploadTraceSnapshotValueCount < EDITOR_UPLOAD_TRACE_MAX_VALUES
+            ? g_editorUploadTraceSnapshotValueCount
+            : EDITOR_UPLOAD_TRACE_MAX_VALUES;
+
+        bool copiedAny = false;
+        if (objectEntries != 0
+            && objectCopyCount != 0
+            && IsReadableRange(objectEntries, objectCopyCount * sizeof(uintptr_t))) {
+            copiedAny = SafeReadMemory(
+                objectEntries,
+                g_editorUploadTraceSnapshotObjects,
+                objectCopyCount * sizeof(uintptr_t)) || copiedAny;
+        }
+        if (valueEntries != 0
+            && valueCopyCount != 0
+            && IsReadableRange(
+                valueEntries,
+                static_cast<size_t>(valueCopyCount) * EDITOR_UPLOAD_TRACE_VALUE_RECORD_SIZE)) {
+            copiedAny = SafeReadMemory(
+                valueEntries,
+                g_editorUploadTraceSnapshotValues,
+                static_cast<size_t>(valueCopyCount) * EDITOR_UPLOAD_TRACE_VALUE_RECORD_SIZE) || copiedAny;
+        }
+
+        g_editorUploadTraceSnapshotValid = copiedAny;
+        LOG_INFO("[EditorUploadTrace] captured flat snapshot index=" << traceIndex
+            << " objects=" << g_editorUploadTraceSnapshotObjectCount
+            << " values=" << g_editorUploadTraceSnapshotValueCount
+            << " copied=" << copiedAny);
+    }
+
+    static bool PublishScaleOverrideMatches(
+        const EditorPublishScaleOverride& overrideEntry,
+        uintptr_t objectPtr) {
+        return overrideEntry.active
+            && objectPtr != 0
+            && (objectPtr == overrideEntry.selectedObject
+                || objectPtr == overrideEntry.mappedObject
+                || objectPtr == overrideEntry.editorScaleBackingObject
+                || objectPtr == overrideEntry.sceneHolder
+                || objectPtr == overrideEntry.firstMeshSceneObject);
+    }
+
+    static const EditorPublishScaleOverride* FindSingleActivePublishScaleOverride() {
+        const EditorPublishScaleOverride* singleOverride = nullptr;
+        const uint32_t now = GetTickCount();
+        for (uint32_t i = 0; i < EDITOR_PUBLISH_SCALE_MAX_OVERRIDES; ++i) {
+            const EditorPublishScaleOverride& overrideEntry = g_editorPublishScaleOverrides[i];
+            if (!overrideEntry.active) {
+                continue;
+            }
+
+            if (overrideEntry.updatedTick != 0
+                && static_cast<uint32_t>(now - overrideEntry.updatedTick) > 30u * 60u * 1000u) {
+                continue;
+            }
+
+            if (singleOverride != nullptr) {
+                return nullptr;
+            }
+            singleOverride = &overrideEntry;
+        }
+
+        return singleOverride;
+    }
+
+    static bool HasActivePublishScaleOverride() {
+        return FindSingleActivePublishScaleOverride() != nullptr;
+    }
+
+    static const EditorPublishScaleOverride* FindPublishScaleOverride(uintptr_t objectPtr) {
+        const uint32_t now = GetTickCount();
+        for (uint32_t i = 0; i < EDITOR_PUBLISH_SCALE_MAX_OVERRIDES; ++i) {
+            const EditorPublishScaleOverride& overrideEntry = g_editorPublishScaleOverrides[i];
+            if (!PublishScaleOverrideMatches(overrideEntry, objectPtr)) {
+                continue;
+            }
+
+            if (overrideEntry.updatedTick != 0
+                && static_cast<uint32_t>(now - overrideEntry.updatedTick) > 30u * 60u * 1000u) {
+                continue;
+            }
+
+            return &overrideEntry;
+        }
+
+        return nullptr;
+    }
+
+    static void PatchPublishScaleValueRecord(
+        uint32_t index,
+        uintptr_t objectPtr,
+        uintptr_t scaleAddress,
+        const EditorPublishScaleOverride& overrideEntry,
+        const char* matchReason) {
+        float oldScale[3] = {};
+        SafeReadMemory(scaleAddress, oldScale, sizeof(oldScale));
+        if (SafeWriteMemory(scaleAddress, overrideEntry.scale, sizeof(overrideEntry.scale))) {
+            LOG_INFO("[EditorUploadTrace] patched publish/save scale record index=" << index
+                << " reason=" << matchReason
+                << " object=" << (objectPtr ? HexAddress(objectPtr) : "<null>")
+                << " old=(" << oldScale[0] << ", " << oldScale[1] << ", " << oldScale[2] << ")"
+                << " new=(" << overrideEntry.scale[0] << ", " << overrideEntry.scale[1]
+                << ", " << overrideEntry.scale[2] << ")"
+                << " selected=" << (overrideEntry.selectedObject
+                    ? HexAddress(overrideEntry.selectedObject)
+                    : "<null>")
+                << " mapped=" << (overrideEntry.mappedObject
+                    ? HexAddress(overrideEntry.mappedObject)
+                    : "<null>")
+                << " backing=" << (overrideEntry.editorScaleBackingObject
+                    ? HexAddress(overrideEntry.editorScaleBackingObject)
+                    : "<null>")
+                << " holder=" << (overrideEntry.sceneHolder
+                    ? HexAddress(overrideEntry.sceneHolder)
+                    : "<null>")
+                << " mesh=" << (overrideEntry.firstMeshSceneObject
+                    ? HexAddress(overrideEntry.firstMeshSceneObject)
+                    : "<null>"));
+        }
+        else {
+            LOG_WARNING("[EditorUploadTrace] failed to patch publish/save scale record index=" << index
+                << " object=" << (objectPtr ? HexAddress(objectPtr) : "<null>")
+                << " address=" << HexAddress(scaleAddress));
+        }
+    }
+
+    static void PatchPublishScaleValueRecords(int* objectList, int* valueList) {
+        if (!g_editorPublishScalePatchEnabled || objectList == nullptr || valueList == nullptr) {
+            return;
+        }
+
+        int objectCount = 0;
+        uintptr_t objectEntries = 0;
+        int valueCount = 0;
+        uintptr_t valueEntries = 0;
+        if (!IsReadableRange(reinterpret_cast<uintptr_t>(objectList), 0x0c)
+            || !IsReadableRange(reinterpret_cast<uintptr_t>(valueList), 0x0c)
+            || !SafeReadValue(reinterpret_cast<uintptr_t>(objectList), objectCount)
+            || !SafeReadValue(reinterpret_cast<uintptr_t>(objectList) + 0x08, objectEntries)
+            || !SafeReadValue(reinterpret_cast<uintptr_t>(valueList), valueCount)
+            || !SafeReadValue(reinterpret_cast<uintptr_t>(valueList) + 0x08, valueEntries)
+            || objectCount <= 0
+            || valueCount <= 0
+            || objectEntries == 0
+            || valueEntries == 0) {
+            return;
+        }
+
+        const uint32_t pairCount = static_cast<uint32_t>(objectCount < valueCount ? objectCount : valueCount);
+        if (!IsReadableRange(objectEntries, pairCount * sizeof(uintptr_t))
+            || !IsReadableRange(
+                valueEntries,
+                static_cast<size_t>(pairCount) * EDITOR_UPLOAD_TRACE_VALUE_RECORD_SIZE)) {
+            return;
+        }
+
+        const EditorPublishScaleOverride* singleOverride =
+            pairCount == 1 ? FindSingleActivePublishScaleOverride() : nullptr;
+        for (uint32_t i = 0; i < pairCount; ++i) {
+            uintptr_t objectPtr = 0;
+            if (!SafeReadValue(objectEntries + i * sizeof(uintptr_t), objectPtr)) {
+                continue;
+            }
+
+            const EditorPublishScaleOverride* overrideEntry = FindPublishScaleOverride(objectPtr);
+            const char* matchReason = "object-pointer";
+            if (overrideEntry == nullptr && singleOverride != nullptr) {
+                overrideEntry = singleOverride;
+                matchReason = "single-record-fallback";
+            }
+            if (overrideEntry == nullptr) {
+                continue;
+            }
+
+            const uintptr_t scaleAddress =
+                valueEntries
+                + static_cast<uintptr_t>(i) * EDITOR_UPLOAD_TRACE_VALUE_RECORD_SIZE
+                + EDITOR_PUBLISH_SCALE_VALUE_OFFSET;
+            PatchPublishScaleValueRecord(i, objectPtr, scaleAddress, *overrideEntry, matchReason);
+        }
+    }
+
+    static void DumpEditorUploadTraceSnapshot() {
+        if (!g_editorUploadTraceSnapshotValid) {
+            LOG_WARNING("[EditorUploadTrace] no flat upload snapshot captured yet");
+            return;
+        }
+
+        LOG_INFO("[EditorUploadTrace] flat snapshot dump index=" << g_editorUploadTraceSnapshotIndex
+            << " objectCount=" << g_editorUploadTraceSnapshotObjectCount
+            << " valueCount=" << g_editorUploadTraceSnapshotValueCount
+            << " objectEntries=" << (g_editorUploadTraceSnapshotObjectEntries
+                ? HexAddress(g_editorUploadTraceSnapshotObjectEntries)
+                : "<null>")
+            << " valueEntries=" << (g_editorUploadTraceSnapshotValueEntries
+                ? HexAddress(g_editorUploadTraceSnapshotValueEntries)
+                : "<null>"));
+
+        const uint32_t objectDumpCount =
+            g_editorUploadTraceSnapshotObjectCount < EDITOR_UPLOAD_TRACE_MAX_OBJECTS
+            ? g_editorUploadTraceSnapshotObjectCount
+            : EDITOR_UPLOAD_TRACE_MAX_OBJECTS;
+        for (uint32_t i = 0; i < objectDumpCount; ++i) {
+            LOG_INFO("[EditorUploadTrace] objectPtr[" << i << "]="
+                << (g_editorUploadTraceSnapshotObjects[i]
+                    ? HexAddress(g_editorUploadTraceSnapshotObjects[i])
+                    : "<null>"));
+        }
+
+        const uint32_t valueDumpCount =
+            g_editorUploadTraceSnapshotValueCount < EDITOR_UPLOAD_TRACE_MAX_VALUES
+            ? g_editorUploadTraceSnapshotValueCount
+            : EDITOR_UPLOAD_TRACE_MAX_VALUES;
+        for (uint32_t i = 0; i < valueDumpCount; ++i) {
+            const uint8_t* record = g_editorUploadTraceSnapshotValues[i];
+            std::ostringstream hexLine;
+            hexLine << "[EditorUploadTrace] valueRecord[" << i << "] bytes";
+            for (uint32_t offset = 0; offset < EDITOR_UPLOAD_TRACE_VALUE_RECORD_SIZE; ++offset) {
+                if ((offset % 16) == 0) {
+                    hexLine << " |" << std::hex << std::uppercase;
+                    if (offset < 0x10) {
+                        hexLine << "0";
+                    }
+                    hexLine << offset << ":";
+                }
+                const uint32_t byteValue = record[offset];
+                if (byteValue < 0x10) {
+                    hexLine << " 0";
+                }
+                else {
+                    hexLine << " ";
+                }
+                hexLine << byteValue;
+            }
+            LOG_INFO(hexLine.str());
+
+            for (uint32_t offset = 0; offset + sizeof(uint32_t) <= EDITOR_UPLOAD_TRACE_VALUE_RECORD_SIZE; offset += 4) {
+                uint32_t raw = 0;
+                float asFloat = 0.0f;
+                memcpy(&raw, record + offset, sizeof(raw));
+                memcpy(&asFloat, record + offset, sizeof(asFloat));
+                LOG_INFO("[EditorUploadTrace] valueRecord[" << i << "] +0x"
+                    << std::hex << std::uppercase << offset << std::dec
+                    << " u32=0x" << std::hex << std::uppercase << raw << std::dec
+                    << " float=" << asFloat);
+            }
+        }
+    }
+
+    static void __fastcall Hook_BuildTrackObjectLists(void* thisPtr, void* edxUnused, int* objectList, int* valueList) {
+        (void)edxUnused;
+        const LONG traceIndex = g_editorUploadTraceArmed
+            ? InterlockedIncrement(&g_editorUploadTraceCount)
+            : 0;
+        if (traceIndex > 0 && traceIndex <= 16) {
+            LogTrackObjectListSnapshot("before", objectList, valueList);
+        }
+        if (g_originalBuildTrackObjectLists) {
+            g_originalBuildTrackObjectLists(thisPtr, objectList, valueList);
+        }
+        PatchPublishScaleValueRecords(objectList, valueList);
+        if (traceIndex > 0 && traceIndex <= 16) {
+            LogTrackObjectListSnapshot("after", objectList, valueList);
+            CaptureTrackObjectListSnapshot(traceIndex, objectList, valueList);
+            if (traceIndex == 16) {
+                g_editorUploadTraceArmed = false;
+                LOG_INFO("[EditorUploadTrace] track object list trace auto-disarmed after 16 captures");
+            }
+        }
+    }
+
+    static void EnsureEditorUploadTraceHooksInstalled() {
+        if (g_editorUploadTrackListTraceHookInstalled) {
+            return;
+        }
+
+        BuildTrackObjectListsFunc trackObjectsTarget = ResolveBuildTrackObjectLists();
+        bool installed = false;
+
+        if (trackObjectsTarget) {
+            MH_STATUS hookStatus = MH_CreateHook(
+                reinterpret_cast<LPVOID>(trackObjectsTarget),
+                reinterpret_cast<LPVOID>(&Hook_BuildTrackObjectLists),
+                reinterpret_cast<LPVOID*>(&g_originalBuildTrackObjectLists));
+            if (hookStatus == MH_OK || hookStatus == MH_ERROR_ALREADY_CREATED) {
+                hookStatus = MH_EnableHook(reinterpret_cast<LPVOID>(trackObjectsTarget));
+                installed = hookStatus == MH_OK || hookStatus == MH_ERROR_ENABLED;
+            }
+            else {
+                LOG_WARNING("[EditorUploadTrace] Failed to create BuildTrackObjectLists hook: "
+                    << MH_StatusToString(hookStatus));
+            }
+        }
+
+        g_editorUploadTrackListTraceHookInstalled = installed;
+        LOG_INFO("[EditorUploadTrace] track-list hook " << (installed ? "installed" : "not installed")
+            << " BuildTrackObjectLists=0x" << std::hex << std::uppercase << GetBuildTrackObjectListsRva() << std::dec);
+    }
+
+    static void LogEditorTrackSaveTrace(
+        const char* name,
+        LONG index,
+        void* thisPtr,
+        void* arg0,
+        uintptr_t arg1,
+        uint32_t result,
+        bool afterCall) {
+        if (!HasActivePublishScaleOverride() && !g_editorUploadTraceArmed) {
+            return;
+        }
+
+        LOG_INFO("[EditorTrackSaveTrace] " << (afterCall ? "after " : "before ")
+            << name
+            << " index=" << index
+            << " this=" << (thisPtr ? HexAddress(reinterpret_cast<uintptr_t>(thisPtr)) : "<null>")
+            << " arg0=" << (arg0 ? HexAddress(reinterpret_cast<uintptr_t>(arg0)) : "<null>")
+            << " arg1=0x" << std::hex << std::uppercase << arg1 << std::dec
+            << " result=0x" << std::hex << std::uppercase << result << std::dec);
+    }
+
+    static uint32_t __fastcall Hook_SerializeTrackData(
+        void* thisPtr,
+        void* edxUnused,
+        void* outStream,
+        char includeBikeState) {
+        (void)edxUnused;
+        const LONG traceIndex = InterlockedIncrement(&g_editorTrackSaveTraceCount);
+        LogEditorTrackSaveTrace(
+            "SerializeTrackData",
+            traceIndex,
+            thisPtr,
+            outStream,
+            static_cast<uintptr_t>(static_cast<unsigned char>(includeBikeState)),
+            0,
+            false);
+        uint32_t result = 0;
+        if (g_originalSerializeTrackData) {
+            result = g_originalSerializeTrackData(thisPtr, outStream, includeBikeState);
+        }
+        LogEditorTrackSaveTrace(
+            "SerializeTrackData",
+            traceIndex,
+            thisPtr,
+            outStream,
+            static_cast<uintptr_t>(static_cast<unsigned char>(includeBikeState)),
+            result,
+            true);
+        return result;
+    }
+
+    static uint32_t __cdecl Hook_SerializeTrackDataToPacket(int packetBuilder) {
+        const LONG traceIndex = InterlockedIncrement(&g_editorTrackSaveTraceCount);
+        LogEditorTrackSaveTrace(
+            "SerializeTrackDataToPacket",
+            traceIndex,
+            nullptr,
+            reinterpret_cast<void*>(packetBuilder),
+            0,
+            0,
+            false);
+        uint32_t result = 0;
+        if (g_originalSerializeTrackDataToPacket) {
+            result = g_originalSerializeTrackDataToPacket(packetBuilder);
+        }
+        LogEditorTrackSaveTrace(
+            "SerializeTrackDataToPacket",
+            traceIndex,
+            nullptr,
+            reinterpret_cast<void*>(packetBuilder),
+            0,
+            result,
+            true);
+        return result;
+    }
+
+    static uint32_t __fastcall Hook_ProcessTrackHashesAndSave(
+        void* thisPtr,
+        void* edxUnused,
+        uint32_t callbackOrTask,
+        int* outputStream) {
+        (void)edxUnused;
+        const LONG traceIndex = InterlockedIncrement(&g_editorTrackSaveTraceCount);
+        LogEditorTrackSaveTrace(
+            "ProcessTrackHashesAndSave",
+            traceIndex,
+            thisPtr,
+            outputStream,
+            callbackOrTask,
+            0,
+            false);
+        uint32_t result = 0;
+        if (g_originalProcessTrackHashesAndSave) {
+            result = g_originalProcessTrackHashesAndSave(thisPtr, callbackOrTask, outputStream);
+        }
+        LogEditorTrackSaveTrace(
+            "ProcessTrackHashesAndSave",
+            traceIndex,
+            thisPtr,
+            outputStream,
+            callbackOrTask,
+            result,
+            true);
+        return result;
+    }
+
+    static bool CreateAndEnableTraceHook(
+        LPVOID target,
+        LPVOID detour,
+        LPVOID* original,
+        const char* name) {
+        if (target == nullptr || detour == nullptr || original == nullptr) {
+            return false;
+        }
+
+        MH_STATUS hookStatus = MH_CreateHook(target, detour, original);
+        if (hookStatus != MH_OK && hookStatus != MH_ERROR_ALREADY_CREATED) {
+            LOG_WARNING("[EditorTrackSaveTrace] Failed to create " << name
+                << " hook: " << MH_StatusToString(hookStatus));
+            return false;
+        }
+
+        hookStatus = MH_EnableHook(target);
+        if (hookStatus != MH_OK && hookStatus != MH_ERROR_ENABLED) {
+            LOG_WARNING("[EditorTrackSaveTrace] Failed to enable " << name
+                << " hook: " << MH_StatusToString(hookStatus));
+            return false;
+        }
+
+        return true;
+    }
+
+    static void EnsureEditorTrackSaveTraceHooksInstalled() {
+        LOG_INFO("[EditorTrackSaveTrace] serializer hooks disabled; previous live hook path was unsafe during save");
+        return;
+        if (g_editorTrackSaveTraceHooksInstalled) {
+            return;
+        }
+
+        bool installedAny = false;
+        installedAny = CreateAndEnableTraceHook(
+            reinterpret_cast<LPVOID>(ResolveSerializeTrackData()),
+            reinterpret_cast<LPVOID>(&Hook_SerializeTrackData),
+            reinterpret_cast<LPVOID*>(&g_originalSerializeTrackData),
+            "SerializeTrackData") || installedAny;
+        installedAny = CreateAndEnableTraceHook(
+            reinterpret_cast<LPVOID>(ResolveSerializeTrackDataToPacket()),
+            reinterpret_cast<LPVOID>(&Hook_SerializeTrackDataToPacket),
+            reinterpret_cast<LPVOID*>(&g_originalSerializeTrackDataToPacket),
+            "SerializeTrackDataToPacket") || installedAny;
+        installedAny = CreateAndEnableTraceHook(
+            reinterpret_cast<LPVOID>(ResolveProcessTrackHashesAndSave()),
+            reinterpret_cast<LPVOID>(&Hook_ProcessTrackHashesAndSave),
+            reinterpret_cast<LPVOID*>(&g_originalProcessTrackHashesAndSave),
+            "ProcessTrackHashesAndSave") || installedAny;
+
+        g_editorTrackSaveTraceHooksInstalled = installedAny;
+        LOG_INFO("[EditorTrackSaveTrace] hooks " << (installedAny ? "installed" : "not installed")
+            << " SerializeTrackData=0x" << std::hex << std::uppercase << GetSerializeTrackDataRva()
+            << " SerializeTrackDataToPacket=0x" << GetSerializeTrackDataToPacketRva()
+            << " ProcessTrackHashesAndSave=0x" << GetProcessTrackHashesAndSaveRva()
+            << std::dec);
+    }
+
+    static void RememberEditorPublishScaleOverride(
+        const SelectedEditorObject& selected,
+        const float scale[3]) {
+        if (!g_editorPublishScalePatchEnabled || scale == nullptr || selected.selectedObject == 0) {
+            return;
+        }
+
+        if (g_editorPublishScalePatchEnabled) {
+            EnsureEditorUploadTraceHooksInstalled();
+        }
+        if (g_editorPublishScalePatchEnabled && !g_editorUploadTrackListTraceHookInstalled) {
+            return;
+        }
+
+        uint32_t slot = EDITOR_PUBLISH_SCALE_MAX_OVERRIDES;
+        uint32_t oldestSlot = 0;
+        uint32_t oldestTick = 0xffffffffu;
+        for (uint32_t i = 0; i < EDITOR_PUBLISH_SCALE_MAX_OVERRIDES; ++i) {
+            EditorPublishScaleOverride& overrideEntry = g_editorPublishScaleOverrides[i];
+            if (overrideEntry.active
+                && (overrideEntry.selectedObject == selected.selectedObject
+                    || overrideEntry.mappedObject == selected.mappedObject
+                    || overrideEntry.editorScaleBackingObject == selected.editorScaleBackingObject
+                    || overrideEntry.sceneHolder == selected.sceneHolder
+                    || overrideEntry.firstMeshSceneObject == selected.firstMeshSceneObject)) {
+                slot = i;
+                break;
+            }
+
+            if (!overrideEntry.active) {
+                slot = i;
+                break;
+            }
+
+            if (overrideEntry.updatedTick < oldestTick) {
+                oldestTick = overrideEntry.updatedTick;
+                oldestSlot = i;
+            }
+        }
+
+        if (slot == EDITOR_PUBLISH_SCALE_MAX_OVERRIDES) {
+            slot = oldestSlot;
+        }
+
+        EditorPublishScaleOverride& overrideEntry = g_editorPublishScaleOverrides[slot];
+        overrideEntry.active = true;
+        overrideEntry.selectedObject = selected.selectedObject;
+        overrideEntry.mappedObject = selected.mappedObject;
+        overrideEntry.editorScaleBackingObject = selected.editorScaleBackingObject;
+        overrideEntry.sceneHolder = selected.sceneHolder;
+        overrideEntry.firstMeshSceneObject = selected.firstMeshSceneObject;
+        overrideEntry.scale[0] = scale[0];
+        overrideEntry.scale[1] = scale[1];
+        overrideEntry.scale[2] = scale[2];
+        overrideEntry.updatedTick = GetTickCount();
+
+        LOG_VERBOSE("[EditorUploadTrace] remembered publish scale slot=" << slot
+            << " selected=" << HexAddress(selected.selectedObject)
+            << " mapped=" << (selected.mappedObject ? HexAddress(selected.mappedObject) : "<null>")
+            << " backing=" << (selected.editorScaleBackingObject ? HexAddress(selected.editorScaleBackingObject) : "<null>")
+            << " holder=" << (selected.sceneHolder ? HexAddress(selected.sceneHolder) : "<null>")
+            << " mesh=" << (selected.firstMeshSceneObject ? HexAddress(selected.firstMeshSceneObject) : "<null>")
+            << " scale=(" << scale[0] << ", " << scale[1] << ", " << scale[2] << ")");
+    }
+
     static bool CaptureEngineSceneObjects(
         uintptr_t sceneRoot,
         uint32_t objectType,
@@ -1978,6 +2721,7 @@ namespace {
         uintptr_t nudgeObject,
         float epsilon,
         uint32_t restoreDelayMs);
+    static bool RunUnsafeSelectionPostScaleRefresh(uintptr_t selectionManager);
     static void AppendRawDwordFields(std::ostringstream& ss, const char* title, uintptr_t baseAddress, uintptr_t byteCount);
 
     static bool SetSceneObjectScaleVector(uintptr_t sceneObject, float uniformScale) {
@@ -2116,16 +2860,6 @@ namespace {
             }
         }
 
-        RenderGraphicsAndUpdateCameraFunc renderUpdate = ResolveRenderGraphicsAndUpdateCamera();
-        if (renderUpdate && sceneObject != 0 && IsReadableRange(sceneObject, sizeof(uintptr_t))) {
-            __try {
-                renderUpdate(reinterpret_cast<void*>(sceneObject));
-                refreshed = true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER) {
-            }
-        }
-
         return refreshed;
     }
 
@@ -2153,6 +2887,10 @@ namespace {
         return scaledObjectRefreshed || refreshObjectRefreshed;
     }
 
+    static void CommitEditorVisualScaleChange() {
+        MarkEditorTransformDirty();
+    }
+
     static bool ReadSceneObjectPosition(uintptr_t sceneObject, float outPosition[3]) {
         if (sceneObject == 0 || outPosition == nullptr || !IsReadableRange(sceneObject + 0x28, sizeof(uintptr_t))) {
             return false;
@@ -2163,6 +2901,93 @@ namespace {
             && transform != 0
             && IsReadableRange(transform + 0x14, sizeof(float) * 3)
             && SafeReadMemory(transform + 0x14, outPosition, sizeof(float) * 3);
+    }
+
+    static bool ReadEditorTransformSavedPosition(uintptr_t editorTransform, float outPosition[3]) {
+        return editorTransform != 0
+            && outPosition != nullptr
+            && IsReadableRange(editorTransform + 0x18, sizeof(float))
+            && SafeReadMemory(editorTransform + 0x10, outPosition, sizeof(float) * 3);
+    }
+
+    static bool WriteEditorTransformSavedPosition(uintptr_t editorTransform, const float position[3]) {
+        return editorTransform != 0
+            && position != nullptr
+            && IsReadableRange(editorTransform + 0x18, sizeof(float))
+            && SafeWriteMemory(editorTransform + 0x10, position, sizeof(float) * 3);
+    }
+
+    static bool SyncEditorSavedPlacementFromSceneObject(
+        const SelectedEditorObject& selected,
+        uintptr_t sceneObject,
+        const char* reason) {
+        if (!g_editorSyncSavedPlacementOnScaleEnabled) {
+            return false;
+        }
+        if (selected.editorTransform == 0 || sceneObject == 0) {
+            LOG_INFO("[EditorInspector] sync saved placement skipped reason="
+                << (reason ? reason : "<unknown>")
+                << " selectedObject=" << (selected.selectedObject ? HexAddress(selected.selectedObject) : "<null>")
+                << " editorTransformEA8=" << (selected.editorTransform ? HexAddress(selected.editorTransform) : "<null>")
+                << " sceneObject=" << (sceneObject ? HexAddress(sceneObject) : "<null>"));
+            return false;
+        }
+
+        float livePosition[3] = {};
+        float oldSavedPosition[3] = {};
+        const bool readLive = ReadSceneObjectPosition(sceneObject, livePosition);
+        const bool readSaved = ReadEditorTransformSavedPosition(selected.editorTransform, oldSavedPosition);
+        if (!readLive || !readSaved) {
+            uintptr_t sceneTransform = 0;
+            SafeReadValue(sceneObject + 0x28, sceneTransform);
+            LOG_INFO("[EditorInspector] sync saved placement failed reason="
+                << (reason ? reason : "<unknown>")
+                << " selectedObject=" << (selected.selectedObject ? HexAddress(selected.selectedObject) : "<null>")
+                << " editorTransformEA8=" << HexAddress(selected.editorTransform)
+                << " sceneObject=" << HexAddress(sceneObject)
+                << " sceneTransform=" << (sceneTransform ? HexAddress(sceneTransform) : "<null>")
+                << " readLive=" << readLive
+                << " readSaved=" << readSaved);
+            return false;
+        }
+
+        const bool wrote = WriteEditorTransformSavedPosition(selected.editorTransform, livePosition);
+        if (wrote) {
+            MarkEditorTransformDirty();
+        }
+
+        LOG_INFO("[EditorInspector] sync saved placement reason="
+            << (reason ? reason : "<unknown>")
+            << " selectedObject=" << (selected.selectedObject ? HexAddress(selected.selectedObject) : "<null>")
+            << " editorTransformEA8=" << HexAddress(selected.editorTransform)
+            << " sceneObject=" << HexAddress(sceneObject)
+            << " oldSaved=(" << oldSavedPosition[0] << ", " << oldSavedPosition[1] << ", " << oldSavedPosition[2] << ")"
+            << " live=(" << livePosition[0] << ", " << livePosition[1] << ", " << livePosition[2] << ")"
+            << " wrote=" << wrote);
+        return wrote;
+    }
+
+    static bool SyncEditorSavedPlacementFromBestSceneObject(
+        const SelectedEditorObject& selected,
+        const char* reason) {
+        const uintptr_t candidates[] = {
+            selected.selectedObject,
+            selected.mappedObject,
+            selected.resourceSceneRoot,
+            selected.firstMeshSceneObject,
+            selected.firstVisibilitySceneObject,
+            selected.firstLightSceneObject,
+        };
+
+        for (uintptr_t candidate : candidates) {
+            if (candidate == 0) {
+                continue;
+            }
+            if (SyncEditorSavedPlacementFromSceneObject(selected, candidate, reason)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static bool SetSceneObjectPositionVector(uintptr_t sceneObject, const float position[3]) {
@@ -2179,13 +3004,9 @@ namespace {
             return false;
         }
 
-        RenderGraphicsAndUpdateCameraFunc renderUpdate = ResolveRenderGraphicsAndUpdateCamera();
         __try {
             SceneObjectSetPositionFunc setPosition = reinterpret_cast<SceneObjectSetPositionFunc>(setPositionAddress);
             setPosition(reinterpret_cast<void*>(sceneObject), position);
-            if (renderUpdate) {
-                renderUpdate(reinterpret_cast<void*>(sceneObject));
-            }
             return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -2309,6 +3130,44 @@ namespace {
         __except (EXCEPTION_EXECUTE_HANDLER) {
             return false;
         }
+    }
+
+    static bool TryApplyNativeUniformScaleBacking(
+        const SelectedEditorObject& selected,
+        const float scale[3]) {
+        if (!g_editorNativeUniformScaleBackingEnabled
+            || scale == nullptr
+            || selected.editorScaleBackingObject == 0) {
+            return false;
+        }
+
+        const float epsilon = 0.0005f;
+        if (std::fabs(scale[0] - scale[1]) > epsilon
+            || std::fabs(scale[0] - scale[2]) > epsilon) {
+            return false;
+        }
+
+        const bool applied = SetBackingObjectScale(selected.editorScaleBackingObject, scale[0]);
+        LOG_INFO("[EditorInspector] Native uniform scale backing selected="
+            << (selected.selectedObject ? HexAddress(selected.selectedObject) : "<null>")
+            << " backing=" << HexAddress(selected.editorScaleBackingObject)
+            << " scale=" << scale[0]
+            << " applied=" << applied);
+        return applied;
+    }
+
+    static bool TryApplyNativeEditorUniformScaleDelta(float delta) {
+        if (!g_editorNativeUniformScaleBackingEnabled || std::fabs(delta) <= 0.0001f) {
+            return false;
+        }
+
+        const uintptr_t selectionManager = ResolveEditorSelectionManagerForInspector();
+        const bool applied = ScaleSelectedObjectsByEditorDelta(selectionManager, delta);
+        LOG_INFO("[EditorInspector] Native editor uniform scale delta="
+            << delta
+            << " selectionManager=" << (selectionManager ? HexAddress(selectionManager) : "<null>")
+            << " applied=" << applied);
+        return applied;
     }
 
     static bool RunUnsafeSelectionPostScaleRefresh(uintptr_t selectionManager) {
@@ -2580,6 +3439,44 @@ namespace {
         return LookupHashMapValue(map, static_cast<uint32_t>(selectedObject), 0x0c, 0x10);
     }
 
+    static uintptr_t LookupEntityManagerSimpleMapValueForAnyKey(
+        uintptr_t managerOffset,
+        const uintptr_t* keys,
+        size_t keyCount,
+        uintptr_t* outKey = nullptr) {
+        if (keys == nullptr) {
+            return 0;
+        }
+
+        for (size_t i = 0; i < keyCount; ++i) {
+            const uintptr_t key = keys[i];
+            if (key == 0) {
+                continue;
+            }
+
+            bool duplicate = false;
+            for (size_t j = 0; j < i; ++j) {
+                if (keys[j] == key) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) {
+                continue;
+            }
+
+            const uintptr_t value = LookupEntityManagerSimpleMapValue(managerOffset, key);
+            if (value != 0) {
+                if (outKey != nullptr) {
+                    *outKey = key;
+                }
+                return value;
+            }
+        }
+
+        return 0;
+    }
+
     static void AddSceneNodeCandidate(
         uintptr_t sceneObject,
         uintptr_t via,
@@ -2779,6 +3676,34 @@ namespace {
                     selected.mappedParentObject = LookupEditorObjectMapValue(selected.parentObject);
                 }
 
+                if (selected.editorTransform == 0) {
+                    const uintptr_t transformKeys[] = {
+                        selected.mappedObject,
+                        selected.parentObject,
+                        selected.mappedParentObject,
+                        selected.sceneHolder,
+                        selected.resourceContainer,
+                        selected.resourceSceneRoot,
+                    };
+                    uintptr_t matchedKey = 0;
+                    selected.editorTransform = LookupEntityManagerSimpleMapValueForAnyKey(
+                        0xea8,
+                        transformKeys,
+                        sizeof(transformKeys) / sizeof(transformKeys[0]),
+                        &matchedKey);
+                    if (selected.editorTransform != 0) {
+                        LOG_INFO("[EditorInspector] resolved EA8 transform via alternate key selectedObject="
+                            << HexAddress(selected.selectedObject)
+                            << " key=" << HexAddress(matchedKey)
+                            << " editorTransform=" << HexAddress(selected.editorTransform));
+                    }
+                }
+                if (!selected.hasRotation
+                    && selected.editorTransform != 0
+                    && IsReadableRange(selected.editorTransform, 0x20)) {
+                    selected.hasRotation = SafeReadValue(selected.editorTransform + 0x1c, selected.rotationRadians);
+                }
+
                 std::vector<uintptr_t> meshObjects;
                 CaptureEngineSceneObjects(selected.selectedObject, 1, 3, meshObjects);
                 if (meshObjects.empty()) {
@@ -2905,12 +3830,22 @@ namespace {
             ClampEditorAutoScale(g_editorInspectorAxisScale[2] * scaleFactor),
         };
         const float clampedScale = ClampEditorAutoScale(g_editorInspectorAutoScale * scaleFactor);
+        const float nativeDelta = clampedScale - g_editorInspectorAutoScale;
 
-        const bool applied = SetSceneObjectScaleVectorWithRefresh(
-            primary.firstMeshSceneObject,
-            scaledAxis,
-            0);
+        bool applied = TryApplyNativeEditorUniformScaleDelta(nativeDelta);
+        if (!applied) {
+            applied = SetSceneObjectScaleVectorWithRefresh(
+                primary.firstMeshSceneObject,
+                scaledAxis,
+                0);
+        }
         if (applied) {
+            CommitEditorVisualScaleChange();
+            if (!g_editorNativeUniformScaleBackingEnabled) {
+                TryApplyNativeUniformScaleBacking(primary, scaledAxis);
+            }
+            SyncEditorSavedPlacementFromBestSceneObject(primary, "hotkey-scale");
+            RememberEditorPublishScaleOverride(primary, scaledAxis);
             g_editorInspectorAutoScale = clampedScale;
             g_editorInspectorLastAppliedScale = clampedScale;
             g_editorInspectorAxisScale[0] = scaledAxis[0];
@@ -3569,6 +4504,10 @@ static std::string GetKeybindingCategory(Keybindings::Action action) {
     case Keybindings::Action::RespawnForward5:
     case Keybindings::Action::InstantFinish:
         return "Respawn Controls";
+    case Keybindings::Action::CaptureSaveState:
+    case Keybindings::Action::RestoreSaveState:
+    case Keybindings::Action::DebugSaveState:
+        return "Save States";
     case Keybindings::Action::IncrementFault:
     case Keybindings::Action::DebugFaultCounter:
     case Keybindings::Action::Add100Faults:
@@ -4297,6 +5236,25 @@ namespace {
         return nullptr;
     }
 
+    static bool IsPitViperDlcGearSet(const GearSetCatalogEntry& entry) {
+        if (entry.kind != GearSetKind::Bike || entry.slot != GearSetSlot::BikeFairings) {
+            return false;
+        }
+
+        const std::string genKey(entry.genKey);
+        return genKey == "GOLD_PITVIPER"
+            || genKey == "WD_PITVIPER"
+            || genKey == "COMIC_PITVIPER"
+            || genKey == "EVO_CHEETAH";
+    }
+
+    static bool IsPitViperDlcBikePartFamily(const std::string& family) {
+        return family == "GOLD"
+            || family == "WD"
+            || family == "COMIC"
+            || family == "EVO";
+    }
+
     static std::string GearSetFallbackName(const GearSetCatalogEntry& entry) {
         std::string name(entry.genKey);
         std::replace(name.begin(), name.end(), '_', ' ');
@@ -4393,6 +5351,13 @@ namespace {
             return exactAlias;
         }
 
+        if (IsPitViperDlcGearSet(entry)) {
+            std::ostringstream stream;
+            stream << GearSetFallbackName(entry) << " (" << GearSetFamilyAlias("CHEETAH") << " "
+                << GearSetSlotSingular(entry.slot) << ")";
+            return stream.str();
+        }
+
         std::string family;
         int variant = 0;
         if (ParseGearSetFamilyAndVariant(entry, family, variant)) {
@@ -4432,6 +5397,10 @@ namespace {
     static std::string GearSetGroupLabel(const GearSetCatalogEntry& entry) {
         if (const char* exactAlias = GearSetExactAlias(entry.genKey)) {
             return exactAlias;
+        }
+
+        if (IsPitViperDlcGearSet(entry)) {
+            return GearSetFamilyAlias("CHEETAH");
         }
 
         std::string family;
@@ -4574,6 +5543,10 @@ namespace {
     }
 
     static std::string BikeItemFamilyLabel(const BikeItemCatalogEntry& entry) {
+        if (IsPitViperDlcBikePartFamily(entry.bikeKey)) {
+            return GearSetFamilyAlias("CHEETAH");
+        }
+
         const char* familyAlias = GearSetFamilyAlias(entry.bikeKey);
         return familyAlias ? familyAlias : entry.bikeKey;
     }
@@ -5221,6 +6194,11 @@ namespace {
         case 109: { static const uint16_t ids[] = { 210, 215, 301, 307 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
         case 110: { static const uint16_t ids[] = { 210, 215, 302, 308 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
         case 111: { static const uint16_t ids[] = { 210, 215, 303, 309 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 774: { static const uint16_t ids[] = { 280, 113, 298, 277, 278, 135, 276, 275, 279, 281, 282, 283 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 966: { static const uint16_t ids[] = { 1013, 1014, 1015, 1016, 1017, 1018, 1019, 1020, 1021, 1022, 1023, 1024 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 967: { static const uint16_t ids[] = { 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 973: { static const uint16_t ids[] = { 866, 867, 868, 869, 870, 871, 872, 873, 874, 875, 122 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
+        case 1008: { static const uint16_t ids[] = { 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 122 }; supplementalChildren = ids; supplementalChildCount = _countof(ids); break; }
         default:
             return false;
         }
@@ -5378,6 +6356,18 @@ void TweakableAppearanceReload::RefreshBikePartEditors() {
         int colorSlot;
     };
     std::vector<ActiveBikeChild> activeChildren;
+    auto addActiveBikeChild = [&activeChildren](uint16_t itemId, int colorSlot) {
+        if (itemId == 0) {
+            return;
+        }
+
+        const auto existing = std::find_if(activeChildren.begin(), activeChildren.end(), [itemId](const ActiveBikeChild& child) {
+            return child.itemId == itemId;
+        });
+        if (existing == activeChildren.end()) {
+            activeChildren.push_back({ itemId, colorSlot });
+        }
+    };
     std::string currentBikeKey;
     bool hasPitViperChild = false;
     for (int i = 0; i < 2; ++i) {
@@ -5395,7 +6385,7 @@ void TweakableAppearanceReload::RefreshBikePartEditors() {
             }
 
             for (uint16_t child : children) {
-                activeChildren.push_back({ child, i });
+                addActiveBikeChild(child, i);
                 const BikeItemCatalogEntry* childEntry = FindBikeCatalogEntry(child);
                 if (childEntry && std::string(childEntry->bikeKey) == "CHEETAH") {
                     hasPitViperChild = true;
@@ -5410,12 +6400,29 @@ void TweakableAppearanceReload::RefreshBikePartEditors() {
             const BikeItemCatalogEntry* childEntry = FindBikeCatalogEntry(child.itemId);
             return childEntry
                 && std::string(childEntry->bikeKey) == "CHEETAH"
-                && std::string(childEntry->partKey) == "ENGINE";
+            && std::string(childEntry->partKey) == "ENGINE";
         });
         if (!alreadyHasPitViperEngine) {
-            activeChildren.push_back({ pitViperEngineItemId, 1 });
+            addActiveBikeChild(pitViperEngineItemId, 1);
         }
     }
+
+    auto addFaultOneZeroDuplicateCandidate = [](BikePartEditorState& state) {
+        if (state.bikeKey != "CHEETAH") {
+            return;
+        }
+
+        static const uint16_t kFaultOneZeroBodyKitChildren[] = {
+            280, 113, 298, 277, 278, 135, 276, 275, 279, 281, 282, 283
+        };
+        for (uint16_t itemId : kFaultOneZeroBodyKitChildren) {
+            const BikeItemCatalogEntry* candidate = FindBikeCatalogEntry(itemId);
+            if (candidate && AreBikePartsCompatible(state.partKey, candidate->partKey)) {
+                AddUniqueItemId(&state.candidateItemIds, itemId);
+                return;
+            }
+        }
+    };
 
     for (const ActiveBikeChild& child : activeChildren) {
         const uint16_t targetItemId = child.itemId;
@@ -5488,6 +6495,7 @@ void TweakableAppearanceReload::RefreshBikePartEditors() {
                 }
             }
         }
+        addFaultOneZeroDuplicateCandidate(state);
 
         if (!state.candidateItemIds.empty()) {
             m_bikePartEditors.push_back(state);
@@ -6113,10 +7121,13 @@ void TweakableAppearanceReload::Render() {
                     if (hasColorOverride) {
                         GearCustomization::SetBikeChildColorOverride(option.id, color);
                     }
+                    const bool selectedPartIsSharedEngine = std::string(option.partKey) == "ENGINE";
                     if (state.hidden
                         ? !GearCustomization::QueueBikeChildItemOverride(option.id, 0, color, previousTargetItemId)
-                        : (std::string(option.partKey) != "ENGINE"
-                            && !GearCustomization::QueueBikeChildItemOverride(previousTargetItemId, option.id, color))) {
+                        : !GearCustomization::QueueBikeChildItemOverride(
+                            selectedPartIsSharedEngine ? 0 : previousTargetItemId,
+                            option.id,
+                            color)) {
                         LOG_WARNING("[DevMenu] Failed to queue replacement bike child item refresh");
                     }
                     state.targetItemId = option.id;
@@ -6322,13 +7333,11 @@ void TweakableAppearanceReload::ResetToDefault() {
     }
 }
 
-void TweakableUIViewExplorer::Render() {
 #ifdef DEVELOPMENT_MODE
+void TweakableUIViewExplorer::Render() {
     UIViewExplorer::RenderImGui();
-#else
-    ImGui::TextDisabled("UI View Explorer is available in DEVELOPMENT_MODE builds.");
-#endif
 }
+#endif
 
 void TweakableEditorInspector::Render() {
     ProcessPendingEditorNudgeRestore();
@@ -6888,7 +7897,6 @@ void TweakableEditorInspector::Render() {
                 ImGui::SetTooltip("Logs native event 0x12/0x13 material/color backing map state before and after engine handling");
             }
 
-            ImGui::SameLine();
             if (ImGui::Button("Set mesh color fields", ImVec2(210.0f, 0.0f))) {
                 const int appliedCount = SetSerializedMeshColorFieldsOnObjects(
                     materialTestMeshes,
@@ -6942,6 +7950,48 @@ void TweakableEditorInspector::Render() {
 
         ImGui::Spacing();
         ImGui::Text("Visual scale");
+        if (ImGui::Button("Trace publish scale", ImVec2(190.0f, 0.0f))) {
+            EnsureEditorUploadTraceHooksInstalled();
+            InterlockedExchange(&g_editorUploadTraceCount, 0);
+            g_editorUploadTraceArmed = g_editorUploadTrackListTraceHookInstalled;
+            LOG_INFO("[EditorUploadTrace] publish scale trace armed="
+                << g_editorUploadTraceArmed
+                << " share/publish the track to capture the native object/value list");
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Captures the object/value records the publisher builds for the currently saved track");
+        }
+
+        if (g_editorUploadTraceArmed) {
+            ImGui::SameLine();
+            if (ImGui::Button("Stop publish trace", ImVec2(170.0f, 0.0f))) {
+                g_editorUploadTraceArmed = false;
+                LOG_INFO("[EditorUploadTrace] publish scale trace manually disarmed");
+            }
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Dump publish snapshot", ImVec2(190.0f, 0.0f))) {
+            DumpEditorUploadTraceSnapshot();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Dumps the last captured publisher object/value records without following embedded pointers");
+        }
+        ImGui::SameLine();
+        ImGui::Checkbox("Patch publish scale", &g_editorPublishScalePatchEnabled);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("When enabled, objects scaled by this inspector patch their scale vector into the native publish record");
+        }
+        ImGui::SameLine();
+        ImGui::Checkbox("Native editor uniform scale", &g_editorNativeUniformScaleBackingEnabled);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("For uniform scale, calls the editor's own selected-object scale path used by native save/load");
+        }
+        ImGui::SameLine();
+        ImGui::Checkbox("Sync saved placement", &g_editorSyncSavedPlacementOnScaleEnabled);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Copies the live scene-object position into the EA8/PAR2 saved transform after scale changes");
+        }
 
         if (primary.firstMeshSceneObject != g_editorInspectorAxisScaleObject) {
             g_editorInspectorAxisScaleObject = primary.firstMeshSceneObject;
@@ -6981,11 +8031,20 @@ void TweakableEditorInspector::Render() {
                 ClampEditorAutoScale(g_editorInspectorAxisScale[2] * scaleRatio),
             };
 
-            const bool applied = SetSceneObjectScaleVectorWithRefresh(
-                primary.firstMeshSceneObject,
-                scaledAxis,
-                0);
+            bool applied = TryApplyNativeEditorUniformScaleDelta(g_editorInspectorAutoScale - previousScale);
+            if (!applied) {
+                applied = SetSceneObjectScaleVectorWithRefresh(
+                    primary.firstMeshSceneObject,
+                    scaledAxis,
+                    0);
+            }
             if (applied) {
+                CommitEditorVisualScaleChange();
+                if (!g_editorNativeUniformScaleBackingEnabled) {
+                    TryApplyNativeUniformScaleBacking(primary, scaledAxis);
+                }
+                SyncEditorSavedPlacementFromBestSceneObject(primary, "auto-scale");
+                RememberEditorPublishScaleOverride(primary, scaledAxis);
                 g_editorInspectorLastAppliedScale = g_editorInspectorAutoScale;
                 g_editorInspectorAxisScale[0] = scaledAxis[0];
                 g_editorInspectorAxisScale[1] = scaledAxis[1];
@@ -7004,6 +8063,17 @@ void TweakableEditorInspector::Render() {
             ImGui::TextDisabled("Auto scale needs a selected object with a mesh scene object.");
         }
         else {
+            if (ImGui::Button("Sync saved placement now", ImVec2(190.0f, 0.0f))) {
+                const bool synced = SyncEditorSavedPlacementFromBestSceneObject(primary, "manual");
+                LOG_INFO("[EditorInspector] manual saved placement sync selectedObject="
+                    << HexAddress(primary.selectedObject)
+                    << " firstMesh=" << HexAddress(primary.firstMeshSceneObject)
+                    << " synced=" << synced);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Manual test: update the EA8/PAR2 saved transform from the current live mesh position");
+            }
+
             ImGui::SetNextItemWidth(320.0f);
             float axisScale[3] = {
                 g_editorInspectorAxisScale[0],
@@ -7023,11 +8093,28 @@ void TweakableEditorInspector::Render() {
             axisScale[1] = ClampEditorAutoScale(axisScale[1]);
             axisScale[2] = ClampEditorAutoScale(axisScale[2]);
             if (axisChanged) {
-                const bool applied = SetSceneObjectScaleVectorWithRefresh(
-                    primary.firstMeshSceneObject,
-                    axisScale,
-                    0);
+                const bool previousUniform =
+                    std::fabs(g_editorInspectorAxisScale[0] - g_editorInspectorAxisScale[1]) <= 0.0005f
+                    && std::fabs(g_editorInspectorAxisScale[0] - g_editorInspectorAxisScale[2]) <= 0.0005f;
+                const bool nextUniform =
+                    std::fabs(axisScale[0] - axisScale[1]) <= 0.0005f
+                    && std::fabs(axisScale[0] - axisScale[2]) <= 0.0005f;
+                bool applied = previousUniform && nextUniform
+                    ? TryApplyNativeEditorUniformScaleDelta(axisScale[0] - g_editorInspectorAxisScale[0])
+                    : false;
+                if (!applied) {
+                    applied = SetSceneObjectScaleVectorWithRefresh(
+                        primary.firstMeshSceneObject,
+                        axisScale,
+                        0);
+                }
                 if (applied) {
+                    CommitEditorVisualScaleChange();
+                    if (!g_editorNativeUniformScaleBackingEnabled) {
+                        TryApplyNativeUniformScaleBacking(primary, axisScale);
+                    }
+                    SyncEditorSavedPlacementFromBestSceneObject(primary, "axis-scale");
+                    RememberEditorPublishScaleOverride(primary, axisScale);
                     g_editorInspectorAxisScale[0] = axisScale[0];
                     g_editorInspectorAxisScale[1] = axisScale[1];
                     g_editorInspectorAxisScale[2] = axisScale[2];
@@ -7041,11 +8128,25 @@ void TweakableEditorInspector::Render() {
 
             if (ImGui::Button("Reset axis scale##editorAxisScaleReset", ImVec2(150.0f, 0.0f))) {
                 float resetScale[3] = { 1.0f, 1.0f, 1.0f };
-                const bool applied = SetSceneObjectScaleVectorWithRefresh(
-                    primary.firstMeshSceneObject,
-                    resetScale,
-                    0);
+                const bool previousUniform =
+                    std::fabs(g_editorInspectorAxisScale[0] - g_editorInspectorAxisScale[1]) <= 0.0005f
+                    && std::fabs(g_editorInspectorAxisScale[0] - g_editorInspectorAxisScale[2]) <= 0.0005f;
+                bool applied = previousUniform
+                    ? TryApplyNativeEditorUniformScaleDelta(1.0f - g_editorInspectorAxisScale[0])
+                    : false;
+                if (!applied) {
+                    applied = SetSceneObjectScaleVectorWithRefresh(
+                        primary.firstMeshSceneObject,
+                        resetScale,
+                        0);
+                }
                 if (applied) {
+                    CommitEditorVisualScaleChange();
+                    if (!g_editorNativeUniformScaleBackingEnabled) {
+                        TryApplyNativeUniformScaleBacking(primary, resetScale);
+                    }
+                    SyncEditorSavedPlacementFromBestSceneObject(primary, "reset-axis-scale");
+                    RememberEditorPublishScaleOverride(primary, resetScale);
                     g_editorInspectorAxisScale[0] = resetScale[0];
                     g_editorInspectorAxisScale[1] = resetScale[1];
                     g_editorInspectorAxisScale[2] = resetScale[2];
@@ -7226,10 +8327,12 @@ DevMenu::~DevMenu() {
 }
 
 void DevMenu::UpdateRuntime() {
+#ifdef DEVELOPMENT_MODE
     ProcessPendingEditorNudgeRestore();
     ProcessEditorScaleKeybinds();
     ProcessStickyEditorMaterialOverride();
     ProcessMaterialParameterTrace();
+#endif
 
     if (m_appearanceReload) {
         m_appearanceReload->UpdateRuntime();
@@ -10599,6 +11702,7 @@ void DevMenu::InitializeMod() {
 
     RegisterTweakable(appearanceFolder);
 
+#ifdef DEVELOPMENT_MODE
     // ============================================================================
     // Editor Subcategory
     // ============================================================================
@@ -10612,6 +11716,7 @@ void DevMenu::InitializeMod() {
     editorFolder->AddChild(editorInspector);
 
     RegisterTweakable(editorFolder);
+#endif
 
 #ifdef DEVELOPMENT_MODE
     // ============================================================================
@@ -11187,13 +12292,13 @@ void DevMenu::InitializeMod() {
     RegisterTweakable(filesFolder);
 
     mod->AddChild(appearanceFolder);
-    mod->AddChild(editorFolder);
     mod->AddChild(fmodFolder);
     mod->AddChild(checkpointFolder);
     mod->AddChild(currencyFolder);
     mod->AddChild(faultTimeFolder);
     mod->AddChild(filesFolder);
 #ifdef DEVELOPMENT_MODE
+    mod->AddChild(editorFolder);
     mod->AddChild(hostJoinFolder);
 #endif
 #ifdef DEVELOPMENT_MODE
@@ -11322,6 +12427,9 @@ void DevMenu::InitializeKeybindings() {
     static bool waitingForRespawnPrevCheckpoint = false;
     static bool waitingForRespawnNextCheckpoint = false;
     static bool waitingForRespawnForward5 = false;
+    static bool waitingForCaptureSaveState = false;
+    static bool waitingForRestoreSaveState = false;
+    static bool waitingForDebugSaveState = false;
     static bool waitingForIncrementFault = false;
     static bool waitingForDebugFaultCounter = false;
     static bool waitingForAdd100Faults = false;
@@ -11357,8 +12465,10 @@ void DevMenu::InitializeKeybindings() {
     static bool waitingForSwapNextBike = false;
     static bool waitingForSwapPrevBike = false;
     static bool waitingForDebugBikeInfo = false;
+#ifdef DEVELOPMENT_MODE
     static bool waitingForEditorScaleDecrease = false;
     static bool waitingForEditorScaleIncrease = false;
+#endif
     static bool waitingForToggleConsole = false;
 
     // Clear the action and default vectors in case of re-initialization
@@ -11466,6 +12576,31 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(instantFinishBtn);
     m_keybindingActions.push_back(Keybindings::Action::InstantFinish);
     m_keybindingDefaults.push_back('F');
+
+    // === Save States ===
+
+    // Capture Save State
+    auto captureSaveStateBtn = CreateKeybindButton(10184, Keybindings::Action::CaptureSaveState, &waitingForCaptureSaveState, this);
+    RegisterTweakable(captureSaveStateBtn);
+    m_keybindingItems.push_back(captureSaveStateBtn);
+    m_keybindingActions.push_back(Keybindings::Action::CaptureSaveState);
+    m_keybindingDefaults.push_back(0);
+
+    // Restore Save State
+    auto restoreSaveStateBtn = CreateKeybindButton(10185, Keybindings::Action::RestoreSaveState, &waitingForRestoreSaveState, this);
+    RegisterTweakable(restoreSaveStateBtn);
+    m_keybindingItems.push_back(restoreSaveStateBtn);
+    m_keybindingActions.push_back(Keybindings::Action::RestoreSaveState);
+    m_keybindingDefaults.push_back(0);
+
+#ifdef DEVELOPMENT_MODE
+    // Debug Save State
+    auto debugSaveStateBtn = CreateKeybindButton(10186, Keybindings::Action::DebugSaveState, &waitingForDebugSaveState, this);
+    RegisterTweakable(debugSaveStateBtn);
+    m_keybindingItems.push_back(debugSaveStateBtn);
+    m_keybindingActions.push_back(Keybindings::Action::DebugSaveState);
+    m_keybindingDefaults.push_back(0);
+#endif
 
     // === Fault / Time / Limit Controls ===
     // Toggle Limit Validation
@@ -11588,9 +12723,10 @@ void DevMenu::InitializeKeybindings() {
     RegisterTweakable(debugBikeInfoBtn);
     m_keybindingItems.push_back(debugBikeInfoBtn);
     m_keybindingActions.push_back(Keybindings::Action::DebugBikeInfo);
-    m_keybindingDefaults.push_back(VK_F9);
+    m_keybindingDefaults.push_back(0);
 #endif
 
+#ifdef DEVELOPMENT_MODE
     // === Editor Controls ===
 
     auto editorScaleDecreaseBtn = CreateKeybindButton(
@@ -11612,6 +12748,7 @@ void DevMenu::InitializeKeybindings() {
     m_keybindingItems.push_back(editorScaleIncreaseBtn);
     m_keybindingActions.push_back(Keybindings::Action::EditorScaleIncrease);
     m_keybindingDefaults.push_back(0);
+#endif
 
     // === Track Central Auto-Scroll Controls ===
 

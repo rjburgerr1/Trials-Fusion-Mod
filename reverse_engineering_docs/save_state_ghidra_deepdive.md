@@ -544,6 +544,26 @@ Additional Steam mappings:
 - Uplay `0x00918690`, RVA `0x00218690`;
 - Steam `0x00357f80`, RVA `0x00217f80`.
 
+Save-state crossover audit against `uplay-to-steam-function-map.csv`:
+
+| Function | Uplay address | Uplay RVA | Steam address | Steam RVA | Notes |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `UpdateBikeAndCameraFromTrack` | `0x00918690` | `0x00218690` | `0x00357f80` | `0x00217f80` | implied match |
+| `FindSceneObjectByHash` | `0x0090a180` | `0x0020a180` | `0x00349a30` | `0x00209a30` | exact instructions/mnemonics |
+| `SetSceneObjectPosition` | `0x00d5cc90` | `0x0065cc90` | `0x0079b890` | `0x0065b890` | duplicate pair; votes select this target |
+| `SetSceneObjectVelocity` | `0x00d5cd60` | `0x0065cd60` | `0x0079b960` | `0x0065b960` | duplicate pair; votes select this target |
+| `SetQuaternionRotation` | `0x00da3ec0` | `0x006a3ec0` | `0x007e1f10` | `0x006a1f10` | exact instructions/mnemonics |
+| `update_rider_position_and_animation` | `0x00928120` | `0x00228120` | `0x003679f0` | `0x002279f0` | implied match |
+| `UpdateCameraTransformsAndPhysics` | `0x009267a0` | `0x002267a0` | `0x00366070` | `0x00226070` | exact plus combined ref match |
+| `GetQuaternionOrAngularVelocity` | `0x0090bdc0` | `0x0020bdc0` | `0x0034b670` | `0x0020b670` | exact plus combined ref match |
+| `get_rigid_body_velocity` | `0x00d59390` | `0x00659390` | `0x00798000` | `0x00658000` | duplicate pair; votes select this target |
+| `GetRagdollBonePosition` | `0x00d59430` | `0x00659430` | `0x007980a0` | `0x006580a0` | duplicate pair; votes select this target |
+| `CollectSceneObjectsByType` | `0x00da3000` | `0x006a3000` | `0x007e19f0` | `0x006a19f0` | exact bytes/instructions/mnemonics |
+| `ExecuteTaskWithLocking` | `0x00756e50` | `0x00056e50` | `0x00154b50` | `0x00014b50` | exact instructions/mnemonics |
+| `ExecuteAsyncTask` | `0x00759830` | `0x00059830` | `0x002f4060` | `0x001b4060` | duplicate pair; 62 votes select this target |
+
+`ExecuteAsyncTask` has an alternate duplicate-instruction Steam target at `0x00921360` (RVA `0x007e1360`), but the CSV gives that target zero `ExecuteAsyncTask` votes and maps it more strongly to `DecryptTaskData`.
+
 ### Time and fault restore is already mostly solved
 
 The existing `Respawn` module already wraps the encrypted counters we need:
@@ -1262,3 +1282,120 @@ uint8_t bikePoseCacheD0_100[0x34];
 ```
 
 Then restore that cache after the native helper and test whether it improves mid-air orientation before touching per-object matrices.
+
+## Portal/teleporter path findings
+
+User testing showed the manual save-state restore can work mechanically, but remains jarring and can inject bad momentum. The in-game portal object is a better model because it moves the rider/bike as a coherent transform operation rather than as disconnected position/velocity writes.
+
+### Important functions
+
+Portal-like handler:
+
+- Uplay: `FUN_008794d0` at `0x008794d0`, RVA `0x001794d0`
+- Steam: `FUN_002b8f20`, RVA `0x00178f20`
+- Xref: called by `FUN_0087ad30`
+
+Core coherent transform primitive:
+
+- Uplay: `UpdateCameraTransformsAndPhysics` at `0x009267a0`, RVA `0x002267a0`
+- Steam: `UpdateCameraTransformsAndPhysics` at `0x00366070`, RVA `0x00226070`
+- Xref: only called by `FUN_008794d0`
+
+Related helpers:
+
+- `AttachObjectsWithPhysics`
+  - Uplay `0x00876740`, RVA `0x00176740`
+  - Steam `0x002b6190`, RVA `0x00176190`
+- `GetQuaternionOrAngularVelocity`
+  - Uplay `0x0090bdc0`, RVA `0x0020bdc0`
+  - Steam `0x0034b670`, RVA `0x0020b670`
+- `InitializeRiderAtPosition`
+  - Uplay `0x0092cf20`, RVA `0x0022cf20`
+  - Steam `0x0036c7f0`, RVA `0x0022c7f0`
+- `PositionSceneObjectsInDirection`
+  - Uplay `0x0090a470`, RVA `0x0020a470`
+  - Steam `0x00349d20`, RVA `0x00209d20`
+
+### Portal handler behavior
+
+`FUN_008794d0(this, triggerState)` appears to be the portal/paired-object activation handler:
+
+1. Resolves a paired destination entity through `HashMap_FindValueByEntityId(*(manager+0xeb8), idFromThis+0x14/0x18)`.
+2. Gets the first bike/rider via `GetFirstEntityFromList(manager)`.
+3. Computes source and destination world quaternions.
+4. If `this+0x1f == 0`, uses `GetQuaternionOrAngularVelocity(bike)` as the source orientation instead of the source portal object.
+5. Computes destination position via `GetObjectPosition(destinationObject)`.
+6. Optionally applies an offset from `triggerState+0x2c` when `this+0x23 != 0`.
+7. Calls:
+
+```cpp
+UpdateCameraTransformsAndPhysics(
+    bike,
+    destinationPosition,
+    destinationDeltaQuaternion,
+    destinationForwardVector,
+    FUN_00c40460(triggerState+0xc),
+    *(char *)(this+0x1d),
+    *(char *)(this+0x1e),
+    triggerState+0x14,
+    triggerState+0x20
+);
+```
+
+8. Calls two `FUN_00879360` cleanup/update calls for the source/destination.
+9. Calls `AttachObjectsWithPhysics(this, triggerState, destinationEntity)`.
+10. Optionally updates a timer/state object when `this+0xb4 != 0`.
+
+This is a strong indication that save-states should eventually use the same kind of relative transform operation: compute delta from current rider pose to captured rider pose, then ask the engine to rotate/translate all dynamic bike objects together.
+
+### What `UpdateCameraTransformsAndPhysics` does
+
+`UpdateCameraTransformsAndPhysics(bike, targetPosition, targetQuat, targetVector, mode, keepVelocity, rotateVelocity, posArray, velArray)`:
+
+1. Chooses the bike scene-object root from `bike+0x678`, with alternate roots when `bike+0x138 & 1` and `mode` is `1` or `2`.
+2. Collects dynamic scene objects with `SceneObject_CollectByType(root, ..., 3, 1, 0, 0)`.
+3. Computes the average camera/object position for the collected objects.
+4. For each dynamic object:
+   - computes its new world position relative to the target;
+   - composes the existing live rigid-body quaternion with the target quaternion;
+   - writes live rigid-body position at `body+0x40..0x48`;
+   - rewrites the live rigid-body rotation matrix at `body+0x10..0x3c`;
+   - updates linear state through `SetSceneObjectPosition` and `SetSceneObjectVelocity`.
+5. If `keepVelocity == 0`, it explicitly zeros both state vectors through the setters.
+6. If `keepVelocity != 0 && rotateVelocity == 0`, it scales the supplied direction vector by the saved speed magnitude and uses that as velocity.
+7. If `keepVelocity != 0 && rotateVelocity != 0`, it rotates the supplied `posArray` vector by the target quaternion and uses `velArray` as velocity.
+8. Walks `bike+0xc` scene objects afterward, finds closest track point, updates object `+0xb4`, and refreshes bike frame task fields:
+   - for hash `0x1329aad5`: writes `bike+0x4f8`, `bike+0x500`, `bike+0x9a4`, `bike+0x9a8`, then executes async tasks at `bike+0x140` and `bike+0x9bc`;
+   - for hash `0x5bd7085d`: executes async tasks at `bike+0x150` and `bike+0x9ac`.
+
+This is the missing coherence layer. Our current save-state code writes some of these fields, but it does not transform the whole dynamic set through one shared delta, does not update the camera/track fields in the same pass, and does not follow with portal attachment cleanup.
+
+### Save-state implication
+
+The next implementation should not keep stacking direct checkpoint respawn plus raw per-object block restoration. A better prototype is:
+
+1. Capture enough portal-style source state:
+   - current target position from primary body/camera/root;
+   - current orientation via `GetQuaternionOrAngularVelocity`;
+   - captured target position/orientation from the slot;
+   - captured per-object velocity arrays if we want exact velocity preservation.
+2. Compute the delta from current pose to captured pose.
+3. Call `UpdateCameraTransformsAndPhysics` once with that target/delta, likely:
+
+```cpp
+UpdateCameraTransformsAndPhysics(
+    bike,
+    capturedTargetPosition,
+    currentToCapturedQuaternionDelta,
+    capturedForwardOrVelocityDirection,
+    0,
+    1,
+    1,
+    capturedPositionArray,
+    capturedVelocityArray
+);
+```
+
+4. Restore time/fault counters last.
+
+If exact velocity is still unstable, first test `keepVelocity=0` to confirm the portal path gives a clean position/rotation/camera teleport, then add velocity preservation back using the portal handler's `triggerState+0x14` and `triggerState+0x20` vector-array contract.

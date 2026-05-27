@@ -193,21 +193,21 @@ namespace DevMenuSync {
 
     // Recursive function to scan a category and all its children
     void ScanCategoryRecursive(void* devMenuData, uintptr_t buildTweakablesListAddr, int categoryId) {
-        LOG_INFO("[DevMenuSync] >>> ScanCategoryRecursive ENTERED: categoryId=" << categoryId);
+        LOG_VERBOSE("[DevMenuSync] >>> ScanCategoryRecursive ENTERED: categoryId=" << categoryId);
 
         int outputArray[3] = { 0, 2, 0 };
         void* arrayData = malloc(8);
         outputArray[2] = (int)arrayData;
 
-        LOG_INFO("[DevMenuSync] About to call BuildTweakablesList...");
-        LOG_INFO("[DevMenuSync]   devMenuData: 0x" << std::hex << (uintptr_t)devMenuData);
-        LOG_INFO("[DevMenuSync]   buildTweakablesListAddr: 0x" << std::hex << buildTweakablesListAddr);
-        LOG_INFO("[DevMenuSync]   categoryId: " << std::dec << categoryId);
+        LOG_VERBOSE("[DevMenuSync] About to call BuildTweakablesList...");
+        LOG_VERBOSE("[DevMenuSync]   devMenuData: 0x" << std::hex << (uintptr_t)devMenuData);
+        LOG_VERBOSE("[DevMenuSync]   buildTweakablesListAddr: 0x" << std::hex << buildTweakablesListAddr);
+        LOG_VERBOSE("[DevMenuSync]   categoryId: " << std::dec << categoryId);
 
         // Call BuildTweakablesList safely
         int success = SafeCallBuildTweakablesList(devMenuData, outputArray, categoryId, buildTweakablesListAddr);
 
-        LOG_INFO("[DevMenuSync] BuildTweakablesList call completed, success=" << success);
+        LOG_VERBOSE("[DevMenuSync] BuildTweakablesList call completed, success=" << success);
 
         if (!success) {
             LOG_ERROR("[DevMenuSync] !!! CRASH/FAILURE in BuildTweakablesList! CategoryID: " << categoryId);
@@ -260,14 +260,14 @@ namespace DevMenuSync {
 
         // CRITICAL: Log version detection first
         bool isSteam = BaseAddress::IsSteamVersion();
-        LOG_INFO("[DevMenuSync] ========================================");
-        LOG_INFO("[DevMenuSync] Version Detection: " << (isSteam ? "STEAM" : "UPLAY"));
-        LOG_INFO("[DevMenuSync] ========================================");
-        LOG_INFO("[DevMenuSync] Using RVAs:");
-        LOG_INFO("[DevMenuSync]   GlobalDevMenuData: 0x" << std::hex << GetGlobalDevMenuDataRVA());
-        LOG_INFO("[DevMenuSync]   InitDevMenuData: 0x" << std::hex << GetInitDevMenuDataRVA());
-        LOG_INFO("[DevMenuSync]   BuildTweakablesList: 0x" << std::hex << GetBuildTweakablesListRVA());
-        LOG_INFO("[DevMenuSync] ========================================");
+        LOG_VERBOSE("[DevMenuSync] ========================================");
+        LOG_VERBOSE("[DevMenuSync] Version Detection: " << (isSteam ? "STEAM" : "UPLAY"));
+        LOG_VERBOSE("[DevMenuSync] ========================================");
+        LOG_VERBOSE("[DevMenuSync] Using RVAs:");
+        LOG_VERBOSE("[DevMenuSync]   GlobalDevMenuData: 0x" << std::hex << GetGlobalDevMenuDataRVA());
+        LOG_VERBOSE("[DevMenuSync]   InitDevMenuData: 0x" << std::hex << GetInitDevMenuDataRVA());
+        LOG_VERBOSE("[DevMenuSync]   BuildTweakablesList: 0x" << std::hex << GetBuildTweakablesListRVA());
+        LOG_VERBOSE("[DevMenuSync] ========================================");
 
         // Get pointer to global dev menu data using version-aware helper
         void** globalDevMenuDataPtr = (void**)(baseAddress + GetGlobalDevMenuDataRVA());
@@ -336,19 +336,19 @@ namespace DevMenuSync {
         // Clear existing map
         g_tweakableMemoryMap.clear();
 
-        LOG_INFO("[DevMenuSync] ===== STARTING RECURSIVE SCAN =====");
-        LOG_INFO("[DevMenuSync] About to call ScanCategoryRecursive with:");
-        LOG_INFO("[DevMenuSync]   devMenuData: 0x" << std::hex << (uintptr_t)devMenuData);
-        LOG_INFO("[DevMenuSync]   buildTweakablesListAddr: 0x" << std::hex << buildTweakablesListAddr);
-        LOG_INFO("[DevMenuSync]   categoryId: 0");
-        LOG_INFO("[DevMenuSync] =====================================");
+        LOG_VERBOSE("[DevMenuSync] ===== STARTING RECURSIVE SCAN =====");
+        LOG_VERBOSE("[DevMenuSync] About to call ScanCategoryRecursive with:");
+        LOG_VERBOSE("[DevMenuSync]   devMenuData: 0x" << std::hex << (uintptr_t)devMenuData);
+        LOG_VERBOSE("[DevMenuSync]   buildTweakablesListAddr: 0x" << std::hex << buildTweakablesListAddr);
+        LOG_VERBOSE("[DevMenuSync]   categoryId: 0");
+        LOG_VERBOSE("[DevMenuSync] =====================================");
 
         // Start recursive scan from category 0 (top level)
         ScanCategoryRecursive(devMenuData, buildTweakablesListAddr, 0);
 
-        LOG_INFO("[DevMenuSync] ===== SCAN COMPLETE =====");
-        LOG_INFO("[DevMenuSync] Found " << std::dec << g_tweakableMemoryMap.size() << " tweakables in game memory.");
-        LOG_INFO("[DevMenuSync] ==========================");
+        LOG_VERBOSE("[DevMenuSync] ===== SCAN COMPLETE =====");
+        LOG_VERBOSE("[DevMenuSync] Found " << std::dec << g_tweakableMemoryMap.size() << " tweakables in game memory.");
+        LOG_VERBOSE("[DevMenuSync] ==========================");
         return true;
     }
 

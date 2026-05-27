@@ -7,6 +7,7 @@
 #include "gamemode.h"
 #include "fmod.h"
 #include "gear-customization.h"
+#include "save-states.h"
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <cstring>
@@ -956,6 +957,10 @@ namespace BikeSwap {
                     return;
                 }
             }
+        }
+
+        if (g_swapStage == SwapStage::None) {
+            SaveStates::ProcessPendingMainThread();
         }
 
         GearCustomization::ProcessPendingMainThread();

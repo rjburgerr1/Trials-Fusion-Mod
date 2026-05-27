@@ -20,6 +20,9 @@ namespace PreventFinish {
     // Notify system that a checkpoint skip action occurred
     void NotifyCheckpointSkip();
 
+    // Notify system that a save state was restored
+    void NotifySaveStateRestore();
+
     // Notify system that fault count was manually reduced
     void NotifyFaultReduction();
 

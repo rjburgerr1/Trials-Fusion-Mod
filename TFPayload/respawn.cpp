@@ -27,7 +27,9 @@ namespace Respawn {
     static constexpr uintptr_t GLOBAL_STRUCT_RVA_STEAM = 0x104d308;
     static constexpr uintptr_t HANDLE_PLAYER_RESPAWN_RVA_STEAM = 0x205420;
     static constexpr uintptr_t EXECUTE_TASK_WITH_LOCKING_RVA_STEAM = 0x14b50;
-    static constexpr uintptr_t EXECUTE_ASYNC_TASK_RVA_STEAM = 0x7e1360;
+    // CSV duplicate match: ExecuteAsyncTask votes select Steam 0x002f4060
+    // (RVA 0x1b4060). The alternate 0x00921360 maps better to DecryptTaskData.
+    static constexpr uintptr_t EXECUTE_ASYNC_TASK_RVA_STEAM = 0x1b4060;
 
     // ============================================================================
     // Helper functions to get correct RVA based on detected version

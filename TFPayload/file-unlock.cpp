@@ -59,6 +59,9 @@ namespace {
         std::string sourcePath;
         std::string outputPath;
         std::string installTarget;
+        std::string sourcePath2;
+        std::string outputPath2;
+        std::string installTarget2;
         std::string launcherUri;
         std::string restartExe;
         std::string restartCwd;
@@ -283,6 +286,9 @@ namespace {
         options.sourcePath = RequireArg(args, "--source");
         options.outputPath = RequireArg(args, "--output");
         options.installTarget = RequireArg(args, "--install-target");
+        options.sourcePath2 = OptionalArg(args, "--source2");
+        options.outputPath2 = OptionalArg(args, "--output2");
+        options.installTarget2 = OptionalArg(args, "--install-target2");
         options.logPath = RequireArg(args, "--log");
         options.waitPid = OptionalDwordArg(args, "--wait-pid", 0);
         options.waitTimeoutSeconds = OptionalDwordArg(args, "--wait-timeout", 60);
@@ -581,7 +587,57 @@ namespace {
         return count;
     }
 
-    std::vector<uint8_t> PatchItemsXml(const std::vector<uint8_t>& raw, size_t& alwaysLocked, size_t& hidden, size_t& storeProduct) {
+    size_t ZeroAttributeValue(std::string& text, const std::string& attribute) {
+        const std::string needle = attribute + "=\"";
+        size_t count = 0;
+        size_t pos = 0;
+        while ((pos = text.find(needle, pos)) != std::string::npos) {
+            const size_t valueStart = pos + needle.size();
+            const size_t valueEnd = text.find('"', valueStart);
+            if (valueEnd == std::string::npos) {
+                break;
+            }
+            if (text.compare(valueStart, valueEnd - valueStart, "0") != 0) {
+                text.replace(valueStart, valueEnd - valueStart, "0");
+                ++count;
+                pos = valueStart + 1;
+            }
+            else {
+                pos = valueEnd + 1;
+            }
+        }
+        return count;
+    }
+
+    size_t RemoveQuotedAttribute(std::string& text, const std::string& attribute) {
+        const std::string needle = attribute + "=\"";
+        size_t count = 0;
+        size_t pos = 0;
+        while ((pos = text.find(needle, pos)) != std::string::npos) {
+            const size_t valueEnd = text.find('"', pos + needle.size());
+            if (valueEnd == std::string::npos) {
+                break;
+            }
+
+            size_t eraseStart = pos;
+            while (eraseStart > 0 && (text[eraseStart - 1] == ' ' || text[eraseStart - 1] == '\t')) {
+                --eraseStart;
+            }
+            text.erase(eraseStart, valueEnd + 1 - eraseStart);
+            pos = eraseStart;
+            ++count;
+        }
+        return count;
+    }
+
+    std::vector<uint8_t> PatchItemsXml(
+        const std::vector<uint8_t>& raw,
+        size_t& alwaysLocked,
+        size_t& hidden,
+        size_t& storeProduct,
+        size_t& expLevelReq,
+        size_t& medalReq,
+        size_t& price) {
         std::string text(raw.begin(), raw.end());
         alwaysLocked = RemoveAttribute(text, "alwaysLocked");
         hidden = RemoveAttribute(text, "hidden");
@@ -589,6 +645,11 @@ namespace {
         storeProduct += RemoveAttribute(text, "isIngameStoreProduct");
         storeProduct += RemoveAttribute(text, "inGameStoreProduct");
         storeProduct += RemoveAttribute(text, "ingameStoreProduct");
+        expLevelReq = ZeroAttributeValue(text, "expLevelReq");
+        expLevelReq += ZeroAttributeValue(text, "explevelreq");
+        medalReq = RemoveQuotedAttribute(text, "medalReq");
+        medalReq += RemoveQuotedAttribute(text, "medalreq");
+        price = ZeroAttributeValue(text, "price");
         return std::vector<uint8_t>(text.begin(), text.end());
     }
 
@@ -618,42 +679,56 @@ namespace {
         size_t alwaysLocked = 0;
         size_t hidden = 0;
         size_t storeProduct = 0;
+        size_t expLevelReq = 0;
+        size_t medalReq = 0;
+        size_t price = 0;
         const std::vector<uint8_t> decodedItems = DecodeEntry(pak, pak.entries[itemIndex]);
-        const std::vector<uint8_t> patchedItems = PatchItemsXml(decodedItems, alwaysLocked, hidden, storeProduct);
+        const std::vector<uint8_t> patchedItems = PatchItemsXml(decodedItems, alwaysLocked, hidden, storeProduct, expLevelReq, medalReq, price);
 
-        std::vector<std::vector<uint8_t>> payloads;
         std::vector<PakEntry> outputEntries = pak.entries;
-        payloads.reserve(pak.entries.size());
         for (size_t i = 0; i < pak.entries.size(); ++i) {
             if (i == itemIndex) {
-                payloads.push_back(patchedItems);
                 outputEntries[i].storedSize = static_cast<uint32_t>(patchedItems.size());
                 outputEntries[i].unpackedSize = static_cast<uint32_t>(patchedItems.size());
                 outputEntries[i].flags = 0x00;
-            }
-            else {
-                payloads.push_back(StoredPayload(pak, pak.entries[i]));
             }
         }
 
         uint32_t cursor = static_cast<uint32_t>(kPakHeaderSize + outputEntries.size() * kPakEntrySize);
         for (size_t i = 0; i < outputEntries.size(); ++i) {
             outputEntries[i].dataOffset = cursor;
-            cursor += static_cast<uint32_t>(payloads[i].size());
+            cursor += i == itemIndex
+                ? static_cast<uint32_t>(patchedItems.size())
+                : pak.entries[i].storedSize;
         }
 
-        std::vector<uint8_t> out;
-        out.reserve(cursor);
-        WriteU32(out, kPakMagic);
-        WriteU32(out, static_cast<uint32_t>(kPakHeaderSize + outputEntries.size() * kPakEntrySize));
-        WriteU32(out, static_cast<uint32_t>(outputEntries.size()));
+        std::vector<uint8_t> header;
+        header.reserve(kPakHeaderSize + outputEntries.size() * kPakEntrySize);
+        WriteU32(header, kPakMagic);
+        WriteU32(header, static_cast<uint32_t>(kPakHeaderSize + outputEntries.size() * kPakEntrySize));
+        WriteU32(header, static_cast<uint32_t>(outputEntries.size()));
         for (const PakEntry& entry : outputEntries) {
-            WriteEntry(out, entry);
+            WriteEntry(header, entry);
         }
-        for (const auto& payload : payloads) {
-            out.insert(out.end(), payload.begin(), payload.end());
+        std::ofstream outputFile(outputPath, std::ios::binary | std::ios::trunc);
+        if (!outputFile) {
+            throw std::runtime_error("failed to open output: " + outputPath);
         }
-        WriteFileBytes(outputPath, out);
+        outputFile.write(reinterpret_cast<const char*>(header.data()), static_cast<std::streamsize>(header.size()));
+        for (size_t i = 0; i < pak.entries.size(); ++i) {
+            if (i == itemIndex) {
+                outputFile.write(reinterpret_cast<const char*>(patchedItems.data()), static_cast<std::streamsize>(patchedItems.size()));
+            }
+            else {
+                const PakEntry& entry = pak.entries[i];
+                outputFile.write(
+                    reinterpret_cast<const char*>(pak.data.data() + entry.dataOffset),
+                    static_cast<std::streamsize>(entry.storedSize));
+            }
+        }
+        if (!outputFile) {
+            throw std::runtime_error("failed to write output: " + outputPath);
+        }
 
         const size_t protectedCount = std::count_if(pak.entries.begin(), pak.entries.end(), [](const PakEntry& entry) {
             return (entry.flags & 0x10) != 0;
@@ -664,9 +739,16 @@ namespace {
         log << "decoded protected entries: " << protectedCount << "\n";
         log << "items.xml entry: " << names[itemIndex] << "\n";
         log << "items.xml unlock edits: " << alwaysLocked << " alwaysLocked, "
-            << hidden << " hidden, " << storeProduct << " isInGameStoreProduct\n";
+            << hidden << " hidden, " << storeProduct << " isInGameStoreProduct, "
+            << expLevelReq << " expLevelReq zeroed, " << medalReq << " medalReq removed, "
+            << price << " price zeroed\n";
         log << "output resource flags: one raw patched items.xml entry; other entries copied unchanged\n";
         log << "footer: omitted\n";
+    }
+
+    std::string FileNameOf(const std::string& path) {
+        const size_t slash = path.find_last_of("\\/");
+        return slash == std::string::npos ? path : path.substr(slash + 1);
     }
 
     void WaitForProcessExit(DWORD pid, DWORD timeoutSeconds) {
@@ -695,7 +777,11 @@ namespace {
             throw std::runtime_error("install target does not exist: " + installTarget);
         }
 
-        const std::string backupPath = DirectoryOf(installTarget) + "\\data_patch.pre_unlock_backup.pak";
+        const std::string installFileName = FileNameOf(installTarget);
+        const std::string backupFileName = installFileName == "data_patch.pak"
+            ? "data_patch.pre_unlock_backup.pak"
+            : installFileName + ".pre_unlock_backup.pak";
+        const std::string backupPath = DirectoryOf(installTarget) + "\\" + backupFileName;
         if (!FileExists(backupPath)) {
             if (!MoveFileExA(installTarget.c_str(), backupPath.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
                 throw std::runtime_error("failed to create backup");
@@ -709,6 +795,10 @@ namespace {
             throw std::runtime_error("failed to install patched pak");
         }
         return backupPath;
+    }
+
+    bool HasSecondPatchTarget(const PatchOptions& options) {
+        return !options.sourcePath2.empty() || !options.outputPath2.empty() || !options.installTarget2.empty();
     }
 
     void RestartGame(const PatchOptions& options, std::ostream& log) {
@@ -744,10 +834,23 @@ namespace {
         }
 
         BuildPatchedPak(options.sourcePath, options.outputPath, log);
+        if (HasSecondPatchTarget(options)) {
+            if (options.sourcePath2.empty() || options.outputPath2.empty() || options.installTarget2.empty()) {
+                throw std::runtime_error("incomplete second pak patch target");
+            }
+            log << "\n";
+            BuildPatchedPak(options.sourcePath2, options.outputPath2, log);
+        }
+
         WaitForProcessExit(options.waitPid, options.waitTimeoutSeconds);
         const std::string backupPath = InstallPatchedPak(options.outputPath, options.installTarget);
         log << "installed: " << options.installTarget << "\n";
         log << "backup:    " << backupPath << "\n";
+        if (HasSecondPatchTarget(options)) {
+            const std::string backupPath2 = InstallPatchedPak(options.outputPath2, options.installTarget2);
+            log << "installed: " << options.installTarget2 << "\n";
+            log << "backup:    " << backupPath2 << "\n";
+        }
         RestartGame(options, log);
     }
 
@@ -764,6 +867,8 @@ namespace {
         const std::string& modulePath,
         const std::string& sourcePakPath,
         const std::string& outputPakPath,
+        const std::string& sourcePakPath2,
+        const std::string& outputPakPath2,
         const std::string& logPath,
         const std::string& launcherUri,
         const std::string& exePath,
@@ -773,6 +878,9 @@ namespace {
         command += " --source " + QuoteArg(sourcePakPath);
         command += " --output " + QuoteArg(outputPakPath);
         command += " --install-target " + QuoteArg(sourcePakPath);
+        command += " --source2 " + QuoteArg(sourcePakPath2);
+        command += " --output2 " + QuoteArg(outputPakPath2);
+        command += " --install-target2 " + QuoteArg(sourcePakPath2);
         command += " --wait-pid " + std::to_string(GetCurrentProcessId());
         command += " --wait-timeout 60 --restart-delay 8";
         command += " --launcher-uri " + QuoteArg(launcherUri);
@@ -792,7 +900,12 @@ void UnlockAllItems() {
 
     const std::string exeDirectory = DirectoryOf(exePath);
     const std::string gameDirectory = FullPathOf(exeDirectory + "\\..");
+    const std::string dataPath = gameDirectory + "\\build\\data_pc\\data.pak";
     const std::string dataPatchPath = gameDirectory + "\\build\\data_pc\\data_patch.pak";
+    if (!FileExists(dataPath)) {
+        LOG_ERROR("[FileUnlock] data.pak not found at " << dataPath);
+        return;
+    }
     if (!FileExists(dataPatchPath)) {
         LOG_ERROR("[FileUnlock] data_patch.pak not found at " << dataPatchPath);
         return;
@@ -804,6 +917,7 @@ void UnlockAllItems() {
         return;
     }
 
+    const std::string outputDataPakPath = dataPath + ".unlock_tmp";
     const std::string outputPakPath = dataPatchPath + ".unlock_tmp";
     const std::string logPath = gameDirectory + "\\build\\data_pc\\data_patch_unlock.log";
     const std::string launcherUri = BaseAddress::IsSteamVersion()
@@ -813,13 +927,15 @@ void UnlockAllItems() {
         modulePath,
         dataPatchPath,
         outputPakPath,
+        dataPath,
+        outputDataPakPath,
         logPath,
         launcherUri,
         exePath,
         exeDirectory);
 
     LOG_INFO("[FileUnlock] Launching native item unlock patcher");
-    LOG_INFO("[FileUnlock] Trials Fusion will close, data_patch.pak will be patched, then the game will restart");
+    LOG_INFO("[FileUnlock] Trials Fusion will close, data.pak and data_patch.pak will be patched, then the game will restart");
     LOG_INFO("[FileUnlock] Restart target: " << launcherUri);
     LOG_INFO("[FileUnlock] Patcher log: " << logPath);
 

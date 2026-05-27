@@ -170,6 +170,9 @@ void Keybindings::Initialize() {
     s_keybindings[Action::RespawnPrevCheckpoint] = 'Q';  // W key
     s_keybindings[Action::RespawnNextCheckpoint] = 'E';  // E key
     s_keybindings[Action::RespawnForward5] = 0;  // Unbound
+    s_keybindings[Action::CaptureSaveState] = 0;  // Unbound
+    s_keybindings[Action::RestoreSaveState] = 0;  // Unbound
+    s_keybindings[Action::DebugSaveState] = 0;  // Unbound
     
     // Fault controls
     s_keybindings[Action::IncrementFault] = 0;  // Unbound
@@ -209,13 +212,13 @@ void Keybindings::Initialize() {
     // Bike Swap
     s_keybindings[Action::SwapNextBike] = VK_OEM_PERIOD;  // . key
     s_keybindings[Action::SwapPrevBike] = VK_OEM_COMMA;   // , key
-    s_keybindings[Action::DebugBikeInfo] = VK_F9;         // F9 key
+    s_keybindings[Action::DebugBikeInfo] = 0;             // Unbound
 
+#ifdef DEVELOPMENT_MODE
     // Editor controls
     s_keybindings[Action::EditorScaleDecrease] = 0;       // Unbound
     s_keybindings[Action::EditorScaleIncrease] = 0;       // Unbound
-    
-#ifdef DEVELOPMENT_MODE
+
     // Console
     s_keybindings[Action::ToggleConsole] = VK_F11;  // F11 key
 #endif
@@ -227,8 +230,10 @@ void Keybindings::Initialize() {
     }
     s_gamepadBindings[Action::RespawnPrevCheckpoint] = XINPUT_GAMEPAD_LEFT_SHOULDER;
     s_gamepadBindings[Action::RespawnNextCheckpoint] = XINPUT_GAMEPAD_RIGHT_SHOULDER;
+#ifdef DEVELOPMENT_MODE
     s_gamepadBindings[Action::EditorScaleDecrease] = XINPUT_GAMEPAD_DPAD_LEFT;
     s_gamepadBindings[Action::EditorScaleIncrease] = XINPUT_GAMEPAD_DPAD_RIGHT;
+#endif
     
     // Initialize key states
     s_keyStates[Action::InstantFinish] = false;
@@ -251,6 +256,9 @@ void Keybindings::Initialize() {
     s_keyStates[Action::RespawnPrevCheckpoint] = false;
     s_keyStates[Action::RespawnNextCheckpoint] = false;
     s_keyStates[Action::RespawnForward5] = false;
+    s_keyStates[Action::CaptureSaveState] = false;
+    s_keyStates[Action::RestoreSaveState] = false;
+    s_keyStates[Action::DebugSaveState] = false;
     s_keyStates[Action::IncrementFault] = false;
     s_keyStates[Action::DebugFaultCounter] = false;
     s_keyStates[Action::Add100Faults] = false;
@@ -275,9 +283,9 @@ void Keybindings::Initialize() {
     s_keyStates[Action::SwapNextBike] = false;
     s_keyStates[Action::SwapPrevBike] = false;
     s_keyStates[Action::DebugBikeInfo] = false;
+#ifdef DEVELOPMENT_MODE
     s_keyStates[Action::EditorScaleDecrease] = false;
     s_keyStates[Action::EditorScaleIncrease] = false;
-#ifdef DEVELOPMENT_MODE
     s_keyStates[Action::ToggleConsole] = false;
 #endif
 
@@ -590,6 +598,12 @@ std::string Keybindings::GetActionName(Action action) {
             return "Respawn Next Checkpoint";
         case Action::RespawnForward5:
             return "Respawn +5 Checkpoints ahead";
+        case Action::CaptureSaveState:
+            return "Capture Save State";
+        case Action::RestoreSaveState:
+            return "Restore Save State";
+        case Action::DebugSaveState:
+            return "Debug Save State";
         // Fault controls
         case Action::IncrementFault:
             return "Increment Fault";
@@ -782,6 +796,12 @@ bool Keybindings::LoadFromFile() {
                 s_keybindings[Action::RespawnNextCheckpoint] = vkCode;
             } else if (actionName == "Respawn +5 Checkpoints ahead") {
                 s_keybindings[Action::RespawnForward5] = vkCode;
+            } else if (actionName == "Capture Save State") {
+                s_keybindings[Action::CaptureSaveState] = vkCode;
+            } else if (actionName == "Restore Save State") {
+                s_keybindings[Action::RestoreSaveState] = vkCode;
+            } else if (actionName == "Debug Save State") {
+                s_keybindings[Action::DebugSaveState] = vkCode;
             // Fault controls
             } else if (actionName == "Increment Fault") {
                 s_keybindings[Action::IncrementFault] = vkCode;
@@ -830,11 +850,11 @@ bool Keybindings::LoadFromFile() {
                 s_keybindings[Action::SwapPrevBike] = vkCode;
             } else if (actionName == "Debug Bike Info") {
                 s_keybindings[Action::DebugBikeInfo] = vkCode;
+#ifdef DEVELOPMENT_MODE
             } else if (actionName == "Editor Scale Decrease") {
                 s_keybindings[Action::EditorScaleDecrease] = vkCode;
             } else if (actionName == "Editor Scale Increase") {
                 s_keybindings[Action::EditorScaleIncrease] = vkCode;
-#ifdef DEVELOPMENT_MODE
             } else if (actionName == "Toggle Console") {
                 s_keybindings[Action::ToggleConsole] = vkCode;
 #endif

@@ -137,10 +137,10 @@ namespace Logging {
     }
 
     void Initialize() {
-        // Try to load saved state, default to enabled if no config exists
+        // Start from a quiet default, then apply the persisted user preference if present.
+        g_verboseLoggingEnabled = false;
         if (!LoadConfig()) {
-            g_verboseLoggingEnabled = true;  // Default to enabled for new installs
-            SaveConfig();  // Create the config file
+            SaveConfig();  // Create the config file with the default state.
         }
         
         // Clear crash trace file at startup (so we can see just this session's activity)
@@ -272,6 +272,7 @@ namespace Logging {
             return false;  // No config file, use defaults
         }
         
+        bool loadedVerboseLogging = false;
         std::string line;
         while (std::getline(file, line)) {
             // Skip comments and empty lines
@@ -294,11 +295,12 @@ namespace Logging {
             
             if (key == "VerboseLogging") {
                 g_verboseLoggingEnabled = (value == "1" || value == "true");
+                loadedVerboseLogging = true;
             }
         }
         
         file.close();
-        return true;
+        return loadedVerboseLogging;
     }
     
     // ImGui console functions

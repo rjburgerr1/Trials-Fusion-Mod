@@ -27,6 +27,7 @@ namespace PreventFinish {
     
     // Track WHY the run was blocked (for anti-cheat)
     static bool g_taintedByCheckpointSkip = false;
+    static bool g_taintedBySaveState = false;
     static bool g_taintedByFaultReduction = false;
     static bool g_taintedByTimeReduction = false;
     static bool g_taintedByBikeRider = false;
@@ -243,6 +244,7 @@ namespace PreventFinish {
         g_runTainted = false;
         g_permanentTaint = false;
         g_taintedByCheckpointSkip = false;
+        g_taintedBySaveState = false;
         g_taintedByFaultReduction = false;
         g_taintedByTimeReduction = false;
         g_taintedByBikeRider = false;
@@ -352,6 +354,7 @@ namespace PreventFinish {
         g_runTainted = false;  // Clear taint on enable (new run)
         g_permanentTaint = false;  // Clear permanent taint
         g_taintedByCheckpointSkip = false;
+        g_taintedBySaveState = false;
         g_taintedByFaultReduction = false;
         g_taintedByTimeReduction = false;
         g_taintedByBikeRider = false;
@@ -382,6 +385,7 @@ namespace PreventFinish {
         g_runTainted = false;
         g_permanentTaint = false;
         g_taintedByCheckpointSkip = false;
+        g_taintedBySaveState = false;
         g_taintedByFaultReduction = false;
         g_taintedByTimeReduction = false;
         g_taintedByBikeRider = false;
@@ -418,6 +422,15 @@ namespace PreventFinish {
         g_finishBlocked = true;
         g_permanentTaint = true;  // Mark as permanently tainted
         g_taintedByCheckpointSkip = true;
+    }
+
+    void NotifySaveStateRestore() {
+        if (!g_enabled) return;
+
+        LOG_VERBOSE("[PreventFinish] Save state restore detected - BLOCKING finish");
+        g_finishBlocked = true;
+        g_permanentTaint = true;
+        g_taintedBySaveState = true;
     }
 
     void NotifyFaultReduction() {
@@ -508,6 +521,7 @@ namespace PreventFinish {
             g_runTainted = false;
             g_permanentTaint = false;
             g_taintedByCheckpointSkip = false;
+            g_taintedBySaveState = false;
             g_taintedByFaultReduction = false;
             g_taintedByTimeReduction = false;
             g_taintedByBikeRider = false;
@@ -788,6 +802,9 @@ namespace PreventFinish {
             LOG_WARNING("[PreventFinish] Run has PERMANENT TAINT - reset button CANNOT clear this!");
             if (g_taintedByCheckpointSkip) {
                 LOG_WARNING("[PreventFinish] Reason: Checkpoint skip detected");
+            }
+            if (g_taintedBySaveState) {
+                LOG_WARNING("[PreventFinish] Reason: Save state was restored");
             }
             if (g_taintedByFaultReduction) {
                 LOG_WARNING("[PreventFinish] Reason: Fault count was reduced");
